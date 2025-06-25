@@ -1,0 +1,133 @@
+syntax = "proto3";
+package cosmos.tx.v1beta1;
+
+import "google/protobuf/any.proto";
+
+option go_package = "github.com/cosmos/cosmos-sdk/types/tx";
+
+// Tx is the standard type used for broadcasting transactions
+message Tx {
+  // body is the processable content of the transaction
+  TxBody body = 1;
+  
+  // auth_info is the authorization related content of the transaction
+  AuthInfo auth_info = 2;
+  
+  // signatures is a list of signatures that matches the length and order of
+  // AuthInfo's signer_infos to allow connecting signature meta information like
+  // public key and signing mode by position
+  repeated bytes signatures = 3;
+}
+
+// TxBody is the body of a transaction that all signers sign over
+message TxBody {
+  // messages is a list of messages to be executed
+  repeated google.protobuf.Any messages = 1;
+  
+  // memo is any arbitrary note/comment to be added to the transaction
+  string memo = 2;
+  
+  // timeout_height is the block height after which this transaction will not
+  // be processed by the chain
+  uint64 timeout_height = 3;
+  
+  // extension_options are arbitrary options that can be added by chains
+  repeated google.protobuf.Any extension_options = 1023;
+  
+  // extension_options are arbitrary non-critical options that can be added by chains
+  repeated google.protobuf.Any non_critical_extension_options = 2047;
+}
+
+// AuthInfo describes the fee and signer modes that are used to sign a transaction
+message AuthInfo {
+  // signer_infos defines the signing modes for the required signers
+  repeated SignerInfo signer_infos = 1;
+  
+  // Fee is the fee and gas limit for the transaction
+  Fee fee = 2;
+}
+
+// SignerInfo describes the public key and signing mode of a single top-level signer
+message SignerInfo {
+  // public_key is the public key of the signer
+  google.protobuf.Any public_key = 1;
+  
+  // mode_info describes the signing mode of the signer
+  ModeInfo mode_info = 2;
+  
+  // sequence is the sequence of the account
+  uint64 sequence = 3;
+}
+
+// ModeInfo describes the signing mode of a single or nested multisig signer
+message ModeInfo {
+  // sum is the oneof that specifies whether this represents a single or nested
+  // multisig signer
+  oneof sum {
+    // single represents a single signer
+    Single single = 1;
+    
+    // multi represents a nested multisig signer
+    Multi multi = 2;
+  }
+  
+  // Single is the mode info for a single signer
+  message Single {
+    // mode is the signing mode of the single signer
+    SignMode mode = 1;
+  }
+  
+  // Multi is the mode info for a multisig public key
+  message Multi {
+    // bitarray specifies which keys within the multisig are signing
+    CompactBitArray bitarray = 1;
+    
+    // mode_infos is the corresponding modes of the signers of the multisig
+    repeated ModeInfo mode_infos = 2;
+  }
+}
+
+// SignMode represents a signing mode with its own security guarantees
+enum SignMode {
+  // SIGN_MODE_UNSPECIFIED specifies an unknown signing mode and will be rejected
+  SIGN_MODE_UNSPECIFIED = 0;
+  
+  // SIGN_MODE_DIRECT specifies a signing mode which uses SignDoc and is verified
+  // with raw bytes from Tx
+  SIGN_MODE_DIRECT = 1;
+  
+  // SIGN_MODE_TEXTUAL is a future signing mode that will verify some human-readable
+  // textual representation on top of the binary representation from SIGN_MODE_DIRECT
+  SIGN_MODE_TEXTUAL = 2;
+  
+  // SIGN_MODE_LEGACY_AMINO_JSON is a backwards compatibility mode which uses
+  // Amino JSON and will be removed in the future
+  SIGN_MODE_LEGACY_AMINO_JSON = 127;
+}
+
+// Fee includes the amount of coins paid in fees and the maximum gas to be used by the transaction
+message Fee {
+  // amount is the amount of coins to be paid as a fee
+  repeated Coin amount = 1;
+  
+  // gas_limit is the maximum gas that can be used in transaction processing
+  uint64 gas_limit = 2;
+  
+  // payer is the address of the fee payer if set
+  string payer = 3;
+  
+  // granter is the address of the fee granter if set
+  string granter = 4;
+}
+
+// Coin defines a token with a denomination and an amount
+message Coin {
+  string denom = 1;
+  string amount = 2;
+}
+
+// CompactBitArray is an implementation of a space efficient bit array
+message CompactBitArray {
+  uint32 extra_bits_stored = 1;
+  bytes elems = 2;
+}

@@ -1,0 +1,40 @@
+syntax = "proto3";
+package cosmos.base.abci.v1beta1;
+
+option go_package = "github.com/cosmos/cosmos-sdk/types";
+
+// ABCIMessageLog defines a structure containing an indexed tx ABCI message log
+message ABCIMessageLog {
+  uint32 msg_index = 1;
+  string log = 2;
+  
+  // Events contains a slice of Event objects that were emitted during some execution
+  repeated StringEvent events = 3;
+}
+
+// StringEvent defines an Event object wrapper where all the attributes
+// contain key/value pairs that are strings instead of bytes
+message StringEvent {
+  string type = 1;
+  repeated Attribute attributes = 2;
+}
+
+// Attribute defines an attribute wrapper where the key and value are strings instead of bytes
+message Attribute {
+  string key = 1;
+  string value = 2;
+}
+
+// Event allows application developers to attach additional information to
+// ResponseBeginBlock, ResponseEndBlock, ResponseCheckTx and ResponseDeliverTx
+message Event {
+  string type = 1;
+  repeated EventAttribute attributes = 2;
+}
+
+// EventAttribute is a single key-value pair, associated with an event
+message EventAttribute {
+  bytes key = 1;
+  bytes value = 2;
+  bool index = 3;
+}

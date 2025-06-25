@@ -1,0 +1,403 @@
+syntax = "proto3";
+package cometbft.abci.v1;
+
+option go_package = "github.com/cometbft/cometbft/proto/tendermint/abci";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// Define ABCI++ service
+service ABCIService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+  rpc Flush(FlushRequest) returns (FlushResponse);
+  rpc Info(InfoRequest) returns (InfoResponse);
+  rpc InitChain(InitChainRequest) returns (InitChainResponse);
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc CheckTx(CheckTxRequest) returns (CheckTxResponse);
+  rpc Commit(CommitRequest) returns (CommitResponse);
+  rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+  rpc OfferSnapshot(OfferSnapshotRequest) returns (OfferSnapshotResponse);
+  rpc LoadSnapshotChunk(LoadSnapshotChunkRequest) returns (LoadSnapshotChunkResponse);
+  rpc ApplySnapshotChunk(ApplySnapshotChunkRequest) returns (ApplySnapshotChunkResponse);
+  rpc PrepareProposal(PrepareProposalRequest) returns (PrepareProposalResponse);
+  rpc ProcessProposal(ProcessProposalRequest) returns (ProcessProposalResponse);
+  rpc ExtendVote(ExtendVoteRequest) returns (ExtendVoteResponse);
+  rpc VerifyVoteExtension(VerifyVoteExtensionRequest) returns (VerifyVoteExtensionResponse);
+  rpc FinalizeBlock(FinalizeBlockRequest) returns (FinalizeBlockResponse);
+}
+
+// Basic messages
+message EchoRequest {
+  string message = 1;
+}
+
+message EchoResponse {
+  string message = 1;
+}
+
+message FlushRequest {}
+message FlushResponse {}
+
+message InfoRequest {}
+
+message InfoResponse {
+  string data = 1;
+  string version = 2;
+  uint64 app_version = 3;
+  int64 last_block_height = 4;
+  bytes last_block_app_hash = 5;
+}
+
+// InitChain
+message InitChainRequest {
+  google.protobuf.Timestamp time = 1;
+  string chain_id = 2;
+  ConsensusParams consensus_params = 3;
+  repeated Validator validators = 4;
+  bytes app_state_bytes = 5;
+  int64 initial_height = 6;
+}
+
+message InitChainResponse {
+  ConsensusParams consensus_params = 1;
+  repeated Validator validators = 2;
+  bytes app_hash = 3;
+}
+
+// Query
+message QueryRequest {
+  bytes data = 1;
+  string path = 2;
+  int64 height = 3;
+  bool prove = 4;
+}
+
+message QueryResponse {
+  uint32 code = 1;
+  string log = 3;
+  string info = 4;
+  int64 index = 5;
+  bytes key = 6;
+  bytes value = 7;
+  ProofOps proof_ops = 8;
+  int64 height = 9;
+  string codespace = 10;
+}
+
+// CheckTx
+message CheckTxRequest {
+  bytes tx = 1;
+  CheckTxType type = 2;
+}
+
+enum CheckTxType {
+  NEW = 0;
+  RECHECK = 1;
+}
+
+message CheckTxResponse {
+  uint32 code = 1;
+  bytes data = 2;
+  string log = 3;
+  string info = 4;
+  int64 gas_wanted = 5;
+  int64 gas_used = 6;
+  repeated Event events = 7;
+  string codespace = 8;
+}
+
+// Commit
+message CommitRequest {}
+
+message CommitResponse {
+  int64 retain_height = 3;
+}
+
+// ListSnapshots
+message ListSnapshotsRequest {}
+
+message ListSnapshotsResponse {
+  repeated Snapshot snapshots = 1;
+}
+
+// OfferSnapshot
+message OfferSnapshotRequest {
+  Snapshot snapshot = 1;
+  bytes app_hash = 2;
+}
+
+message OfferSnapshotResponse {
+  OfferSnapshotResult result = 1;
+}
+
+enum OfferSnapshotResult {
+  UNKNOWN = 0;
+  ACCEPT = 1;
+  ABORT = 2;
+  REJECT = 3;
+  REJECT_FORMAT = 4;
+  REJECT_SENDER = 5;
+}
+
+// LoadSnapshotChunk
+message LoadSnapshotChunkRequest {
+  uint64 height = 1;
+  uint32 format = 2;
+  uint32 chunk = 3;
+}
+
+message LoadSnapshotChunkResponse {
+  bytes chunk = 1;
+}
+
+// ApplySnapshotChunk
+message ApplySnapshotChunkRequest {
+  uint32 index = 1;
+  bytes chunk = 2;
+  string sender = 3;
+}
+
+message ApplySnapshotChunkResponse {
+  ApplySnapshotChunkResult result = 1;
+  repeated uint32 refetch_chunks = 2;
+  repeated string reject_senders = 3;
+}
+
+enum ApplySnapshotChunkResult {
+  UNKNOWN_RESULT = 0;
+  ACCEPT_RESULT = 1;
+  ABORT_RESULT = 2;
+  RETRY = 3;
+  RETRY_SNAPSHOT = 4;
+  REJECT_SNAPSHOT = 5;
+}
+
+// PrepareProposal - ABCI++
+message PrepareProposalRequest {
+  int64 max_tx_bytes = 1;
+  repeated bytes txs = 2;
+  ExtendedCommitInfo local_last_commit = 3;
+  repeated Misbehavior misbehavior = 4;
+  int64 height = 5;
+  google.protobuf.Timestamp time = 6;
+  bytes next_validators_hash = 7;
+  bytes proposer_address = 8;
+}
+
+message PrepareProposalResponse {
+  repeated bytes txs = 1;
+}
+
+// ProcessProposal - ABCI++
+message ProcessProposalRequest {
+  repeated bytes txs = 1;
+  CommitInfo proposed_last_commit = 2;
+  repeated Misbehavior misbehavior = 3;
+  bytes hash = 4;
+  int64 height = 5;
+  google.protobuf.Timestamp time = 6;
+  bytes next_validators_hash = 7;
+  bytes proposer_address = 8;
+}
+
+message ProcessProposalResponse {
+  ProcessProposalStatus status = 1;
+}
+
+enum ProcessProposalStatus {
+  UNKNOWN_STATUS = 0;
+  ACCEPT_PROPOSAL = 1;
+  REJECT_PROPOSAL = 2;
+}
+
+// ExtendVote - ABCI++
+message ExtendVoteRequest {
+  bytes hash = 1;
+  int64 height = 2;
+  google.protobuf.Timestamp time = 3;
+  repeated bytes txs = 4;
+  CommitInfo proposed_last_commit = 5;
+  repeated Misbehavior misbehavior = 6;
+  bytes next_validators_hash = 7;
+  bytes proposer_address = 8;
+}
+
+message ExtendVoteResponse {
+  bytes vote_extension = 1;
+}
+
+// VerifyVoteExtension - ABCI++
+message VerifyVoteExtensionRequest {
+  bytes hash = 1;
+  bytes validator_address = 2;
+  int64 height = 3;
+  bytes vote_extension = 4;
+}
+
+message VerifyVoteExtensionResponse {
+  VerifyVoteExtensionStatus status = 1;
+}
+
+enum VerifyVoteExtensionStatus {
+  UNKNOWN_VERIFY_STATUS = 0;
+  ACCEPT_VOTE = 1;
+  REJECT_VOTE = 2;
+}
+
+// FinalizeBlock - ABCI++
+message FinalizeBlockRequest {
+  repeated bytes txs = 1;
+  CommitInfo decided_last_commit = 2;
+  repeated Misbehavior misbehavior = 3;
+  bytes hash = 4;
+  int64 height = 5;
+  google.protobuf.Timestamp time = 6;
+  bytes next_validators_hash = 7;
+  bytes proposer_address = 8;
+}
+
+message FinalizeBlockResponse {
+  repeated Event events = 1;
+  repeated ExecTxResult tx_results = 2;
+  repeated Validator validator_updates = 3;
+  ConsensusParams consensus_param_updates = 4;
+  bytes app_hash = 5;
+}
+
+// ExecTxResult contains results of executing one individual transaction
+message ExecTxResult {
+  uint32 code = 1;
+  bytes data = 2;
+  string log = 3;
+  string info = 4;
+  int64 gas_wanted = 5;
+  int64 gas_used = 6;
+  repeated Event events = 7;
+  string codespace = 8;
+}
+
+// Event allows application developers to attach additional information to
+// ResponseFinalizeBlock and ResponseCheckTx.
+message Event {
+  string type = 1;
+  repeated EventAttribute attributes = 2;
+}
+
+// EventAttribute is a single key-value pair, associated with an event.
+message EventAttribute {
+  string key = 1;
+  string value = 2;
+  bool index = 3;
+}
+
+// Validator
+message Validator {
+  bytes address = 1;
+  int64 power = 2;
+}
+
+// ConsensusParams contains all consensus-relevant parameters
+message ConsensusParams {
+  BlockParams block = 1;
+  EvidenceParams evidence = 2;
+  ValidatorParams validator = 3;
+  VersionParams version = 4;
+  ABCIParams abci = 5;
+}
+
+// BlockParams contains limits on the block size.
+message BlockParams {
+  int64 max_bytes = 1;
+  int64 max_gas = 2;
+}
+
+// EvidenceParams determine how we handle evidence of malfeasance.
+message EvidenceParams {
+  int64 max_age_num_blocks = 1;
+  google.protobuf.Duration max_age_duration = 2;
+  int64 max_bytes = 3;
+}
+
+// ValidatorParams restrict the public key types validators can use.
+message ValidatorParams {
+  repeated string pub_key_types = 1;
+}
+
+// VersionParams contains the ABCI application version.
+message VersionParams {
+  uint64 app = 1;
+}
+
+// ABCIParams configure ABCI functionality specific to the ABCI application.
+message ABCIParams {
+  int64 vote_extensions_enable_height = 1;
+}
+
+// Snapshot
+message Snapshot {
+  uint64 height = 1;
+  uint32 format = 2;
+  uint32 chunks = 3;
+  bytes hash = 4;
+  bytes metadata = 5;
+}
+
+// ProofOps is Merkle proof defined by the list of ProofOps
+message ProofOps {
+  repeated ProofOp ops = 1;
+}
+
+// ProofOp defines an operation used for calculating Merkle root
+message ProofOp {
+  string type = 1;
+  bytes key = 2;
+  bytes data = 3;
+}
+
+// CommitInfo contains votes for the particular round.
+message CommitInfo {
+  int32 round = 1;
+  repeated VoteInfo votes = 2;
+}
+
+// ExtendedCommitInfo contains votes for the particular round.
+message ExtendedCommitInfo {
+  int32 round = 1;
+  repeated ExtendedVoteInfo votes = 2;
+}
+
+// VoteInfo
+message VoteInfo {
+  Validator validator = 1;
+  BlockIDFlag block_id_flag = 2;
+}
+
+// ExtendedVoteInfo
+message ExtendedVoteInfo {
+  Validator validator = 1;
+  VoteInfo vote_info = 2;
+  bytes vote_extension = 3;
+  bytes extension_signature = 4;
+}
+
+enum BlockIDFlag {
+  UNKNOWN_BLOCK_ID = 0;
+  BLOCK_ID_FLAG_ABSENT = 1;
+  BLOCK_ID_FLAG_COMMIT = 2;
+  BLOCK_ID_FLAG_NIL = 3;
+}
+
+// Misbehavior is a type of misbehavior committed by a validator.
+message Misbehavior {
+  MisbehaviorType type = 1;
+  Validator validator = 2;
+  int64 height = 3;
+  google.protobuf.Timestamp time = 4;
+  int64 total_voting_power = 5;
+}
+
+enum MisbehaviorType {
+  UNKNOWN_MISBEHAVIOR = 0;
+  DUPLICATE_VOTE = 1;
+  LIGHT_CLIENT_ATTACK = 2;
+}

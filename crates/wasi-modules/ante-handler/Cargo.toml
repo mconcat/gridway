@@ -1,0 +1,40 @@
+[package]
+name = "wasi-ante-handler"
+version = "0.1.0"
+edition = "2021"
+authors = ["Helium Contributors"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# WASI support
+wasi = "0.13"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Cryptography
+sha2 = "0.10"
+k256 = { version = "0.13", features = ["ecdsa"] }
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+signature = "2.2"
+
+# Error handling
+thiserror = "1.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Utilities
+hex = "0.4"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+
+[profile.release]
+lto = true
+opt-level = "s"
+strip = true

@@ -1,0 +1,38 @@
+[package]
+name = "begin-blocker"
+version = "0.1.0"
+edition = "2021"
+authors = ["Helium Blockchain <contact@helium.zone>"]
+license = "Apache-2.0"
+description = "WASI BeginBlock handler module for Helium blockchain"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+log = "0.4"
+env_logger = "0.11"
+sha2 = "0.10"
+hex = "0.4"
+
+[lib]
+name = "begin_blocker"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+# WASI build profile
+[profile.wasi]
+inherits = "release"
+opt-level = "z"     # Optimize for size
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Single codegen unit for better optimization
+strip = true        # Strip debug symbols
+
+# Standard profiles
+[profile.release]
+opt-level = 3
+lto = true
+
+[profile.dev]
+opt-level = 0
+debug = true

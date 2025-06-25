@@ -1,0 +1,12 @@
+Helium
+Copyright (C) 2024 mconcat
+
+This product includes software developed as a derivative work of:
+
+Cosmos SDK (https://github.com/cosmos/cosmos-sdk)
+Copyright (c) 2016 All in Bits, Inc dba Tendermint
+Copyright (c) 2018-2024 Cosmos SDK Contributors
+
+The Cosmos SDK is licensed under the Apache License, Version 2.0.
+Helium is a Rust implementation inspired by the architecture and design
+of Cosmos SDK, licensed under AGPL-3.0.

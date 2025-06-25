@@ -1,0 +1,36 @@
+syntax = "proto3";
+package cosmos.base.query.v1beta1;
+
+option go_package = "github.com/cosmos/cosmos-sdk/types/query";
+
+// PageRequest is to be embedded in gRPC request messages for efficient pagination
+message PageRequest {
+  // key is a value returned in PageResponse.next_key to begin
+  // querying the next page most efficiently
+  bytes key = 1;
+  
+  // offset is a numeric offset that can be used when key is unavailable
+  uint64 offset = 2;
+  
+  // limit is the total number of results to be returned in the result page
+  uint64 limit = 3;
+  
+  // count_total is set to true to indicate that the result set should include
+  // a count of the total number of items available for pagination
+  bool count_total = 4;
+  
+  // reverse is set to true if results are to be returned in the descending order
+  bool reverse = 5;
+}
+
+// PageResponse is to be embedded in gRPC response messages where the corresponding
+// request message has used PageRequest
+message PageResponse {
+  // next_key is the key to be passed to PageRequest.key to
+  // query the next page most efficiently
+  bytes next_key = 1;
+  
+  // total is total number of results available if PageRequest.count_total
+  // was set, its value is undefined otherwise
+  uint64 total = 2;
+}

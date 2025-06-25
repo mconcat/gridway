@@ -1,0 +1,39 @@
+syntax = "proto3";
+package cosmos.bank.v1beta1;
+
+option go_package = "github.com/cosmos/cosmos-sdk/x/bank/types";
+
+// Params defines the parameters for the bank module
+message Params {
+  repeated SendEnabled send_enabled = 1;
+  bool default_send_enabled = 2;
+}
+
+// SendEnabled maps coin denom to a send_enabled status (whether a coin can be transferred)
+message SendEnabled {
+  string denom = 1;
+  bool enabled = 2;
+}
+
+// Coin defines a token with a denomination and an amount
+message Coin {
+  string denom = 1;
+  string amount = 2;
+}
+
+// Metadata represents a struct that describes a basic token
+message Metadata {
+  string description = 1;
+  repeated DenomUnit denom_units = 2;
+  string base = 3;
+  string display = 4;
+  string name = 5;
+  string symbol = 6;
+}
+
+// DenomUnit represents a struct that describes a given denomination unit of the basic token
+message DenomUnit {
+  string denom = 1;
+  uint32 exponent = 2;
+  repeated string aliases = 3;
+}

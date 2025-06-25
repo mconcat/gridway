@@ -1,0 +1,24 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# IDE and development tools
+.vscode/
+.idea/
+*.swp
+*.swo
+.cursorindexingignore
+
+# OS
+.DS_Store
+
+# Claude and AI tools
+.claude/
+.specstory/
+.aifleet/
+
+# Worktrees
+worktrees/
+
+# Old references
+cosmos-sdk/

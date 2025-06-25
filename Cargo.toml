@@ -1,0 +1,130 @@
+[workspace]
+members = [
+    "crates/helium-types",
+    "crates/helium-math",
+    "crates/helium-crypto", 
+    "crates/helium-keyring",
+    "crates/helium-errors",
+    "crates/helium-log",
+    "crates/helium-codec",
+    "crates/helium-store",
+    "crates/helium-baseapp",
+    "crates/helium-server",
+    "crates/helium-client",
+    "crates/helium-simapp",
+    "crates/wasi-modules/ante-handler",
+]
+
+[workspace.package]
+authors = ["mconcat"]
+license = "AGPL-3.0"
+edition = "2021"
+repository = "https://github.com/mconcat/helium"
+
+[workspace.dependencies]
+# Core crates
+helium-types = { path = "crates/helium-types" }
+helium-math = { path = "crates/helium-math" }
+helium-crypto = { path = "crates/helium-crypto" }
+helium-keyring = { path = "crates/helium-keyring" }
+helium-errors = { path = "crates/helium-errors" }
+helium-log = { path = "crates/helium-log" }
+helium-codec = { path = "crates/helium-codec" }
+helium-store = { path = "crates/helium-store" }
+helium-baseapp = { path = "crates/helium-baseapp" }
+helium-server = { path = "crates/helium-server" }
+helium-client = { path = "crates/helium-client" }
+helium-simapp = { path = "crates/helium-simapp" }
+
+# External dependencies
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+prost = "0.13"
+tokio = { version = "1.40", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+async-trait = "0.1"
+
+# Math dependencies
+num-bigint = "0.4"
+num-traits = "0.2"
+rust_decimal = "1.35"
+
+# Crypto dependencies
+k256 = { version = "0.13", features = ["ecdsa"] }
+ed25519-dalek = "2.1"
+sha2 = "0.10"
+ripemd = "0.1"
+signature = "2.2"
+bech32 = "0.11"
+
+# HD wallet
+bip39 = "2.0"
+
+# HTTP/RPC
+reqwest = "0.12"
+hyper = "1.4"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Config
+figment = "0.10"
+
+# WASM runtime
+wasmtime = "25.0"
+
+# Testing
+proptest = "1.5"
+
+[package]
+name = "helium"
+version = "0.1.0"
+edition = "2021"
+authors = ["mconcat"]
+description = "Minimal Rust implementation of helium BaseApp"
+license = "AGPL-3.0"
+repository = "https://github.com/mconcat/helium"
+
+[dependencies]
+# Use workspace dependencies
+helium-types = { workspace = true }
+helium-math = { workspace = true }
+helium-crypto = { workspace = true }
+helium-keyring = { workspace = true }
+helium-errors = { workspace = true }
+helium-log = { workspace = true }
+helium-codec = { workspace = true }
+helium-store = { workspace = true }
+helium-baseapp = { workspace = true }
+helium-server = { workspace = true }
+helium-client = { workspace = true }
+helium-simapp = { workspace = true }
+
+# ABCI interface
+tendermint-abci = "0.34"
+tendermint-proto = "0.34"
+
+# External dependencies from workspace
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Storage
+rocksdb = "0.21"
+
+# Other
+bytes = "1.5"
+hex = "0.4"
+anyhow = "1.0"
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[[example]]
+name = "simple_app"
+path = "examples/simple_app.rs"

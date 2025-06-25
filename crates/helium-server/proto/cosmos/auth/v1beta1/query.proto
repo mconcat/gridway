@@ -1,0 +1,56 @@
+syntax = "proto3";
+package cosmos.auth.v1beta1;
+
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "google/protobuf/any.proto";
+import "cosmos/auth/v1beta1/auth.proto";
+
+option go_package = "github.com/cosmos/cosmos-sdk/x/auth/types";
+
+// Query defines the gRPC querier service for auth module
+service Query {
+  // Accounts returns all the existing accounts
+  rpc Accounts(QueryAccountsRequest) returns (QueryAccountsResponse) {}
+  
+  // Account returns account details based on address
+  rpc Account(QueryAccountRequest) returns (QueryAccountResponse) {}
+  
+  // Params queries all parameters
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {}
+}
+
+// QueryAccountsRequest is the request type for the Query/Accounts RPC method
+message QueryAccountsRequest {
+  // pagination defines an optional pagination for the request
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAccountsResponse is the response type for the Query/Accounts RPC method
+message QueryAccountsResponse {
+  // accounts are the existing accounts
+  repeated google.protobuf.Any accounts = 1;
+  
+  // pagination defines the pagination in the response
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryAccountRequest is the request type for the Query/Account RPC method
+message QueryAccountRequest {
+  // address defines the address to query for
+  string address = 1;
+}
+
+// QueryAccountResponse is the response type for the Query/Account RPC method
+message QueryAccountResponse {
+  // account defines the account of the corresponding address
+  google.protobuf.Any account = 1;
+}
+
+// QueryParamsRequest is the request type for the Query/Params RPC method
+message QueryParamsRequest {}
+
+// QueryParamsResponse is the response type for the Query/Params RPC method
+message QueryParamsResponse {
+  // params defines the parameters of the module
+  Params params = 1;
+}

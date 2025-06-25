@@ -1,0 +1,24 @@
+[package]
+name = "helium-store"
+version = "0.1.0"
+edition = "2021"
+authors = ["mconcat"]
+license = "AGPL-3.0"
+repository = "https://github.com/mconcat/helium"
+description = "Storage layer implementation for the helium blockchain framework"
+
+[dependencies]
+bytes = "1.5"
+rocksdb = "0.21"
+serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
+thiserror = "1.0"
+
+# JMT (Jellyfish Merkle Tree) implementation
+jmt = "0.10"
+# Additional crypto dependencies for JMT
+blake3 = "1.5"
+hex = "0.4"
+
+[dev-dependencies]
+tempfile = "3.14"
