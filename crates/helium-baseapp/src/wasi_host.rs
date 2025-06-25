@@ -693,6 +693,332 @@ impl Default for WasiHost {
     }
 }
 
+/// Mock WASI Host for Testing
+///
+/// MockWasiHost simulates WASI module execution with configurable responses for host function calls.
+/// This enables comprehensive testing of WASI-dependent code without requiring actual WASM compilation.
+#[cfg(test)]
+pub struct MockWasiHost {
+    /// Stored modules with their mock state
+    modules: Arc<Mutex<HashMap<String, MockWasmModule>>>,
+    /// Configurable responses for host function calls
+    host_function_responses: Arc<Mutex<HashMap<String, MockHostResponse>>>,
+    /// Function execution responses
+    function_responses: Arc<Mutex<HashMap<String, MockFunctionResponse>>>,
+    /// Module execution responses
+    module_responses: Arc<Mutex<HashMap<String, MockExecutionResult>>>,
+}
+
+/// Mock WASM module state
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub struct MockWasmModule {
+    pub name: String,
+    pub state: ModuleState,
+    pub memory_limit: u64,
+    pub gas_limit: u64,
+    pub wasm_bytes: Vec<u8>,
+}
+
+/// Mock response for host function calls
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub enum MockHostResponse {
+    /// Return a fixed value
+    Value(i32),
+    /// Simulate an error
+    Error(String),
+    /// Custom response function
+    Custom(fn(i32, i32, i32) -> i32),
+}
+
+/// Mock response for function execution
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub enum MockFunctionResponse {
+    /// Return fixed values
+    Values(Vec<Val>),
+    /// Simulate an error
+    Error(WasiHostError),
+    /// Custom response
+    Custom(fn(&str, &[Val]) -> Result<Vec<Val>>),
+}
+
+/// Mock execution result for modules
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub struct MockExecutionResult {
+    pub exit_code: i32,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
+#[cfg(test)]
+impl MockWasiHost {
+    /// Create a new mock WASI host
+    pub fn new() -> Self {
+        Self {
+            modules: Arc::new(Mutex::new(HashMap::new())),
+            host_function_responses: Arc::new(Mutex::new(HashMap::new())),
+            function_responses: Arc::new(Mutex::new(HashMap::new())),
+            module_responses: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Configure mock response for a host function
+    pub fn set_host_function_response(&self, function_name: &str, response: MockHostResponse) {
+        let mut responses = self.host_function_responses.lock().unwrap();
+        responses.insert(function_name.to_string(), response);
+    }
+
+    /// Configure mock response for function execution
+    pub fn set_function_response(&self, function_name: &str, response: MockFunctionResponse) {
+        let mut responses = self.function_responses.lock().unwrap();
+        responses.insert(function_name.to_string(), response);
+    }
+
+    /// Configure mock response for module execution
+    pub fn set_module_response(&self, module_name: &str, result: MockExecutionResult) {
+        let mut responses = self.module_responses.lock().unwrap();
+        responses.insert(module_name.to_string(), result);
+    }
+
+    /// Load a WASM module (mock implementation)
+    pub fn load_module(&self, name: String, wasm_bytes: &[u8]) -> Result<()> {
+        debug!("Mock: Loading WASM module: {}", name);
+
+        let mock_module = MockWasmModule {
+            name: name.clone(),
+            state: ModuleState::Loaded,
+            memory_limit: 16 * 1024 * 1024,
+            gas_limit: 1_000_000,
+            wasm_bytes: wasm_bytes.to_vec(),
+        };
+
+        let mut modules = self.modules.lock().unwrap();
+        modules.insert(name.clone(), mock_module);
+
+        info!("Mock: Successfully loaded WASM module: {}", name);
+        Ok(())
+    }
+
+    /// Load a WASM module from file (mock implementation)
+    pub fn load_module_from_file(&self, name: String, path: PathBuf) -> Result<()> {
+        let wasm_bytes = std::fs::read(&path).map_err(|e| {
+            WasiHostError::InvalidModule(format!("Failed to read file {:?}: {}", path, e))
+        })?;
+        self.load_module(name, &wasm_bytes)
+    }
+
+    /// Validate a WASM module (mock implementation)
+    pub fn validate_module(&self, _wasm_bytes: &[u8]) -> Result<()> {
+        debug!("Mock: Validating WASM module");
+        info!("Mock: WASM module validation successful");
+        Ok(())
+    }
+
+    /// Initialize a loaded module (mock implementation)
+    pub fn initialize_module(&self, name: &str) -> Result<()> {
+        debug!("Mock: Initializing WASM module: {}", name);
+
+        let mut modules = self.modules.lock().unwrap();
+        let module = modules
+            .get_mut(name)
+            .ok_or_else(|| WasiHostError::ModuleNotFound(name.to_string()))?;
+
+        module.state = ModuleState::Initialized;
+
+        info!("Mock: Successfully initialized WASM module: {}", name);
+        Ok(())
+    }
+
+    /// Execute a function in a WASM module (mock implementation)
+    pub fn execute_function(
+        &self,
+        module_name: &str,
+        function_name: &str,
+        args: &[Val],
+    ) -> Result<Vec<Val>> {
+        debug!(
+            "Mock: Executing function {} in module {}",
+            function_name, module_name
+        );
+
+        // Check if module exists and is ready
+        {
+            let mut modules = self.modules.lock().unwrap();
+            let module = modules
+                .get_mut(module_name)
+                .ok_or_else(|| WasiHostError::ModuleNotFound(module_name.to_string()))?;
+
+            if !matches!(module.state, ModuleState::Initialized) {
+                return Err(WasiHostError::ModuleExecution(format!(
+                    "Module {} is not ready for execution",
+                    module_name
+                )));
+            }
+            module.state = ModuleState::Executing;
+        }
+
+        // Check for configured response
+        let responses = self.function_responses.lock().unwrap();
+        let result = if let Some(response) = responses.get(function_name) {
+            match response {
+                MockFunctionResponse::Values(values) => Ok(values.clone()),
+                MockFunctionResponse::Error(error) => Err(error.clone()),
+                MockFunctionResponse::Custom(func) => func(function_name, args),
+            }
+        } else {
+            // Default behavior: return success with default values
+            Ok(vec![Val::I32(0)])
+        };
+
+        // Reset module state
+        {
+            let mut modules = self.modules.lock().unwrap();
+            if let Some(module) = modules.get_mut(module_name) {
+                module.state = ModuleState::Initialized;
+            }
+        }
+
+        match &result {
+            Ok(_) => debug!(
+                "Mock: Successfully executed function {} in module {}",
+                function_name, module_name
+            ),
+            Err(e) => error!(
+                "Mock: Function {} execution failed in module {}: {}",
+                function_name, module_name, e
+            ),
+        }
+
+        result
+    }
+
+    /// Execute a WASM module with input data (mock implementation)
+    pub fn execute_module_with_input(&self, wasm_bytes: &[u8], input: &[u8]) -> Result<ExecutionResult> {
+        debug!("Mock: Executing WASM module with input");
+
+        // Try to find a configured response based on the input or module content
+        let module_hash = format!("{:x}", sha2::Sha256::digest(wasm_bytes));
+        let responses = self.module_responses.lock().unwrap();
+        
+        if let Some(mock_result) = responses.get(&module_hash) {
+            Ok(ExecutionResult {
+                exit_code: mock_result.exit_code,
+                stdout: mock_result.stdout.clone(),
+                stderr: mock_result.stderr.clone(),
+            })
+        } else {
+            // Default success response
+            Ok(ExecutionResult {
+                exit_code: 0,
+                stdout: b"Mock execution successful".to_vec(),
+                stderr: vec![],
+            })
+        }
+    }
+
+    /// Cleanup and remove a module (mock implementation)
+    pub fn cleanup_module(&self, name: &str) -> Result<()> {
+        debug!("Mock: Cleaning up WASM module: {}", name);
+
+        let mut modules = self.modules.lock().unwrap();
+        modules.remove(name);
+
+        info!("Mock: Successfully cleaned up WASM module: {}", name);
+        Ok(())
+    }
+
+    /// Get module state (mock implementation)
+    pub fn get_module_state(&self, name: &str) -> Result<ModuleState> {
+        let modules = self.modules.lock().unwrap();
+        modules
+            .get(name)
+            .map(|m| m.state.clone())
+            .ok_or_else(|| WasiHostError::ModuleNotFound(name.to_string()))
+    }
+
+    /// List all loaded modules (mock implementation)
+    pub fn list_modules(&self) -> Result<Vec<String>> {
+        let modules = self.modules.lock().unwrap();
+        Ok(modules.keys().cloned().collect())
+    }
+
+    /// Recover a module from error state (mock implementation)
+    pub fn recover_module(&self, name: &str) -> Result<()> {
+        debug!("Mock: Attempting to recover module: {}", name);
+
+        let mut modules = self.modules.lock().unwrap();
+        let module = modules
+            .get_mut(name)
+            .ok_or_else(|| WasiHostError::ModuleNotFound(name.to_string()))?;
+
+        if !matches!(module.state, ModuleState::Error(_)) {
+            return Err(WasiHostError::ModuleExecution(format!(
+                "Module {} is not in error state, cannot recover",
+                name
+            )));
+        }
+
+        module.state = ModuleState::Initialized;
+
+        info!("Mock: Successfully recovered module: {}", name);
+        Ok(())
+    }
+
+    /// Set module to error state (mock implementation)
+    pub fn set_module_error(&self, name: &str, error: String) -> Result<()> {
+        let mut modules = self.modules.lock().unwrap();
+        if let Some(module) = modules.get_mut(name) {
+            module.state = ModuleState::Error(error.clone());
+            error!("Mock: Module {} entered error state: {}", name, error);
+        }
+        Ok(())
+    }
+
+    /// Mock host function for logging
+    pub fn mock_host_log(&self, level: i32, ptr: i32, len: i32) -> i32 {
+        if let Some(MockHostResponse::Value(val)) = self.host_function_responses.lock().unwrap().get("host_log") {
+            *val
+        } else {
+            debug!("Mock: WASM Log [{}]: ptr={}, len={}", level, ptr, len);
+            0 // Success
+        }
+    }
+
+    /// Mock host function for memory allocation
+    pub fn mock_host_alloc(&self, size: i32) -> i32 {
+        if let Some(MockHostResponse::Value(val)) = self.host_function_responses.lock().unwrap().get("host_alloc") {
+            *val
+        } else {
+            debug!("Mock: WASM requested memory allocation: {} bytes", size);
+            if size > 0 && size < 1024 * 1024 {
+                1024 // Mock allocation pointer
+            } else {
+                0 // Allocation failed
+            }
+        }
+    }
+
+    /// Mock host function for memory deallocation
+    pub fn mock_host_free(&self, ptr: i32) -> i32 {
+        if let Some(MockHostResponse::Value(val)) = self.host_function_responses.lock().unwrap().get("host_free") {
+            *val
+        } else {
+            debug!("Mock: WASM freed memory at: {}", ptr);
+            0 // Success
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for MockWasiHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -749,5 +1075,215 @@ mod tests {
         assert!(!wasm_module.is_ready());
         assert_eq!(wasm_module.memory_limit, 1024);
         assert_eq!(wasm_module.gas_limit, 1000);
+    }
+
+    #[test]
+    fn test_mock_wasi_host_creation() {
+        let mock_host = MockWasiHost::new();
+        
+        // Initially no modules
+        let modules = mock_host.list_modules().unwrap();
+        assert!(modules.is_empty());
+    }
+
+    #[test]
+    fn test_mock_module_lifecycle() {
+        let mock_host = MockWasiHost::new();
+        
+        // Create a minimal WASM module for testing
+        let wasm = wat::parse_str(
+            r#"
+            (module
+                (func (export "test") (result i32)
+                    i32.const 42
+                )
+            )
+        "#,
+        ).unwrap();
+
+        // Load module
+        mock_host.load_module("test_module".to_string(), &wasm).unwrap();
+        
+        // Check module is loaded
+        let modules = mock_host.list_modules().unwrap();
+        assert_eq!(modules.len(), 1);
+        assert!(modules.contains(&"test_module".to_string()));
+        
+        // Check initial state
+        let state = mock_host.get_module_state("test_module").unwrap();
+        assert_eq!(state, ModuleState::Loaded);
+        
+        // Initialize module
+        mock_host.initialize_module("test_module").unwrap();
+        
+        // Check initialized state
+        let state = mock_host.get_module_state("test_module").unwrap();
+        assert_eq!(state, ModuleState::Initialized);
+        
+        // Cleanup module
+        mock_host.cleanup_module("test_module").unwrap();
+        
+        // Check module is removed
+        let modules = mock_host.list_modules().unwrap();
+        assert!(modules.is_empty());
+    }
+
+    #[test]
+    fn test_mock_function_execution() {
+        let mock_host = MockWasiHost::new();
+        
+        // Create and load a test module
+        let wasm = wat::parse_str(
+            r#"
+            (module
+                (func (export "test_func") (result i32)
+                    i32.const 42
+                )
+            )
+        "#,
+        ).unwrap();
+        
+        mock_host.load_module("test_module".to_string(), &wasm).unwrap();
+        mock_host.initialize_module("test_module").unwrap();
+        
+        // Test default function execution
+        let result = mock_host.execute_function("test_module", "test_func", &[]).unwrap();
+        assert_eq!(result, vec![Val::I32(0)]); // Default mock response
+        
+        // Configure custom response
+        mock_host.set_function_response(
+            "test_func",
+            MockFunctionResponse::Values(vec![Val::I32(42)]),
+        );
+        
+        // Test custom response
+        let result = mock_host.execute_function("test_module", "test_func", &[]).unwrap();
+        assert_eq!(result, vec![Val::I32(42)]);
+        
+        // Configure error response
+        mock_host.set_function_response(
+            "test_func",
+            MockFunctionResponse::Error(WasiHostError::ModuleExecution("Test error".to_string())),
+        );
+        
+        // Test error response
+        let result = mock_host.execute_function("test_module", "test_func", &[]);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            WasiHostError::ModuleExecution(msg) => assert_eq!(msg, "Test error"),
+            _ => panic!("Expected ModuleExecution error"),
+        }
+    }
+
+    #[test]
+    fn test_mock_host_functions() {
+        let mock_host = MockWasiHost::new();
+        
+        // Test default host function behavior
+        assert_eq!(mock_host.mock_host_log(1, 100, 10), 0);
+        assert_eq!(mock_host.mock_host_alloc(1024), 1024);
+        assert_eq!(mock_host.mock_host_free(1024), 0);
+        
+        // Configure custom responses
+        mock_host.set_host_function_response("host_log", MockHostResponse::Value(42));
+        mock_host.set_host_function_response("host_alloc", MockHostResponse::Value(2048));
+        mock_host.set_host_function_response("host_free", MockHostResponse::Value(1));
+        
+        // Test custom responses
+        assert_eq!(mock_host.mock_host_log(1, 100, 10), 42);
+        assert_eq!(mock_host.mock_host_alloc(1024), 2048);
+        assert_eq!(mock_host.mock_host_free(1024), 1);
+    }
+
+    #[test]
+    fn test_mock_module_execution_with_input() {
+        let mock_host = MockWasiHost::new();
+        
+        // Create a test WASM module
+        let wasm = wat::parse_str(
+            r#"
+            (module
+                (func (export "_start")
+                    ;; Simple start function
+                )
+            )
+        "#,
+        ).unwrap();
+        
+        // Test default execution
+        let result = mock_host.execute_module_with_input(&wasm, b"test input").unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout, b"Mock execution successful");
+        assert!(result.stderr.is_empty());
+        
+        // Configure custom response
+        let module_hash = format!("{:x}", sha2::Sha256::digest(&wasm));
+        mock_host.set_module_response(&module_hash, MockExecutionResult {
+            exit_code: 42,
+            stdout: b"Custom output".to_vec(),
+            stderr: b"Custom error".to_vec(),
+        });
+        
+        // Test custom response
+        let result = mock_host.execute_module_with_input(&wasm, b"test input").unwrap();
+        assert_eq!(result.exit_code, 42);
+        assert_eq!(result.stdout, b"Custom output");
+        assert_eq!(result.stderr, b"Custom error");
+    }
+
+    #[test]
+    fn test_mock_module_error_recovery() {
+        let mock_host = MockWasiHost::new();
+        
+        // Create and load a test module
+        let wasm = wat::parse_str(
+            r#"
+            (module
+                (func (export "test") (result i32)
+                    i32.const 42
+                )
+            )
+        "#,
+        ).unwrap();
+        
+        mock_host.load_module("test_module".to_string(), &wasm).unwrap();
+        mock_host.initialize_module("test_module").unwrap();
+        
+        // Set module to error state
+        mock_host.set_module_error("test_module", "Test error".to_string()).unwrap();
+        
+        // Check error state
+        let state = mock_host.get_module_state("test_module").unwrap();
+        assert!(matches!(state, ModuleState::Error(_)));
+        
+        // Recover module
+        mock_host.recover_module("test_module").unwrap();
+        
+        // Check recovered state
+        let state = mock_host.get_module_state("test_module").unwrap();
+        assert_eq!(state, ModuleState::Initialized);
+    }
+
+    #[test]
+    fn test_mock_module_validation() {
+        let mock_host = MockWasiHost::new();
+        
+        // Test module validation (always succeeds in mock)
+        let wasm = wat::parse_str(
+            r#"
+            (module
+                (func (export "test") (result i32)
+                    i32.const 42
+                )
+            )
+        "#,
+        ).unwrap();
+        
+        let result = mock_host.validate_module(&wasm);
+        assert!(result.is_ok());
+        
+        // Even invalid bytes should pass in mock
+        let result = mock_host.validate_module(b"invalid wasm");
+        assert!(result.is_ok());
     }
 }
