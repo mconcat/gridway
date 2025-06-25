@@ -1,0 +1,82 @@
+# Configuration for actions/labeler
+
+# Add 'documentation' label to any change to docs files
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.md'
+      - 'LICENSE'
+      - 'NOTICE'
+
+# Add 'rust' label to any Rust code changes
+rust:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+
+# Add 'wasm' label to WASM-related changes
+wasm:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'crates/wasi-modules/**/*'
+      - '**/*wasm*'
+      - '**/*wasi*'
+
+# Add 'crypto' label to cryptography-related changes
+crypto:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'crates/helium-crypto/**/*'
+      - 'crates/helium-keyring/**/*'
+      - '**/*crypto*'
+      - '**/*sign*'
+
+# Add 'storage' label to storage-related changes
+storage:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'crates/helium-store/**/*'
+      - '**/*rocksdb*'
+      - '**/*storage*'
+      - '**/*database*'
+
+# Add 'abci' label to ABCI/Tendermint-related changes
+abci:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*abci*'
+      - '**/*tendermint*'
+      - 'crates/helium-server/**/*'
+
+# Add 'client' label to client-related changes
+client:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'crates/helium-client/**/*'
+
+# Add 'ci' label to CI/CD changes
+ci:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/**/*'
+      - 'Makefile'
+      - '.rustfmt.toml'
+      - '.clippy.toml'
+
+# Add 'dependencies' label when dependencies are updated
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+
+# Add 'tests' label to test-related changes
+tests:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*_test.rs'
+      - '**/*_tests.rs'
+      - '**/tests/**/*'
+      - '**/test/**/*'

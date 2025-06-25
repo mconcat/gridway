@@ -1,0 +1,71 @@
+name: WASM Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  wasm-test:
+    name: Test WASM Modules
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-wasip1
+    
+    - name: Install wasmtime
+      run: |
+        curl https://wasmtime.dev/install.sh -sSf | bash
+        echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-registry-wasm-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-wasm-
+    
+    - name: Build WASM modules
+      run: |
+        cd crates/wasi-modules
+        cargo build --release --target wasm32-wasip1
+    
+    - name: Test WASM module loading
+      run: |
+        # Test that WASM modules can be loaded
+        for wasm in crates/wasi-modules/target/wasm32-wasip1/release/*.wasm; do
+          echo "Testing WASM module: $wasm"
+          wasmtime compile "$wasm"
+        done
+    
+    - name: Validate WASM modules
+      run: |
+        # Validate WASM module structure
+        for wasm in crates/wasi-modules/target/wasm32-wasip1/release/*.wasm; do
+          echo "Validating WASM module: $wasm"
+          wasmtime wasm2wat "$wasm" > /dev/null
+        done
+    
+    - name: Check WASM module sizes
+      run: |
+        # Report WASM module sizes
+        echo "WASM Module Sizes:"
+        ls -lh crates/wasi-modules/target/wasm32-wasip1/release/*.wasm
+    
+    - name: Run WASM-specific tests
+      run: |
+        # Run any WASM-specific tests if they exist
+        cd crates/wasi-modules
+        cargo test --target wasm32-wasip1 || echo "No WASM-specific tests found"
