@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::{debug, error, info};
 use wasmtime::*;
@@ -722,7 +723,7 @@ pub struct MockWasmModule {
 
 /// Mock response for host function calls
 #[cfg(test)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum MockHostResponse {
     /// Return a fixed value
     Value(i32),
@@ -734,7 +735,7 @@ pub enum MockHostResponse {
 
 /// Mock response for function execution
 #[cfg(test)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum MockFunctionResponse {
     /// Return fixed values
     Values(Vec<Val>),
@@ -900,7 +901,7 @@ impl MockWasiHost {
         debug!("Mock: Executing WASM module with input");
 
         // Try to find a configured response based on the input or module content
-        let module_hash = format!("{:x}", sha2::Sha256::digest(wasm_bytes));
+        let module_hash = format!("{:x}", Sha256::digest(wasm_bytes));
         let responses = self.module_responses.lock().unwrap();
         
         if let Some(mock_result) = responses.get(&module_hash) {
@@ -1217,7 +1218,7 @@ mod tests {
         assert!(result.stderr.is_empty());
         
         // Configure custom response
-        let module_hash = format!("{:x}", sha2::Sha256::digest(&wasm));
+        let module_hash = format!("{:x}", Sha256::digest(&wasm));
         mock_host.set_module_response(&module_hash, MockExecutionResult {
             exit_code: 42,
             stdout: b"Custom output".to_vec(),
