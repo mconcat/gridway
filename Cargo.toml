@@ -113,6 +113,8 @@ tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+figment = { workspace = true, features = ["toml", "json", "env"] }
 
 # Storage
 rocksdb = "0.21"
@@ -121,9 +123,17 @@ rocksdb = "0.21"
 bytes = "1.5"
 hex = "0.4"
 anyhow = "1.0"
+toml = "0.8"
+directories = "5.0"
+
+[[bin]]
+name = "helium"
+path = "src/main.rs"
 
 [dev-dependencies]
 tempfile = "3.8"
+assert_cmd = "2.0"
+predicates = "3.0"
 
 [[example]]
 name = "simple_app"
