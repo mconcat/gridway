@@ -4,7 +4,10 @@ use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 use helium_keyring::{backends::MemoryKeyring, Keyring};
 use helium_crypto::PrivateKey;
-use std::fs::{Permissions, OpenOptions};
+use std::fs::OpenOptions;
+#[cfg(unix)]
+use std::fs::Permissions;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use rand::RngCore;
 use base64::{engine::general_purpose, Engine as _};
@@ -404,7 +407,8 @@ fn init_node_key(home_dir: &PathBuf) -> Result<()> {
             .truncate(true)
             .open(&key_path)?;
         
-        // Set secure permissions before writing
+        // Set secure permissions before writing (Unix only)
+        #[cfg(unix)]
         file.set_permissions(Permissions::from_mode(0o600))?;
         
         // Write the key data
@@ -629,8 +633,9 @@ fn delete_key(name: &str) -> Result<()> {
 
 // Keyring helper function
 async fn get_keyring() -> Result<MemoryKeyring> {
-    // For now, using MemoryKeyring which is sufficient for development/testing
-    // In production, consider using FileKeyring or OsKeyring for persistent storage
+    // TODO: Replace with persistent keyring (FileKeyring or OsKeyring)
+    // MemoryKeyring doesn't persist keys between CLI invocations
+    // This is a temporary solution for now
     Ok(MemoryKeyring::new())
 }
 
