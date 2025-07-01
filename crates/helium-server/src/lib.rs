@@ -4,6 +4,7 @@
 //! for helium blockchain applications.
 
 pub mod abci_server;
+pub mod config;
 pub mod grpc;
 pub mod rest;
 pub mod services;
