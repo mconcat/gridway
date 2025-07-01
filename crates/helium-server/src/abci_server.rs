@@ -146,7 +146,7 @@ impl AbciServer {
         };
 
         // Parse listen address
-        let addr = config
+        let addr: std::net::SocketAddr = config
             .listen_address
             .strip_prefix("tcp://")
             .unwrap_or(&config.listen_address)
@@ -550,97 +550,6 @@ impl AbciService for AbciServer {
         // TODO: Implement vote extension verification when needed
         Ok(Response::new(VerifyVoteExtensionResponse {
             status: VerifyVoteExtensionStatus::AcceptVote.into(),
-        }))
-    }
-
-    /// BeginBlock signals the beginning of a new block
-    async fn begin_block(
-        &self,
-        request: Request<BeginBlockRequest>,
-    ) -> std::result::Result<Response<BeginBlockResponse>, Status> {
-        let req = request.into_inner();
-        let header = req
-            .header
-            .ok_or_else(|| Status::invalid_argument("Missing block header"))?;
-
-        info!(
-            "ABCI BeginBlock: height={}, time={}, proposer={}",
-            header.height,
-            header.time.as_ref().map(|t| t.seconds).unwrap_or(0),
-            hex::encode(&header.proposer_address)
-        );
-
-        let mut app = self.app.write().await;
-
-        // Set block context
-        let block_time = header.time.as_ref().map(|t| t.seconds as u64).unwrap_or(0);
-        app.begin_block(header.height as u64, block_time, header.chain_id.clone())
-            .map_err(|e| Status::internal(format!("BeginBlock failed: {}", e)))?;
-
-        // Process evidence
-        for evidence in req.byzantine_validators {
-            warn!("Evidence of byzantine validator: {:?}", evidence);
-            // TODO: Process evidence when implemented
-        }
-
-        // TODO: Get events from BeginBlock processing
-        let events = vec![];
-
-        Ok(Response::new(BeginBlockResponse {
-            events: convert_events(events),
-        }))
-    }
-
-    /// DeliverTx executes a transaction
-    async fn deliver_tx(
-        &self,
-        request: Request<DeliverTxRequest>,
-    ) -> std::result::Result<Response<DeliverTxResponse>, Status> {
-        let req = request.into_inner();
-        debug!("ABCI DeliverTx: {} bytes", req.tx.len());
-
-        let mut app = self.app.write().await;
-        let result = app
-            .deliver_tx(&req.tx)
-            .map_err(|e| Status::internal(format!("DeliverTx failed: {}", e)))?;
-
-        Ok(Response::new(DeliverTxResponse {
-            code: result.code,
-            data: vec![],
-            log: result.log,
-            info: String::new(),
-            gas_wanted: result.gas_wanted as i64,
-            gas_used: result.gas_used as i64,
-            events: convert_events(result.events),
-            codespace: String::new(),
-        }))
-    }
-
-    /// EndBlock signals the end of a block
-    async fn end_block(
-        &self,
-        request: Request<EndBlockRequest>,
-    ) -> std::result::Result<Response<EndBlockResponse>, Status> {
-        let req = request.into_inner();
-        info!("ABCI EndBlock: height={}", req.height);
-
-        let mut app = self.app.write().await;
-
-        // End block processing
-        app.end_block()
-            .map_err(|e| Status::internal(format!("EndBlock failed: {}", e)))?;
-
-        // TODO: Get events from end block processing
-        let events = vec![];
-
-        // TODO: Get validator updates and consensus param updates from modules
-        let validator_updates = vec![];
-        let consensus_param_updates = None;
-
-        Ok(Response::new(EndBlockResponse {
-            validator_updates,
-            consensus_param_updates,
-            events: convert_events(events),
         }))
     }
 

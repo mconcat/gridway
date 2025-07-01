@@ -470,16 +470,18 @@ impl ModuleRouter {
         for cap in granted_caps {
             match cap {
                 CapabilityType::ReadState(ns) => {
-                    self.vfs.add_capability(Capability::Read(ns))?;
+                    self.vfs.add_capability(Capability::Read(ns.into()))?;
                 }
                 CapabilityType::WriteState(ns) => {
-                    self.vfs.add_capability(Capability::Write(ns))?;
+                    self.vfs.add_capability(Capability::Write(ns.into()))?;
                 }
-                CapabilityType::DeleteState(ns) => {
-                    self.vfs.add_capability(Capability::Delete(ns))?;
+                CapabilityType::DeleteState(_ns) => {
+                    // Delete capability not supported in current VFS implementation
+                    // TODO: Add Delete capability to VFS when needed
                 }
-                CapabilityType::ListState(ns) => {
-                    self.vfs.add_capability(Capability::List(ns))?;
+                CapabilityType::ListState(_ns) => {
+                    // List capability not supported in current VFS implementation
+                    // TODO: Add List capability to VFS when needed
                 }
                 _ => {} // Other capabilities don't map to VFS
             }
@@ -724,11 +726,14 @@ impl ModuleRouter {
         let namespace = parts[1];
 
         match operation {
-            "read" => Ok(Capability::Read(namespace.to_string())),
-            "write" => Ok(Capability::Write(namespace.to_string())),
-            "list" => Ok(Capability::List(namespace.to_string())),
-            "create" => Ok(Capability::Create(namespace.to_string())),
-            "delete" => Ok(Capability::Delete(namespace.to_string())),
+            "read" => Ok(Capability::Read(namespace.to_string().into())),
+            "write" => Ok(Capability::Write(namespace.to_string().into())),
+            "execute" => Ok(Capability::Execute(namespace.to_string().into())),
+            // TODO: Add support for list, create, delete when added to VFS
+            "list" | "create" | "delete" => Err(RouterError::InvalidConfig(format!(
+                "Unsupported capability operation: {}",
+                operation
+            ))),
             _ => Err(RouterError::InvalidConfig(format!(
                 "Unknown capability operation: {}",
                 operation

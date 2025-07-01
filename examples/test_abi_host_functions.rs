@@ -23,12 +23,13 @@ fn main() {
         .unwrap();
 
     // Add VFS capabilities
-    vfs.add_capability(VfsCapability::Read("test_module".to_string()))
+    vfs.add_capability(VfsCapability::Read("test_module".to_string().into()))
         .unwrap();
-    vfs.add_capability(VfsCapability::Write("test_module".to_string()))
+    vfs.add_capability(VfsCapability::Write("test_module".to_string().into()))
         .unwrap();
-    vfs.add_capability(VfsCapability::Create("test_module".to_string()))
-        .unwrap();
+    // Note: Create capability is not available in current VFS implementation
+    // vfs.add_capability(VfsCapability::Create("test_module".to_string().into()))
+    //     .unwrap();
 
     println!("✓ VFS initialized with test_module namespace");
 

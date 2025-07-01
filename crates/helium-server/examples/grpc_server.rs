@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state_manager = StateManager::new();
     let _state_manager = Arc::new(RwLock::new(state_manager));
-    let base_app = Arc::new(RwLock::new(BaseApp::new("example-app".to_string())));
+    let base_app = Arc::new(RwLock::new(BaseApp::new("example-app".to_string())?));
 
     // Create service implementations
     let bank_service = BankQueryService::new();

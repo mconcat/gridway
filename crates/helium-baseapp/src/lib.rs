@@ -744,7 +744,7 @@ impl BaseApp {
 
         // Create decode request - assume base64 encoding for now
         let request = DecodeRequest {
-            tx_bytes: base64::encode(tx_bytes),
+            tx_bytes: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tx_bytes),
             encoding: "base64".to_string(),
             validate: true,
         };
