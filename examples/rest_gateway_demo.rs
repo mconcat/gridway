@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Serve the application
     // Note: This example requires axum to be added to the root Cargo.toml dependencies
     // axum::serve(listener, app).await?;
-    
+
     // For now, just indicate that the server would start here
     info!("REST Gateway configured and ready to serve (axum dependency required to actually run)");
 
