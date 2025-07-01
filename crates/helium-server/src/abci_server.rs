@@ -704,6 +704,7 @@ mod tests {
             flush_interval: 50,
             persist_interval: 10,
             retain_blocks: 100,
+            chain_id: "test-chain".to_string(),
         };
         let server = AbciServer::with_config(app, "test-chain".to_string(), config.clone());
         assert_eq!(server.chain_id, "test-chain");

@@ -40,12 +40,14 @@ mod tests {
             .unwrap();
 
         // Add VFS capabilities
-        vfs.add_capability(crate::vfs::Capability::Read("test_module".to_string()))
-            .unwrap();
-        vfs.add_capability(crate::vfs::Capability::Write("test_module".to_string()))
-            .unwrap();
-        vfs.add_capability(crate::vfs::Capability::Create("test_module".to_string()))
-            .unwrap();
+        vfs.add_capability(crate::vfs::Capability::Read(
+            "test_module".to_string().into(),
+        ))
+        .unwrap();
+        vfs.add_capability(crate::vfs::Capability::Write(
+            "test_module".to_string().into(),
+        ))
+        .unwrap();
 
         context.set_vfs(vfs.clone());
 
@@ -78,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_host_state_get_set() {
-        let (mut context, _vfs, _cap_manager) = setup_test_context();
+        let (context, _vfs, _cap_manager) = setup_test_context();
 
         // Create WASM engine and store
         let engine = Engine::default();
@@ -169,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_host_capability_check() {
-        let (mut context, _vfs, cap_manager) = setup_test_context();
+        let (context, _vfs, cap_manager) = setup_test_context();
 
         // Grant additional capability
         cap_manager
@@ -243,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_host_ipc_send() {
-        let (mut context, _vfs, cap_manager) = setup_test_context();
+        let (context, _vfs, cap_manager) = setup_test_context();
 
         // Grant IPC send capability
         cap_manager
