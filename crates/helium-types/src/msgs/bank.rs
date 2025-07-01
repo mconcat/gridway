@@ -192,8 +192,7 @@ impl Message for MsgSend {
                             .amount
                             .parse::<u64>()
                             .map_err(|_| prost::DecodeError::new("invalid coin amount"))
-                            .and_then(|val| Ok(Int::from_u64(val)))
-                            .map_err(|_| prost::DecodeError::new("invalid coin amount"))?;
+                            .map(Int::from_u64)?;
                         Coin::new(proto_coin.denom, amount)
                             .map_err(|_| prost::DecodeError::new("invalid coin"))
                     })

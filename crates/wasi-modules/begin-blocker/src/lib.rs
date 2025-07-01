@@ -143,10 +143,8 @@ impl WasiBeginBlockHandler {
     }
 
     fn process_block_header(&self, header: &BlockContext) -> Vec<Event> {
-        let mut events = vec![];
-
         // Emit new block event
-        events.push(Event {
+        vec![Event {
             event_type: "new_block".to_string(),
             attributes: vec![
                 Attribute {
@@ -166,9 +164,7 @@ impl WasiBeginBlockHandler {
                     value: hex::encode(&header.app_hash),
                 },
             ],
-        });
-
-        events
+        }]
     }
 
     fn process_last_commit(&mut self, last_commit: &LastCommitInfo, height: u64) -> Vec<Event> {

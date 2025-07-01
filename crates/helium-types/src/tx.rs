@@ -223,7 +223,7 @@ pub struct ModeInfoSingleProto {
 
 /// Protobuf representation of multi mode info
 #[derive(Clone, PartialEq, Message)]
-struct ModeInfoMultiProto {
+pub(crate) struct ModeInfoMultiProto {
     #[prost(message, optional, tag = "1")]
     pub bitarray: Option<CompactBitArrayProto>,
     #[prost(message, repeated, tag = "2")]
@@ -232,7 +232,7 @@ struct ModeInfoMultiProto {
 
 /// Protobuf representation of compact bit array
 #[derive(Clone, PartialEq, Message)]
-struct CompactBitArrayProto {
+pub(crate) struct CompactBitArrayProto {
     #[prost(uint32, tag = "1")]
     pub extra_bits_stored: u32,
     #[prost(bytes = "vec", tag = "2")]
@@ -332,10 +332,13 @@ impl From<&AuthInfo> for AuthInfoProto {
     }
 }
 
+/// Type alias for message decoder function
+type MessageDecoder = fn(&[u8]) -> Result<Box<dyn SdkMsg>, TxDecodeError>;
+
 /// Transaction decoder for handling protobuf and JSON formats
 pub struct TxDecoder {
     /// Message type registry for decoding
-    message_registry: HashMap<String, fn(&[u8]) -> Result<Box<dyn SdkMsg>, TxDecodeError>>,
+    message_registry: HashMap<String, MessageDecoder>,
 }
 
 impl TxDecoder {
@@ -350,7 +353,7 @@ impl TxDecoder {
     pub fn register_message_type<T>(
         &mut self,
         type_url: &str,
-        decoder: fn(&[u8]) -> Result<Box<dyn SdkMsg>, TxDecodeError>,
+        decoder: MessageDecoder,
     ) {
         self.message_registry.insert(type_url.to_string(), decoder);
     }
