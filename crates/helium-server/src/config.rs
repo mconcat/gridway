@@ -22,6 +22,9 @@ pub struct AbciConfig {
 
     /// Number of recent blocks to retain
     pub retain_blocks: u64,
+
+    /// Chain ID for the network
+    pub chain_id: String,
 }
 
 impl Default for AbciConfig {
@@ -33,6 +36,7 @@ impl Default for AbciConfig {
             flush_interval: 100,
             persist_interval: 1,
             retain_blocks: 0, // Keep all blocks by default
+            chain_id: "helium-1".to_string(),
         }
     }
 }

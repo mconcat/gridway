@@ -133,10 +133,14 @@ impl AbciServer {
     }
 
     /// Start the ABCI server with TCP connection handling
-    pub async fn start_abci_server(app: Arc<RwLock<BaseApp>>, config: &AbciConfig) -> Result<()> {
+    pub async fn start_abci_server(
+        app: Arc<RwLock<BaseApp>>,
+        config: &AbciConfig,
+        mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<()> {
         let server = AbciServer {
             app,
-            chain_id: "helium-1".to_string(), // TODO: Get from config
+            chain_id: config.chain_id.clone(),
             initial_height: 1,
             config: config.clone(),
         };
@@ -155,21 +159,37 @@ impl AbciServer {
 
         info!("ABCI server listening on {}", addr);
 
-        // Accept connections
+        // Accept connections with graceful shutdown
         loop {
-            let (stream, peer_addr) = listener
-                .accept()
-                .await
-                .map_err(|e| AbciError::ServerError(format!("Accept failed: {}", e)))?;
+            tokio::select! {
+                // Handle incoming connections
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, peer_addr)) => {
+                            let server_clone = server.clone();
 
-            let server_clone = server.clone();
-
-            tokio::spawn(async move {
-                if let Err(e) = handle_abci_connection(server_clone, stream, peer_addr).await {
-                    error!("ABCI connection error from {}: {}", peer_addr, e);
+                            tokio::spawn(async move {
+                                if let Err(e) = handle_abci_connection(server_clone, stream, peer_addr).await {
+                                    error!("ABCI connection error from {}: {}", peer_addr, e);
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            error!("Failed to accept connection: {}", e);
+                            continue;
+                        }
+                    }
                 }
-            });
+                // Handle shutdown signal
+                _ = &mut shutdown_rx => {
+                    info!("Received shutdown signal, stopping ABCI server");
+                    break;
+                }
+            }
         }
+
+        info!("ABCI server shutdown complete");
+        Ok(())
     }
 }
 
