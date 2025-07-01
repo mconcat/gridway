@@ -260,7 +260,7 @@ impl Default for TransactionVerifier {
 }
 
 /// Create sign bytes for SIGN_MODE_DIRECT (simplified deterministic format)
-/// 
+///
 /// This function creates a deterministic byte representation of a SignDoc for signature verification.
 /// In a full implementation, this would use proper protobuf serialization.
 /// For POC, we use a simplified deterministic format.

@@ -246,14 +246,14 @@ impl WasiHost {
     /// Validate a WASM module without loading it
     pub fn validate_module(&self, wasm_bytes: &[u8]) -> Result<()> {
         debug!("Validating WASM module");
-        
+
         // Compile the module to validate it
         let module = Module::new(&self.engine, wasm_bytes)
             .map_err(|e| WasiHostError::ModuleCompilation(e.into()))?;
-        
+
         // Validate module exports
         self.validate_module_exports(&module)?;
-        
+
         info!("WASM module validation successful");
         Ok(())
     }
@@ -633,51 +633,55 @@ impl WasiHost {
     }
 
     /// Execute a WASM module with input data and capture output
-    pub fn execute_module_with_input(&self, wasm_bytes: &[u8], _input: &[u8]) -> Result<ExecutionResult> {
+    pub fn execute_module_with_input(
+        &self,
+        wasm_bytes: &[u8],
+        _input: &[u8],
+    ) -> Result<ExecutionResult> {
         debug!("Executing WASM module with input");
-        
+
         // Compile the module
         let module = Module::new(&self.engine, wasm_bytes)
             .map_err(|e| WasiHostError::ModuleCompilation(e.into()))?;
-        
+
         // For now, use a simplified approach with inherit_stdio
         // TODO: Implement proper I/O capture using MemoryPipe when API is stable
-        let wasi_ctx = WasiCtxBuilder::new()
-            .inherit_stdio()
-            .inherit_env()
-            .build();
-        
+        let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().inherit_env().build();
+
         let mut store = Store::new(&self.engine, wasi_ctx);
-        
+
         // Set fuel for gas metering
-        store.set_fuel(self.default_gas_limit)
+        store
+            .set_fuel(self.default_gas_limit)
             .map_err(|e| WasiHostError::ModuleInstantiation(e.to_string()))?;
-        
+
         // Create WASI linker - using direct import since the API keeps changing
         let mut linker = Linker::new(&self.engine);
         // Add basic host functions for now
         self.add_host_functions(&mut linker)?;
-        
+
         // Instantiate the module
-        let instance = linker.instantiate(&mut store, &module)
+        let instance = linker
+            .instantiate(&mut store, &module)
             .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?;
-        
+
         // Get the entry point function (looking for 'ante_handle' or '_start')
-        let exit_code = if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "ante_handle") {
-            // Custom entry point
-            func.call(&mut store, ())
-                .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
-        } else if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
-            // Standard WASI entry point
-            func.call(&mut store, ())
-                .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?;
-            0 // Success
-        } else {
-            return Err(WasiHostError::ModuleExecution(
-                "No entry point found (expected 'ante_handle' or '_start')".to_string()
-            ));
-        };
-        
+        let exit_code =
+            if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "ante_handle") {
+                // Custom entry point
+                func.call(&mut store, ())
+                    .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
+            } else if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
+                // Standard WASI entry point
+                func.call(&mut store, ())
+                    .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?;
+                0 // Success
+            } else {
+                return Err(WasiHostError::ModuleExecution(
+                    "No entry point found (expected 'ante_handle' or '_start')".to_string(),
+                ));
+            };
+
         // For now, return empty output - will be improved with proper I/O capture
         Ok(ExecutionResult {
             exit_code,

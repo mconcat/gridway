@@ -104,10 +104,10 @@ impl JMTStore {
         let mut hasher = Sha256::new();
 
         // Hash version
-        hasher.update(&self.version.to_be_bytes());
+        hasher.update(self.version.to_be_bytes());
 
         // Hash store name
-        hasher.update(&self.name.as_bytes());
+        hasher.update(self.name.as_bytes());
 
         // Hash all committed data in sorted order for determinism
         let mut entries: Vec<_> = self.committed.iter().collect();
@@ -145,7 +145,7 @@ impl JMTStore {
         // Store the root hash for this version
         let version_key = format!("__root_hash_{}", self.version);
         self.db
-            .put(version_key.as_bytes(), &new_root_hash)
+            .put(version_key.as_bytes(), new_root_hash)
             .map_err(|e| StoreError::BackendError(format!("RocksDB put error: {}", e)))?;
 
         Ok(new_root_hash)
@@ -182,8 +182,8 @@ impl JMTStore {
     fn generate_simple_proof(&self, key: &[u8]) -> Vec<u8> {
         let mut hasher = Sha256::new();
         hasher.update(key);
-        hasher.update(&self.root_hash());
-        hasher.update(&self.version.to_be_bytes());
+        hasher.update(self.root_hash());
+        hasher.update(self.version.to_be_bytes());
         hasher.finalize().to_vec()
     }
 

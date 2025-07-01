@@ -223,7 +223,7 @@ impl Config {
     /// Load configuration from file, falling back to default if file doesn't exist
     pub fn load() -> Result<Self, ConfigError> {
         let config_path = Self::default_config_path()?;
-        
+
         if config_path.exists() {
             Self::load_from_file(&config_path)
         } else {
@@ -236,10 +236,10 @@ impl Config {
     pub fn load_from_file(path: &PathBuf) -> Result<Self, ConfigError> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| ConfigError::ReadError(format!("{}: {}", path.display(), e)))?;
-        
+
         let config: Config = toml::from_str(&content)
             .map_err(|e| ConfigError::ParseError(format!("{}: {}", path.display(), e)))?;
-        
+
         config.validate()?;
         Ok(config)
     }
@@ -247,19 +247,20 @@ impl Config {
     /// Save configuration to file
     pub fn save(&self) -> Result<(), ConfigError> {
         let config_path = Self::default_config_path()?;
-        
+
         // Create parent directory if it doesn't exist
         if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| ConfigError::ReadError(format!("Failed to create config directory: {}", e)))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                ConfigError::ReadError(format!("Failed to create config directory: {}", e))
+            })?;
         }
 
         let content = toml::to_string_pretty(self)
             .map_err(|e| ConfigError::ParseError(format!("Failed to serialize config: {}", e)))?;
-        
+
         std::fs::write(&config_path, content)
             .map_err(|e| ConfigError::ReadError(format!("Failed to write config file: {}", e)))?;
-        
+
         Ok(())
     }
 
@@ -282,27 +283,29 @@ impl Config {
         // Validate gas limits
         if self.gas.min_limit > self.gas.max_limit {
             return Err(ConfigError::InvalidValue(
-                "Gas min_limit cannot be greater than max_limit".to_string()
+                "Gas min_limit cannot be greater than max_limit".to_string(),
             ));
         }
 
-        if self.gas.default_limit < self.gas.min_limit || self.gas.default_limit > self.gas.max_limit {
+        if self.gas.default_limit < self.gas.min_limit
+            || self.gas.default_limit > self.gas.max_limit
+        {
             return Err(ConfigError::InvalidValue(
-                "Gas default_limit must be between min_limit and max_limit".to_string()
+                "Gas default_limit must be between min_limit and max_limit".to_string(),
             ));
         }
 
         // Validate adjustment factor
         if self.gas.adjustment_factor <= 0.0 {
             return Err(ConfigError::InvalidValue(
-                "Gas adjustment_factor must be positive".to_string()
+                "Gas adjustment_factor must be positive".to_string(),
             ));
         }
 
         // Validate ports
         if self.server.grpc_port == 0 || self.server.rest_port == 0 {
             return Err(ConfigError::InvalidValue(
-                "Server ports must be non-zero".to_string()
+                "Server ports must be non-zero".to_string(),
             ));
         }
 
@@ -314,7 +317,7 @@ impl Config {
         let price_str = &self.gas.default_price;
         let mut chars = price_str.chars().peekable();
         let mut number_part = String::new();
-        
+
         // Extract number part
         while let Some(ch) = chars.peek() {
             if ch.is_ascii_digit() || *ch == '.' {
@@ -324,23 +327,21 @@ impl Config {
                 break;
             }
         }
-        
+
         // Extract denom part
         let denom_part: String = chars.collect();
-        
+
         if number_part.is_empty() || denom_part.is_empty() {
             return Err(ConfigError::InvalidValue(format!(
                 "Invalid gas price format: {}. Expected format: '0.025stake'",
                 price_str
             )));
         }
-        
-        let price = number_part.parse::<f64>()
-            .map_err(|_| ConfigError::InvalidValue(format!(
-                "Invalid gas price number: {}",
-                number_part
-            )))?;
-        
+
+        let price = number_part.parse::<f64>().map_err(|_| {
+            ConfigError::InvalidValue(format!("Invalid gas price number: {}", number_part))
+        })?;
+
         Ok((price, denom_part))
     }
 
@@ -366,16 +367,20 @@ impl Config {
 
     /// Get gRPC server address
     pub fn grpc_server_address(&self) -> String {
-        format!("{}:{}", 
-                self.server.address.split(':').next().unwrap_or("127.0.0.1"),
-                self.server.grpc_port)
+        format!(
+            "{}:{}",
+            self.server.address.split(':').next().unwrap_or("127.0.0.1"),
+            self.server.grpc_port
+        )
     }
 
     /// Get REST server address
     pub fn rest_server_address(&self) -> String {
-        format!("{}:{}", 
-                self.server.address.split(':').next().unwrap_or("127.0.0.1"),
-                self.server.rest_port)
+        format!(
+            "{}:{}",
+            self.server.address.split(':').next().unwrap_or("127.0.0.1"),
+            self.server.rest_port
+        )
     }
 }
 
@@ -426,7 +431,7 @@ mod tests {
         let config = Config::default();
         let toml_str = toml::to_string(&config).unwrap();
         let parsed_config: Config = toml::from_str(&toml_str).unwrap();
-        
+
         assert_eq!(config.chain.id, parsed_config.chain.id);
         assert_eq!(config.gas.default_limit, parsed_config.gas.default_limit);
     }
@@ -450,7 +455,7 @@ mod tests {
     #[test]
     fn test_utility_methods() {
         let config = Config::default();
-        
+
         assert_eq!(config.client_timeout(), Duration::from_secs(30));
         assert_eq!(config.simulation_block_time(), Duration::from_millis(5000));
         assert!(config.grpc_server_address().contains("9090"));

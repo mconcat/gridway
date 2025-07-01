@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use helium_types::{SdkMsg, SdkError, AccAddress};
+use helium_types::{AccAddress, SdkError, SdkMsg};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -76,13 +76,19 @@ impl SdkMsg for MsgStoreCode {
 
     fn validate_basic(&self) -> std::result::Result<(), SdkError> {
         if self.authority.is_empty() {
-            return Err(SdkError::InvalidRequest("authority cannot be empty".to_string()));
+            return Err(SdkError::InvalidRequest(
+                "authority cannot be empty".to_string(),
+            ));
         }
         if self.wasm_code.is_empty() {
-            return Err(SdkError::InvalidRequest("wasm_code cannot be empty".to_string()));
+            return Err(SdkError::InvalidRequest(
+                "wasm_code cannot be empty".to_string(),
+            ));
         }
         if self.metadata.name.is_empty() {
-            return Err(SdkError::InvalidRequest("metadata name cannot be empty".to_string()));
+            return Err(SdkError::InvalidRequest(
+                "metadata name cannot be empty".to_string(),
+            ));
         }
         Ok(())
     }
@@ -124,13 +130,19 @@ impl SdkMsg for MsgInstallModule {
 
     fn validate_basic(&self) -> std::result::Result<(), SdkError> {
         if self.authority.is_empty() {
-            return Err(SdkError::InvalidRequest("authority cannot be empty".to_string()));
+            return Err(SdkError::InvalidRequest(
+                "authority cannot be empty".to_string(),
+            ));
         }
         if self.code_id == 0 {
-            return Err(SdkError::InvalidRequest("code_id must be greater than 0".to_string()));
+            return Err(SdkError::InvalidRequest(
+                "code_id must be greater than 0".to_string(),
+            ));
         }
         if self.config.name.is_empty() {
-            return Err(SdkError::InvalidRequest("module name cannot be empty".to_string()));
+            return Err(SdkError::InvalidRequest(
+                "module name cannot be empty".to_string(),
+            ));
         }
         Ok(())
     }
@@ -172,13 +184,19 @@ impl SdkMsg for MsgUpgradeModule {
 
     fn validate_basic(&self) -> std::result::Result<(), SdkError> {
         if self.authority.is_empty() {
-            return Err(SdkError::InvalidRequest("authority cannot be empty".to_string()));
+            return Err(SdkError::InvalidRequest(
+                "authority cannot be empty".to_string(),
+            ));
         }
         if self.module_name.is_empty() {
-            return Err(SdkError::InvalidRequest("module_name cannot be empty".to_string()));
+            return Err(SdkError::InvalidRequest(
+                "module_name cannot be empty".to_string(),
+            ));
         }
         if self.new_code_id == 0 {
-            return Err(SdkError::InvalidRequest("new_code_id must be greater than 0".to_string()));
+            return Err(SdkError::InvalidRequest(
+                "new_code_id must be greater than 0".to_string(),
+            ));
         }
         Ok(())
     }
@@ -326,13 +344,15 @@ impl ModuleGovernance {
         let checksum = self.calculate_checksum(&msg.wasm_code);
         if checksum != msg.metadata.checksum {
             return Err(GovernanceError::InvalidWasm(
-                "checksum mismatch".to_string()
+                "checksum mismatch".to_string(),
             ));
         }
 
         // Get next code ID
         let code_id = {
-            let mut next_id = self.next_code_id.lock()
+            let mut next_id = self
+                .next_code_id
+                .lock()
                 .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
             let id = *next_id;
             *next_id += 1;
@@ -349,7 +369,9 @@ impl ModuleGovernance {
         };
 
         {
-            let mut registry = self.code_registry.lock()
+            let mut registry = self
+                .code_registry
+                .lock()
                 .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
             registry.insert(code_id, stored_code);
         }
@@ -375,7 +397,9 @@ impl ModuleGovernance {
 
         // Check if module already exists
         {
-            let registry = self.module_registry.lock()
+            let registry = self
+                .module_registry
+                .lock()
                 .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
             if registry.contains_key(&msg.config.name) {
                 return Err(GovernanceError::ModuleAlreadyExists(msg.config.name));
@@ -384,10 +408,15 @@ impl ModuleGovernance {
 
         // Verify code exists
         let stored_code = {
-            let registry = self.code_registry.lock()
+            let registry = self
+                .code_registry
+                .lock()
                 .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
-            registry.get(&msg.code_id)
-                .ok_or_else(|| GovernanceError::InvalidConfig(format!("code ID {} not found", msg.code_id)))?
+            registry
+                .get(&msg.code_id)
+                .ok_or_else(|| {
+                    GovernanceError::InvalidConfig(format!("code ID {} not found", msg.code_id))
+                })?
                 .clone()
         };
 
@@ -418,7 +447,9 @@ impl ModuleGovernance {
 
         let module_name = installed_module.name.clone();
         {
-            let mut registry = self.module_registry.lock()
+            let mut registry = self
+                .module_registry
+                .lock()
                 .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
             registry.insert(installed_module.name.clone(), installed_module);
         }
@@ -444,19 +475,27 @@ impl ModuleGovernance {
 
         // Get current module
         let current_module = {
-            let registry = self.module_registry.lock()
+            let registry = self
+                .module_registry
+                .lock()
                 .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
-            registry.get(&msg.module_name)
+            registry
+                .get(&msg.module_name)
                 .ok_or_else(|| GovernanceError::ModuleNotFound(msg.module_name.clone()))?
                 .clone()
         };
 
         // Get new code
         let new_code = {
-            let registry = self.code_registry.lock()
+            let registry = self
+                .code_registry
+                .lock()
                 .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
-            registry.get(&msg.new_code_id)
-                .ok_or_else(|| GovernanceError::InvalidConfig(format!("code ID {} not found", msg.new_code_id)))?
+            registry
+                .get(&msg.new_code_id)
+                .ok_or_else(|| {
+                    GovernanceError::InvalidConfig(format!("code ID {} not found", msg.new_code_id))
+                })?
                 .clone()
         };
 
@@ -487,9 +526,11 @@ impl ModuleGovernance {
 
         // Update module registry
         {
-            let mut registry = self.module_registry.lock()
+            let mut registry = self
+                .module_registry
+                .lock()
                 .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
-            
+
             if let Some(module) = registry.get_mut(&msg.module_name) {
                 module.code_id = msg.new_code_id;
                 module.upgraded_at = Some(self.current_timestamp());
@@ -513,12 +554,17 @@ impl ModuleGovernance {
 
         let magic = &code[0..4];
         if magic != b"\x00asm" {
-            return Err(GovernanceError::InvalidWasm("invalid WASM magic number".to_string()));
+            return Err(GovernanceError::InvalidWasm(
+                "invalid WASM magic number".to_string(),
+            ));
         }
 
         let version = u32::from_le_bytes([code[4], code[5], code[6], code[7]]);
         if version != 1 {
-            return Err(GovernanceError::InvalidWasm(format!("unsupported WASM version: {}", version)));
+            return Err(GovernanceError::InvalidWasm(format!(
+                "unsupported WASM version: {}",
+                version
+            )));
         }
 
         // TODO: Add more comprehensive WASM validation using wasmparser
@@ -546,7 +592,11 @@ impl ModuleGovernance {
     }
 
     /// Create ModuleConfig from install config and stored code
-    fn create_module_config(&self, config: &ModuleInstallConfig, stored_code: &StoredCode) -> Result<ModuleConfig> {
+    fn create_module_config(
+        &self,
+        config: &ModuleInstallConfig,
+        stored_code: &StoredCode,
+    ) -> Result<ModuleConfig> {
         // Write WASM code to temporary file
         let temp_path = self.write_temp_wasm(&stored_code.code, &config.name)?;
 
@@ -581,9 +631,10 @@ impl ModuleGovernance {
     fn write_temp_wasm(&self, code: &[u8], module_name: &str) -> Result<PathBuf> {
         let temp_dir = std::env::temp_dir();
         let temp_path = temp_dir.join(format!("{}.wasm", module_name));
-        
-        std::fs::write(&temp_path, code)
-            .map_err(|e| GovernanceError::StorageError(format!("Failed to write temp WASM: {}", e)))?;
+
+        std::fs::write(&temp_path, code).map_err(|e| {
+            GovernanceError::StorageError(format!("Failed to write temp WASM: {}", e))
+        })?;
 
         Ok(temp_path)
     }
@@ -596,7 +647,11 @@ impl ModuleGovernance {
     }
 
     /// Check version compatibility between current and new module
-    fn check_version_compatibility(&self, current: &InstalledModule, new_code: &StoredCode) -> Result<()> {
+    fn check_version_compatibility(
+        &self,
+        current: &InstalledModule,
+        new_code: &StoredCode,
+    ) -> Result<()> {
         // Simple semantic version check - in production this would be more sophisticated
         let current_version = &current.version;
         let new_version = &new_code.metadata.version;
@@ -632,9 +687,11 @@ impl ModuleGovernance {
 
     /// Persist code registry to VFS
     fn persist_code_registry(&self) -> Result<()> {
-        let registry = self.code_registry.lock()
+        let registry = self
+            .code_registry
+            .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
-        
+
         let serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed: {}", e)))?;
 
@@ -645,9 +702,11 @@ impl ModuleGovernance {
 
     /// Persist module registry to VFS
     fn persist_module_registry(&self) -> Result<()> {
-        let registry = self.module_registry.lock()
+        let registry = self
+            .module_registry
+            .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
-        
+
         let serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed: {}", e)))?;
 
@@ -658,28 +717,36 @@ impl ModuleGovernance {
 
     /// Get installed module info
     pub fn get_module(&self, name: &str) -> Result<Option<InstalledModule>> {
-        let registry = self.module_registry.lock()
+        let registry = self
+            .module_registry
+            .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
         Ok(registry.get(name).cloned())
     }
 
     /// Get stored code info
     pub fn get_code(&self, code_id: u64) -> Result<Option<StoredCode>> {
-        let registry = self.code_registry.lock()
+        let registry = self
+            .code_registry
+            .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
         Ok(registry.get(&code_id).cloned())
     }
 
     /// List all installed modules
     pub fn list_modules(&self) -> Result<Vec<InstalledModule>> {
-        let registry = self.module_registry.lock()
+        let registry = self
+            .module_registry
+            .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
         Ok(registry.values().cloned().collect())
     }
 
     /// List all stored codes
     pub fn list_codes(&self) -> Result<Vec<StoredCode>> {
-        let registry = self.code_registry.lock()
+        let registry = self
+            .code_registry
+            .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
         Ok(registry.values().cloned().collect())
     }
@@ -696,7 +763,8 @@ impl ModuleGovernance {
     fn load_module_in_router(&self, module_name: &str) -> Result<()> {
         // Use the router's internal load_module method through a workaround
         // Since we can't access private methods, we'll trigger initialization
-        self.router.initialize()
+        self.router
+            .initialize()
             .map_err(|e| GovernanceError::RouterError(e))?;
         Ok(())
     }
@@ -715,12 +783,8 @@ mod tests {
         let wasi_host = Arc::new(WasiHost::new().unwrap());
         let vfs = Arc::new(VirtualFilesystem::new());
         let router = Arc::new(ModuleRouter::new(wasi_host, vfs.clone()));
-        
-        let governance = ModuleGovernance::new(
-            router,
-            vfs,
-            "governance_authority".to_string(),
-        );
+
+        let governance = ModuleGovernance::new(router, vfs, "governance_authority".to_string());
 
         (governance, temp_dir)
     }
@@ -735,7 +799,7 @@ mod tests {
         valid_code.resize(100, 0); // Add some dummy data
 
         let checksum = governance.calculate_checksum(&valid_code);
-        
+
         let msg = MsgStoreCode {
             authority: "governance_authority".to_string(),
             wasm_code: valid_code,

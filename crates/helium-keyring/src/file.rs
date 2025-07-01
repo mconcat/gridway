@@ -535,15 +535,18 @@ impl Keyring for FileKeyring {
         Ok(())
     }
 
-    async fn import_private_key(&mut self, name: &str, private_key_hex: &str) -> Result<KeyInfo, KeyringError> {
+    async fn import_private_key(
+        &mut self,
+        name: &str,
+        private_key_hex: &str,
+    ) -> Result<KeyInfo, KeyringError> {
         // Check if key already exists
         if self.keys.contains_key(name) || self.key_path(name).exists() {
             return Err(KeyringError::KeyExists(name.to_string()));
         }
 
-        let privkey_bytes = hex::decode(private_key_hex).map_err(|e| {
-            KeyringError::BackendError(format!("Invalid hex private key: {}", e))
-        })?;
+        let privkey_bytes = hex::decode(private_key_hex)
+            .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {}", e)))?;
 
         // Support both secp256k1 and ed25519 keys based on length
         let privkey = match privkey_bytes.len() {
@@ -553,11 +556,16 @@ impl Keyring for FileKeyring {
                     PrivateKey::Secp256k1(key)
                 } else {
                     // Try ed25519
-                    let key = ed25519_dalek::SigningKey::from_bytes(&privkey_bytes.try_into().unwrap());
+                    let key =
+                        ed25519_dalek::SigningKey::from_bytes(&privkey_bytes.try_into().unwrap());
                     PrivateKey::Ed25519(key)
                 }
             }
-            _ => return Err(KeyringError::BackendError("Invalid private key length".to_string())),
+            _ => {
+                return Err(KeyringError::BackendError(
+                    "Invalid private key length".to_string(),
+                ))
+            }
         };
 
         let pubkey = privkey.public_key();
@@ -581,11 +589,18 @@ impl Keyring for FileKeyring {
         })
     }
 
-    async fn export_key(&self, name: &str, include_private: bool) -> Result<ExportedKey, KeyringError> {
+    async fn export_key(
+        &self,
+        name: &str,
+        include_private: bool,
+    ) -> Result<ExportedKey, KeyringError> {
         self.export_key_impl(name, include_private).await
     }
 
-    async fn import_exported_key(&mut self, exported: &ExportedKey) -> Result<KeyInfo, KeyringError> {
+    async fn import_exported_key(
+        &mut self,
+        exported: &ExportedKey,
+    ) -> Result<KeyInfo, KeyringError> {
         self.import_exported_key_impl(exported).await
     }
 }

@@ -485,7 +485,7 @@ impl AppGenesis {
         let config = Config::default();
         Self::with_setup(chain_id, &config)
     }
-    
+
     /// Initialize genesis with validator and faucet account from config
     pub fn with_setup(chain_id: String, config: &Config) -> Result<Self, SdkError> {
         let mut genesis = Self::new(chain_id);

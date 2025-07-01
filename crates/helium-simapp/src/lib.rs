@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// Simulation error types
 #[derive(Error, Debug)]
@@ -151,11 +151,16 @@ impl Simulator {
     pub fn new(config: SimConfig) -> Self {
         Self::with_app_config(config, Config::default())
     }
-    
+
     /// Create a new simulator with app config
     pub fn with_app_config(config: SimConfig, app_config: Config) -> Self {
         let accounts = (0..config.num_accounts)
-            .map(|i| Account::new(format!("account_{}", i), app_config.simulation.default_balance))
+            .map(|i| {
+                Account::new(
+                    format!("account_{}", i),
+                    app_config.simulation.default_balance,
+                )
+            })
             .collect();
 
         Self {
@@ -280,7 +285,7 @@ impl Simulator {
         self.stats.avg_tps = self.stats.txs_processed as f64 / duration.as_secs_f64();
 
         info!("Simulation completed!");
-        info!(blocks = %self.stats.blocks_processed, txs = %self.stats.txs_processed, 
+        info!(blocks = %self.stats.blocks_processed, txs = %self.stats.txs_processed,
               avg_tps = %self.stats.avg_tps, "Simulation results");
 
         Ok(self.stats.clone())

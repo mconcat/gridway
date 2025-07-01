@@ -7,10 +7,10 @@
 
 use prost::Message;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tonic::{transport::Server, Request, Response, Status};
-use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 // use prost_types::Any;
 
 use helium_baseapp::{Attribute, BaseApp, Event, QueryResponse, TxResponse};
@@ -38,23 +38,23 @@ pub enum AbciError {
     /// Codec error
     #[error("Codec error: {0}")]
     CodecError(String),
-    
+
     /// Invalid transaction
     #[error("Invalid transaction: {0}")]
     InvalidTransaction(String),
-    
+
     /// Insufficient fees
     #[error("Insufficient fees: {0}")]
     InsufficientFees(String),
-    
+
     /// Invalid sequence
     #[error("Invalid sequence: {0}")]
     InvalidSequence(String),
-    
+
     /// Unknown request
     #[error("Unknown request: {0}")]
     UnknownRequest(String),
-    
+
     /// Internal error
     #[error("Internal error: {0}")]
     InternalError(String),
@@ -104,7 +104,7 @@ impl AbciServer {
     pub fn new(app: BaseApp, chain_id: String) -> Self {
         Self::with_config(app, chain_id, AbciConfig::default())
     }
-    
+
     /// Create a new ABCI++ server with configuration
     pub fn with_config(app: BaseApp, chain_id: String, config: AbciConfig) -> Self {
         Self {
@@ -131,38 +131,39 @@ impl AbciServer {
 
         Ok(())
     }
-    
+
     /// Start the ABCI server with TCP connection handling
-    pub async fn start_abci_server(
-        app: Arc<RwLock<BaseApp>>,
-        config: &AbciConfig,
-    ) -> Result<()> {
+    pub async fn start_abci_server(app: Arc<RwLock<BaseApp>>, config: &AbciConfig) -> Result<()> {
         let server = AbciServer {
             app,
             chain_id: "helium-1".to_string(), // TODO: Get from config
             initial_height: 1,
             config: config.clone(),
         };
-        
+
         // Parse listen address
-        let addr = config.listen_address
+        let addr = config
+            .listen_address
             .strip_prefix("tcp://")
             .unwrap_or(&config.listen_address)
             .parse()
             .map_err(|e| AbciError::ServerError(format!("Invalid address: {}", e)))?;
-        
-        let listener = TcpListener::bind(addr).await
+
+        let listener = TcpListener::bind(addr)
+            .await
             .map_err(|e| AbciError::ServerError(format!("Failed to bind: {}", e)))?;
-        
+
         info!("ABCI server listening on {}", addr);
-        
+
         // Accept connections
         loop {
-            let (stream, peer_addr) = listener.accept().await
+            let (stream, peer_addr) = listener
+                .accept()
+                .await
                 .map_err(|e| AbciError::ServerError(format!("Accept failed: {}", e)))?;
-            
+
             let server_clone = server.clone();
-            
+
             tokio::spawn(async move {
                 if let Err(e) = handle_abci_connection(server_clone, stream, peer_addr).await {
                     error!("ABCI connection error from {}: {}", peer_addr, e);
@@ -334,9 +335,7 @@ impl AbciService for AbciServer {
             value: response.value,
             proof_ops: response.proof.map(|p| {
                 // TODO: Convert proof to ProofOps when merkle proofs are implemented
-                abci::ProofOps {
-                    ops: vec![],
-                }
+                abci::ProofOps { ops: vec![] }
             }),
             height: response.height as i64,
             codespace: String::new(),
@@ -381,7 +380,7 @@ impl AbciService for AbciServer {
             .map_err(|e| Status::internal(format!("Commit failed: {}", e)))?;
 
         let height = app.get_height();
-        
+
         // Optionally persist to disk based on configuration
         if self.config.persist_interval > 0 && height % self.config.persist_interval == 0 {
             // TODO: Implement snapshot persistence
@@ -540,8 +539,10 @@ impl AbciService for AbciServer {
         request: Request<BeginBlockRequest>,
     ) -> std::result::Result<Response<BeginBlockResponse>, Status> {
         let req = request.into_inner();
-        let header = req.header.ok_or_else(|| Status::invalid_argument("Missing block header"))?;
-        
+        let header = req
+            .header
+            .ok_or_else(|| Status::invalid_argument("Missing block header"))?;
+
         info!(
             "ABCI BeginBlock: height={}, time={}, proposer={}",
             header.height,
@@ -550,26 +551,26 @@ impl AbciService for AbciServer {
         );
 
         let mut app = self.app.write().await;
-        
+
         // Set block context
         let block_time = header.time.as_ref().map(|t| t.seconds as u64).unwrap_or(0);
         app.begin_block(header.height as u64, block_time, header.chain_id.clone())
             .map_err(|e| Status::internal(format!("BeginBlock failed: {}", e)))?;
-        
+
         // Process evidence
         for evidence in req.byzantine_validators {
             warn!("Evidence of byzantine validator: {:?}", evidence);
             // TODO: Process evidence when implemented
         }
-        
+
         // TODO: Get events from BeginBlock processing
         let events = vec![];
-        
+
         Ok(Response::new(BeginBlockResponse {
             events: convert_events(events),
         }))
     }
-    
+
     /// DeliverTx executes a transaction
     async fn deliver_tx(
         &self,
@@ -577,11 +578,12 @@ impl AbciService for AbciServer {
     ) -> std::result::Result<Response<DeliverTxResponse>, Status> {
         let req = request.into_inner();
         debug!("ABCI DeliverTx: {} bytes", req.tx.len());
-        
+
         let mut app = self.app.write().await;
-        let result = app.deliver_tx(&req.tx)
+        let result = app
+            .deliver_tx(&req.tx)
             .map_err(|e| Status::internal(format!("DeliverTx failed: {}", e)))?;
-        
+
         Ok(Response::new(DeliverTxResponse {
             code: result.code,
             data: vec![],
@@ -593,7 +595,7 @@ impl AbciService for AbciServer {
             codespace: String::new(),
         }))
     }
-    
+
     /// EndBlock signals the end of a block
     async fn end_block(
         &self,
@@ -601,27 +603,27 @@ impl AbciService for AbciServer {
     ) -> std::result::Result<Response<EndBlockResponse>, Status> {
         let req = request.into_inner();
         info!("ABCI EndBlock: height={}", req.height);
-        
+
         let mut app = self.app.write().await;
-        
+
         // End block processing
         app.end_block()
             .map_err(|e| Status::internal(format!("EndBlock failed: {}", e)))?;
-        
+
         // TODO: Get events from end block processing
         let events = vec![];
-        
+
         // TODO: Get validator updates and consensus param updates from modules
         let validator_updates = vec![];
         let consensus_param_updates = None;
-        
+
         Ok(Response::new(EndBlockResponse {
             validator_updates,
             consensus_param_updates,
             events: convert_events(events),
         }))
     }
-    
+
     /// FinalizeBlock delivers a decided block to the application
     async fn finalize_block(
         &self,
@@ -762,7 +764,7 @@ mod tests {
         assert_eq!(server.chain_id, "test-chain");
         assert_eq!(server.initial_height, 1);
     }
-    
+
     #[tokio::test]
     async fn test_abci_server_with_config() {
         let app = BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp");
@@ -805,12 +807,12 @@ mod tests {
         assert_eq!(info.app_version, 1);
         assert_eq!(info.last_block_height, 0);
     }
-    
+
     #[tokio::test]
     async fn test_init_chain() {
         let app = BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp");
         let server = AbciServer::new(app, "test-chain".to_string());
-        
+
         let request = Request::new(InitChainRequest {
             time: None,
             chain_id: "test-chain".to_string(),
@@ -819,17 +821,17 @@ mod tests {
             app_state_bytes: vec![],
             initial_height: 1,
         });
-        
+
         let response = server.init_chain(request).await.unwrap();
         let result = response.into_inner();
         assert!(result.validators.is_empty());
     }
-    
+
     #[tokio::test]
     async fn test_init_chain_wrong_chain_id() {
         let app = BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp");
         let server = AbciServer::new(app, "test-chain".to_string());
-        
+
         let request = Request::new(InitChainRequest {
             time: None,
             chain_id: "wrong-chain".to_string(),
@@ -838,60 +840,60 @@ mod tests {
             app_state_bytes: vec![],
             initial_height: 1,
         });
-        
+
         let response = server.init_chain(request).await;
         assert!(response.is_err());
     }
-    
+
     #[tokio::test]
     async fn test_check_tx() {
         let app = BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp");
         let server = AbciServer::new(app, "test-chain".to_string());
-        
+
         let request = Request::new(CheckTxRequest {
             tx: vec![1, 2, 3, 4],
             r#type: 0,
         });
-        
+
         let response = server.check_tx(request).await.unwrap();
         let result = response.into_inner();
         // Basic validation should pass for now
         assert_eq!(result.code, 0);
     }
-    
+
     #[tokio::test]
     async fn test_query() {
         let app = BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp");
         let server = AbciServer::new(app, "test-chain".to_string());
-        
+
         let request = Request::new(QueryRequest {
             data: vec![],
             path: "/app/version".to_string(),
             height: 0,
             prove: false,
         });
-        
+
         let response = server.query(request).await.unwrap();
         let result = response.into_inner();
         assert_eq!(result.code, 0);
     }
-    
-    #[tokio::test] 
+
+    #[tokio::test]
     async fn test_query_invalid_path() {
         let app = BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp");
         let server = AbciServer::new(app, "test-chain".to_string());
-        
+
         let request = Request::new(QueryRequest {
             data: vec![],
             path: "".to_string(),
             height: 0,
             prove: false,
         });
-        
+
         let response = server.query(request).await;
         assert!(response.is_err());
     }
-    
+
     #[tokio::test]
     async fn test_error_codes() {
         assert_eq!(AbciError::InvalidTransaction("test".to_string()).code(), 1);
@@ -899,7 +901,10 @@ mod tests {
         assert_eq!(AbciError::InvalidSequence("test".to_string()).code(), 3);
         assert_eq!(AbciError::UnknownRequest("test".to_string()).code(), 4);
         assert_eq!(AbciError::InternalError("test".to_string()).code(), 99);
-        assert_eq!(AbciError::BaseApp(helium_baseapp::BaseAppError::InvalidTx("test".to_string())).code(), 100);
+        assert_eq!(
+            AbciError::BaseApp(helium_baseapp::BaseAppError::InvalidTx("test".to_string())).code(),
+            100
+        );
     }
 }
 
@@ -910,15 +915,15 @@ async fn handle_abci_connection(
     peer_addr: std::net::SocketAddr,
 ) -> Result<()> {
     info!("New ABCI connection from {}", peer_addr);
-    
+
     // TODO: Implement actual ABCI wire protocol handling
     // This would involve:
     // 1. Reading length-prefixed messages
     // 2. Decoding ABCI requests
     // 3. Routing to appropriate methods
     // 4. Encoding and sending responses
-    
+
     // For now, we're using gRPC via tonic, so this is a placeholder
-    
+
     Ok(())
 }

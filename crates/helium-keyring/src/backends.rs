@@ -16,7 +16,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::{ExportedKey, KeyInfo, Keyring, KeyringError};
 
 /// In-memory keyring backend for testing and development
-/// 
+///
 /// **WARNING**: This backend stores keys in plain text in memory.
 /// It should only be used for testing and development purposes.
 #[derive(Debug)]
@@ -25,7 +25,7 @@ pub struct MemoryKeyring {
 }
 
 /// Operating System secure storage keyring backend
-/// 
+///
 /// This backend uses the operating system's secure storage mechanisms:
 /// - macOS: Keychain Services
 /// - Windows: Windows Credential Store  
@@ -184,14 +184,17 @@ impl Keyring for MemoryKeyring {
         Ok(())
     }
 
-    async fn import_private_key(&mut self, name: &str, private_key_hex: &str) -> Result<KeyInfo, KeyringError> {
+    async fn import_private_key(
+        &mut self,
+        name: &str,
+        private_key_hex: &str,
+    ) -> Result<KeyInfo, KeyringError> {
         if self.keys.contains_key(name) {
             return Err(KeyringError::KeyExists(name.to_string()));
         }
 
-        let privkey_bytes = hex::decode(private_key_hex).map_err(|e| {
-            KeyringError::BackendError(format!("Invalid hex private key: {}", e))
-        })?;
+        let privkey_bytes = hex::decode(private_key_hex)
+            .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {}", e)))?;
 
         // Support both secp256k1 and ed25519 keys based on length
         let privkey = match privkey_bytes.len() {
@@ -201,11 +204,16 @@ impl Keyring for MemoryKeyring {
                     PrivateKey::Secp256k1(key)
                 } else {
                     // Try ed25519
-                    let key = ed25519_dalek::SigningKey::from_bytes(&privkey_bytes.try_into().unwrap());
+                    let key =
+                        ed25519_dalek::SigningKey::from_bytes(&privkey_bytes.try_into().unwrap());
                     PrivateKey::Ed25519(key)
                 }
             }
-            _ => return Err(KeyringError::BackendError("Invalid private key length".to_string())),
+            _ => {
+                return Err(KeyringError::BackendError(
+                    "Invalid private key length".to_string(),
+                ))
+            }
         };
 
         let pubkey = privkey.public_key();
@@ -226,7 +234,11 @@ impl Keyring for MemoryKeyring {
         })
     }
 
-    async fn export_key(&self, name: &str, include_private: bool) -> Result<ExportedKey, KeyringError> {
+    async fn export_key(
+        &self,
+        name: &str,
+        include_private: bool,
+    ) -> Result<ExportedKey, KeyringError> {
         let key = self
             .keys
             .get(name)
@@ -256,7 +268,10 @@ impl Keyring for MemoryKeyring {
         })
     }
 
-    async fn import_exported_key(&mut self, exported: &ExportedKey) -> Result<KeyInfo, KeyringError> {
+    async fn import_exported_key(
+        &mut self,
+        exported: &ExportedKey,
+    ) -> Result<KeyInfo, KeyringError> {
         // Check if key already exists
         if self.keys.contains_key(&exported.name) {
             return Err(KeyringError::KeyExists(exported.name.clone()));
@@ -294,50 +309,59 @@ impl OsKeyring {
 
     /// Store a key in the OS secure storage
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-    async fn store_key_in_os(&self, name: &str, key_data: &SerializableKey) -> Result<(), KeyringError> {
+    async fn store_key_in_os(
+        &self,
+        name: &str,
+        key_data: &SerializableKey,
+    ) -> Result<(), KeyringError> {
         let key_json = serde_json::to_string(key_data)
             .map_err(|e| KeyringError::BackendError(format!("Failed to serialize key: {}", e)))?;
 
         // Use the keyring crate for cross-platform OS secure storage
-        let entry = keyring::Entry::new(&self.service_name, name)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to create keyring entry: {}", e)))?;
-        
-        entry.set_password(&key_json)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to store key in OS keyring: {}", e)))?;
-        
+        let entry = keyring::Entry::new(&self.service_name, name).map_err(|e| {
+            KeyringError::BackendError(format!("Failed to create keyring entry: {}", e))
+        })?;
+
+        entry.set_password(&key_json).map_err(|e| {
+            KeyringError::BackendError(format!("Failed to store key in OS keyring: {}", e))
+        })?;
+
         Ok(())
     }
 
     /// Retrieve a key from the OS secure storage  
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     async fn retrieve_key_from_os(&self, name: &str) -> Result<SerializableKey, KeyringError> {
-        let entry = keyring::Entry::new(&self.service_name, name)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to create keyring entry: {}", e)))?;
-        
-        let key_json = entry.get_password()
-            .map_err(|e| match e {
-                keyring::Error::NoEntry => KeyringError::KeyNotFound(name.to_string()),
-                _ => KeyringError::BackendError(format!("Failed to retrieve key from OS keyring: {}", e)),
-            })?;
-        
-        let key_data: SerializableKey = serde_json::from_str(&key_json)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to deserialize key data: {}", e)))?;
-        
+        let entry = keyring::Entry::new(&self.service_name, name).map_err(|e| {
+            KeyringError::BackendError(format!("Failed to create keyring entry: {}", e))
+        })?;
+
+        let key_json = entry.get_password().map_err(|e| match e {
+            keyring::Error::NoEntry => KeyringError::KeyNotFound(name.to_string()),
+            _ => {
+                KeyringError::BackendError(format!("Failed to retrieve key from OS keyring: {}", e))
+            }
+        })?;
+
+        let key_data: SerializableKey = serde_json::from_str(&key_json).map_err(|e| {
+            KeyringError::BackendError(format!("Failed to deserialize key data: {}", e))
+        })?;
+
         Ok(key_data)
     }
 
     /// Delete a key from the OS secure storage
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     async fn delete_key_from_os(&self, name: &str) -> Result<(), KeyringError> {
-        let entry = keyring::Entry::new(&self.service_name, name)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to create keyring entry: {}", e)))?;
-        
-        entry.delete_credential()
-            .map_err(|e| match e {
-                keyring::Error::NoEntry => KeyringError::KeyNotFound(name.to_string()),
-                _ => KeyringError::BackendError(format!("Failed to delete key from OS keyring: {}", e)),
-            })?;
-        
+        let entry = keyring::Entry::new(&self.service_name, name).map_err(|e| {
+            KeyringError::BackendError(format!("Failed to create keyring entry: {}", e))
+        })?;
+
+        entry.delete_credential().map_err(|e| match e {
+            keyring::Error::NoEntry => KeyringError::KeyNotFound(name.to_string()),
+            _ => KeyringError::BackendError(format!("Failed to delete key from OS keyring: {}", e)),
+        })?;
+
         Ok(())
     }
 
@@ -347,16 +371,26 @@ impl OsKeyring {
         // The keyring crate doesn't provide a native list function
         // We'll maintain a registry key that stores the list of key names
         let registry_entry = keyring::Entry::new(&self.service_name, "_helium_key_registry")
-            .map_err(|e| KeyringError::BackendError(format!("Failed to create registry entry: {}", e)))?;
-        
+            .map_err(|e| {
+                KeyringError::BackendError(format!("Failed to create registry entry: {}", e))
+            })?;
+
         println!("DEBUG: list_keys_from_os: attempting to read registry with service: {} user: _helium_key_registry", self.service_name);
-        
+
         match registry_entry.get_password() {
             Ok(registry_json) => {
-                println!("DEBUG: list_keys_from_os: got registry data: {}", registry_json);
-                let key_names: Vec<String> = serde_json::from_str(&registry_json)
-                    .map_err(|e| KeyringError::BackendError(format!("Failed to parse key registry: {}", e)))?;
-                println!("DEBUG: list_keys_from_os: parsed {} keys: {:?}", key_names.len(), key_names);
+                println!(
+                    "DEBUG: list_keys_from_os: got registry data: {}",
+                    registry_json
+                );
+                let key_names: Vec<String> = serde_json::from_str(&registry_json).map_err(|e| {
+                    KeyringError::BackendError(format!("Failed to parse key registry: {}", e))
+                })?;
+                println!(
+                    "DEBUG: list_keys_from_os: parsed {} keys: {:?}",
+                    key_names.len(),
+                    key_names
+                );
                 Ok(key_names)
             }
             Err(keyring::Error::NoEntry) => {
@@ -366,7 +400,10 @@ impl OsKeyring {
             }
             Err(e) => {
                 println!("DEBUG: list_keys_from_os: other error: {:?}", e);
-                Err(KeyringError::BackendError(format!("Failed to access key registry: {}", e)))
+                Err(KeyringError::BackendError(format!(
+                    "Failed to access key registry: {}",
+                    e
+                )))
             }
         }
     }
@@ -376,22 +413,29 @@ impl OsKeyring {
     async fn add_key_to_registry(&self, name: &str) -> Result<(), KeyringError> {
         let mut key_names = self.list_keys_from_os().await?;
         println!("DEBUG: add_key_to_registry: current keys: {:?}", key_names);
-        
+
         if !key_names.contains(&name.to_string()) {
             key_names.push(name.to_string());
             key_names.sort(); // Keep sorted for consistency
-            
+
             let registry_entry = keyring::Entry::new(&self.service_name, "_helium_key_registry")
-                .map_err(|e| KeyringError::BackendError(format!("Failed to create registry entry: {}", e)))?;
-            
-            let registry_json = serde_json::to_string(&key_names)
-                .map_err(|e| KeyringError::BackendError(format!("Failed to serialize key registry: {}", e)))?;
-            
-            println!("DEBUG: add_key_to_registry: updating registry with: {}", registry_json);
-            
-            registry_entry.set_password(&registry_json)
-                .map_err(|e| KeyringError::BackendError(format!("Failed to update key registry: {}", e)))?;
-                
+                .map_err(|e| {
+                    KeyringError::BackendError(format!("Failed to create registry entry: {}", e))
+                })?;
+
+            let registry_json = serde_json::to_string(&key_names).map_err(|e| {
+                KeyringError::BackendError(format!("Failed to serialize key registry: {}", e))
+            })?;
+
+            println!(
+                "DEBUG: add_key_to_registry: updating registry with: {}",
+                registry_json
+            );
+
+            registry_entry.set_password(&registry_json).map_err(|e| {
+                KeyringError::BackendError(format!("Failed to update key registry: {}", e))
+            })?;
+
             // Add a small delay to ensure the keyring write is flushed
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
@@ -404,19 +448,23 @@ impl OsKeyring {
         let mut key_names = self.list_keys_from_os().await?;
         if let Some(pos) = key_names.iter().position(|x| x == name) {
             key_names.remove(pos);
-            
+
             let registry_entry = keyring::Entry::new(&self.service_name, "_helium_key_registry")
-                .map_err(|e| KeyringError::BackendError(format!("Failed to create registry entry: {}", e)))?;
-            
+                .map_err(|e| {
+                    KeyringError::BackendError(format!("Failed to create registry entry: {}", e))
+                })?;
+
             if key_names.is_empty() {
                 // If no keys left, remove the registry entry
                 let _ = registry_entry.delete_credential(); // Ignore error if already deleted
             } else {
-                let registry_json = serde_json::to_string(&key_names)
-                    .map_err(|e| KeyringError::BackendError(format!("Failed to serialize key registry: {}", e)))?;
-                
-                registry_entry.set_password(&registry_json)
-                    .map_err(|e| KeyringError::BackendError(format!("Failed to update key registry: {}", e)))?;
+                let registry_json = serde_json::to_string(&key_names).map_err(|e| {
+                    KeyringError::BackendError(format!("Failed to serialize key registry: {}", e))
+                })?;
+
+                registry_entry.set_password(&registry_json).map_err(|e| {
+                    KeyringError::BackendError(format!("Failed to update key registry: {}", e))
+                })?;
             }
         }
         Ok(())
@@ -424,44 +472,54 @@ impl OsKeyring {
 
     /// Unsupported platform fallback methods
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    async fn store_key_in_os(&self, _name: &str, _key_data: &SerializableKey) -> Result<(), KeyringError> {
+    async fn store_key_in_os(
+        &self,
+        _name: &str,
+        _key_data: &SerializableKey,
+    ) -> Result<(), KeyringError> {
         Err(KeyringError::BackendError(
-            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring.".to_string()
+            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring."
+                .to_string(),
         ))
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     async fn retrieve_key_from_os(&self, _name: &str) -> Result<SerializableKey, KeyringError> {
         Err(KeyringError::BackendError(
-            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring.".to_string()
+            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring."
+                .to_string(),
         ))
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     async fn delete_key_from_os(&self, _name: &str) -> Result<(), KeyringError> {
         Err(KeyringError::BackendError(
-            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring.".to_string()
+            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring."
+                .to_string(),
         ))
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     async fn list_keys_from_os(&self) -> Result<Vec<String>, KeyringError> {
         Err(KeyringError::BackendError(
-            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring.".to_string()
+            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring."
+                .to_string(),
         ))
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     async fn add_key_to_registry(&self, _name: &str) -> Result<(), KeyringError> {
         Err(KeyringError::BackendError(
-            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring.".to_string()
+            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring."
+                .to_string(),
         ))
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     async fn remove_key_from_registry(&self, _name: &str) -> Result<(), KeyringError> {
         Err(KeyringError::BackendError(
-            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring.".to_string()
+            "OS keyring not supported on this platform. Use FileKeyring or MemoryKeyring."
+                .to_string(),
         ))
     }
 
@@ -481,21 +539,35 @@ impl OsKeyring {
     }
 
     /// Convert serializable key to stored key format
-    fn from_serializable_key(&self, serializable: SerializableKey) -> Result<StoredKey, KeyringError> {
+    fn from_serializable_key(
+        &self,
+        serializable: SerializableKey,
+    ) -> Result<StoredKey, KeyringError> {
         let privkey = match serializable.key_type.as_str() {
             "secp256k1" => {
-                let key = Secp256k1PrivKey::from_slice(&serializable.privkey_bytes)
-                    .map_err(|e| KeyringError::BackendError(format!("Invalid secp256k1 key: {}", e)))?;
+                let key =
+                    Secp256k1PrivKey::from_slice(&serializable.privkey_bytes).map_err(|e| {
+                        KeyringError::BackendError(format!("Invalid secp256k1 key: {}", e))
+                    })?;
                 PrivateKey::Secp256k1(key)
             }
             "ed25519" => {
                 if serializable.privkey_bytes.len() != 32 {
-                    return Err(KeyringError::BackendError("Invalid ed25519 key length".to_string()));
+                    return Err(KeyringError::BackendError(
+                        "Invalid ed25519 key length".to_string(),
+                    ));
                 }
-                let key = ed25519_dalek::SigningKey::from_bytes(&serializable.privkey_bytes.clone().try_into().unwrap());
+                let key = ed25519_dalek::SigningKey::from_bytes(
+                    &serializable.privkey_bytes.clone().try_into().unwrap(),
+                );
                 PrivateKey::Ed25519(key)
             }
-            _ => return Err(KeyringError::BackendError(format!("Unknown key type: {}", serializable.key_type))),
+            _ => {
+                return Err(KeyringError::BackendError(format!(
+                    "Unknown key type: {}",
+                    serializable.key_type
+                )))
+            }
         };
 
         let address = helium_types::address::AccAddress::from_bech32(&serializable.address)
@@ -546,7 +618,7 @@ impl Keyring for OsKeyring {
         // Store in OS secure storage
         let serializable = self.to_serializable_key(&stored_key, name);
         self.store_key_in_os(name, &serializable).await?;
-        
+
         // Add to key registry
         self.add_key_to_registry(name).await?;
 
@@ -583,7 +655,7 @@ impl Keyring for OsKeyring {
         // Store in OS secure storage
         let serializable = self.to_serializable_key(&stored_key, name);
         self.store_key_in_os(name, &serializable).await?;
-        
+
         // Add to key registry
         self.add_key_to_registry(name).await?;
 
@@ -600,7 +672,7 @@ impl Keyring for OsKeyring {
     async fn list_keys(&self) -> Result<Vec<KeyInfo>, KeyringError> {
         // Get keys from OS storage
         let os_key_names = self.list_keys_from_os().await?;
-        
+
         let mut keys = Vec::new();
         for name in os_key_names {
             if let Ok(serializable) = self.retrieve_key_from_os(&name).await {
@@ -629,7 +701,7 @@ impl Keyring for OsKeyring {
 
         // Try to retrieve from OS storage
         let serializable = self.retrieve_key_from_os(name).await?;
-        
+
         Ok(KeyInfo {
             name: name.to_string(),
             pubkey: serializable.pubkey.clone(),
@@ -662,14 +734,18 @@ impl Keyring for OsKeyring {
 
         // Delete from OS storage
         self.delete_key_from_os(name).await?;
-        
+
         // Remove from key registry
         self.remove_key_from_registry(name).await?;
 
         Ok(())
     }
 
-    async fn import_private_key(&mut self, name: &str, private_key_hex: &str) -> Result<KeyInfo, KeyringError> {
+    async fn import_private_key(
+        &mut self,
+        name: &str,
+        private_key_hex: &str,
+    ) -> Result<KeyInfo, KeyringError> {
         // Check if key already exists
         if self.keys_cache.contains_key(name) {
             return Err(KeyringError::KeyExists(name.to_string()));
@@ -679,9 +755,8 @@ impl Keyring for OsKeyring {
             return Err(KeyringError::KeyExists(name.to_string()));
         }
 
-        let privkey_bytes = hex::decode(private_key_hex).map_err(|e| {
-            KeyringError::BackendError(format!("Invalid hex private key: {}", e))
-        })?;
+        let privkey_bytes = hex::decode(private_key_hex)
+            .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {}", e)))?;
 
         // Support both secp256k1 and ed25519 keys based on length
         let privkey = match privkey_bytes.len() {
@@ -691,11 +766,16 @@ impl Keyring for OsKeyring {
                     PrivateKey::Secp256k1(key)
                 } else {
                     // Try ed25519
-                    let key = ed25519_dalek::SigningKey::from_bytes(&privkey_bytes.try_into().unwrap());
+                    let key =
+                        ed25519_dalek::SigningKey::from_bytes(&privkey_bytes.try_into().unwrap());
                     PrivateKey::Ed25519(key)
                 }
             }
-            _ => return Err(KeyringError::BackendError("Invalid private key length".to_string())),
+            _ => {
+                return Err(KeyringError::BackendError(
+                    "Invalid private key length".to_string(),
+                ))
+            }
         };
 
         let pubkey = privkey.public_key();
@@ -710,7 +790,7 @@ impl Keyring for OsKeyring {
         // Store in OS secure storage
         let serializable = self.to_serializable_key(&stored_key, name);
         self.store_key_in_os(name, &serializable).await?;
-        
+
         // Add to key registry
         self.add_key_to_registry(name).await?;
 
@@ -724,7 +804,11 @@ impl Keyring for OsKeyring {
         })
     }
 
-    async fn export_key(&self, name: &str, include_private: bool) -> Result<ExportedKey, KeyringError> {
+    async fn export_key(
+        &self,
+        name: &str,
+        include_private: bool,
+    ) -> Result<ExportedKey, KeyringError> {
         // Check cache first
         let stored_key = if let Some(key) = self.keys_cache.get(name) {
             key.clone()
@@ -758,7 +842,10 @@ impl Keyring for OsKeyring {
         })
     }
 
-    async fn import_exported_key(&mut self, exported: &ExportedKey) -> Result<KeyInfo, KeyringError> {
+    async fn import_exported_key(
+        &mut self,
+        exported: &ExportedKey,
+    ) -> Result<KeyInfo, KeyringError> {
         // Check if key already exists
         if self.keys_cache.contains_key(&exported.name) {
             return Err(KeyringError::KeyExists(exported.name.clone()));
@@ -909,11 +996,17 @@ mod tests {
         let signing_key = Secp256k1PrivKey::random(&mut rng);
         let privkey_hex = hex::encode(signing_key.to_bytes());
 
-        let key_info = keyring.import_private_key("imported_privkey", &privkey_hex).await.unwrap();
+        let key_info = keyring
+            .import_private_key("imported_privkey", &privkey_hex)
+            .await
+            .unwrap();
         assert_eq!(key_info.name, "imported_privkey");
 
         // Verify the key can be used for signing
-        let signature = keyring.sign("imported_privkey", b"test message").await.unwrap();
+        let signature = keyring
+            .sign("imported_privkey", b"test message")
+            .await
+            .unwrap();
         assert!(!signature.is_empty());
 
         // Test export
@@ -964,11 +1057,14 @@ mod tests {
         let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
         // Import same key into memory keyring
-        let memory_key = memory_keyring.import_key("consistency_test", mnemonic).await.unwrap();
+        let memory_key = memory_keyring
+            .import_key("consistency_test", mnemonic)
+            .await
+            .unwrap();
 
         // Both should produce same address for same mnemonic
         assert!(!memory_key.address.to_string().is_empty());
-        
+
         // Both should be able to sign
         let data = b"consistency test message";
         let memory_sig = memory_keyring.sign("consistency_test", data).await.unwrap();

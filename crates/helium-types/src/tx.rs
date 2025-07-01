@@ -1,9 +1,9 @@
 //! Transaction types and traits
 
 use crate::{address::AccAddress, error::SdkError};
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use prost::Message;
 
 /// Trait defining the contract for all messages that the host can process
 pub trait SdkMsg: Send + Sync + 'static {
@@ -204,7 +204,7 @@ pub struct ModeInfoProto {
 /// Nested module for mode info variants
 mod mode_info_proto {
     use super::*;
-    
+
     #[derive(Clone, PartialEq, prost::Oneof)]
     pub enum Sum {
         #[prost(message, tag = "1")]
@@ -276,12 +276,14 @@ pub enum SignMode {
 impl From<&TxBody> for TxBodyProto {
     fn from(body: &TxBody) -> Self {
         Self {
-            messages: body.messages.iter().map(|msg| {
-                helium_codec::protobuf::Any {
+            messages: body
+                .messages
+                .iter()
+                .map(|msg| helium_codec::protobuf::Any {
                     type_url: msg.type_url.clone(),
                     value: msg.value.clone(),
-                }
-            }).collect(),
+                })
+                .collect(),
             memo: body.memo.clone(),
             timeout_height: body.timeout_height,
             extension_options: vec![],
@@ -293,31 +295,35 @@ impl From<&TxBody> for TxBodyProto {
 impl From<&AuthInfo> for AuthInfoProto {
     fn from(auth_info: &AuthInfo) -> Self {
         Self {
-            signer_infos: auth_info.signer_infos.iter().map(|info| {
-                SignerInfoProto {
-                    public_key: info.public_key.as_ref().map(|pk| {
-                        helium_codec::protobuf::Any {
+            signer_infos: auth_info
+                .signer_infos
+                .iter()
+                .map(|info| SignerInfoProto {
+                    public_key: info
+                        .public_key
+                        .as_ref()
+                        .map(|pk| helium_codec::protobuf::Any {
                             type_url: pk.type_url.clone(),
                             value: pk.value.clone(),
-                        }
-                    }),
-                    mode_info: info.mode_info.single.as_ref().map(|single| {
-                        ModeInfoProto {
-                            sum: Some(mode_info_proto::Sum::Single(ModeInfoSingleProto {
-                                mode: single.mode as i32,
-                            })),
-                        }
+                        }),
+                    mode_info: info.mode_info.single.as_ref().map(|single| ModeInfoProto {
+                        sum: Some(mode_info_proto::Sum::Single(ModeInfoSingleProto {
+                            mode: single.mode as i32,
+                        })),
                     }),
                     sequence: info.sequence,
-                }
-            }).collect(),
+                })
+                .collect(),
             fee: Some(FeeProto {
-                amount: auth_info.fee.amount.iter().map(|fee_amount| {
-                    CoinProto {
+                amount: auth_info
+                    .fee
+                    .amount
+                    .iter()
+                    .map(|fee_amount| CoinProto {
                         denom: fee_amount.denom.clone(),
                         amount: fee_amount.amount.clone(),
-                    }
-                }).collect(),
+                    })
+                    .collect(),
                 gas_limit: auth_info.fee.gas_limit,
                 payer: auth_info.fee.payer.clone(),
                 granter: auth_info.fee.granter.clone(),
@@ -352,18 +358,16 @@ impl TxDecoder {
     /// Register standard Cosmos SDK message types
     pub fn register_standard_types(&mut self) {
         // Register MsgSend
-        self.register_message_type::<()>(
-            "/cosmos.bank.v1beta1.MsgSend",
-            |bytes| {
-                use crate::msgs::bank::MsgSend;
-                use prost::Message;
-                
-                let msg = MsgSend::decode(bytes)
-                    .map_err(|e| TxDecodeError::InvalidMessageData(format!("failed to decode MsgSend: {}", e)))?;
-                Ok(Box::new(msg))
-            },
-        );
-        
+        self.register_message_type::<()>("/cosmos.bank.v1beta1.MsgSend", |bytes| {
+            use crate::msgs::bank::MsgSend;
+            use prost::Message;
+
+            let msg = MsgSend::decode(bytes).map_err(|e| {
+                TxDecodeError::InvalidMessageData(format!("failed to decode MsgSend: {}", e))
+            })?;
+            Ok(Box::new(msg))
+        });
+
         // Additional standard message types can be registered here
     }
 
@@ -390,18 +394,21 @@ impl TxDecoder {
     /// Decode transaction from protobuf bytes
     fn decode_protobuf_tx(&self, tx_bytes: &[u8]) -> Result<RawTx, TxDecodeError> {
         // Decode the protobuf transaction
-        let tx_proto = TxProto::decode(tx_bytes)
-            .map_err(|e| TxDecodeError::ProtobufError(format!("failed to decode transaction: {}", e)))?;
+        let tx_proto = TxProto::decode(tx_bytes).map_err(|e| {
+            TxDecodeError::ProtobufError(format!("failed to decode transaction: {}", e))
+        })?;
 
         // Extract and convert the body
         let body = if let Some(body_proto) = tx_proto.body {
             TxBody {
-                messages: body_proto.messages.into_iter().map(|any| {
-                    TxMessage {
+                messages: body_proto
+                    .messages
+                    .into_iter()
+                    .map(|any| TxMessage {
                         type_url: any.type_url,
                         value: any.value,
-                    }
-                }).collect(),
+                    })
+                    .collect(),
                 memo: body_proto.memo,
                 timeout_height: body_proto.timeout_height,
             }
@@ -411,38 +418,44 @@ impl TxDecoder {
 
         // Extract and convert the auth info
         let auth_info = if let Some(auth_proto) = tx_proto.auth_info {
-            let signer_infos = auth_proto.signer_infos.into_iter().map(|signer_proto| {
-                SignerInfo {
-                    public_key: signer_proto.public_key.map(|any| TxMessage {
-                        type_url: any.type_url,
-                        value: any.value,
-                    }),
-                    mode_info: match signer_proto.mode_info {
-                        Some(mode_proto) => match mode_proto.sum {
-                            Some(mode_info_proto::Sum::Single(single)) => ModeInfo {
-                                single: Some(ModeInfoSingle {
-                                    mode: single.mode as u32,
-                                }),
-                            },
-                            Some(mode_info_proto::Sum::Multi(_)) => ModeInfo {
-                                single: None, // Multi-sig not fully supported in this struct yet
+            let signer_infos = auth_proto
+                .signer_infos
+                .into_iter()
+                .map(|signer_proto| {
+                    SignerInfo {
+                        public_key: signer_proto.public_key.map(|any| TxMessage {
+                            type_url: any.type_url,
+                            value: any.value,
+                        }),
+                        mode_info: match signer_proto.mode_info {
+                            Some(mode_proto) => match mode_proto.sum {
+                                Some(mode_info_proto::Sum::Single(single)) => ModeInfo {
+                                    single: Some(ModeInfoSingle {
+                                        mode: single.mode as u32,
+                                    }),
+                                },
+                                Some(mode_info_proto::Sum::Multi(_)) => ModeInfo {
+                                    single: None, // Multi-sig not fully supported in this struct yet
+                                },
+                                None => ModeInfo { single: None },
                             },
                             None => ModeInfo { single: None },
                         },
-                        None => ModeInfo { single: None },
-                    },
-                    sequence: signer_proto.sequence,
-                }
-            }).collect();
+                        sequence: signer_proto.sequence,
+                    }
+                })
+                .collect();
 
             let fee = if let Some(fee_proto) = auth_proto.fee {
                 Fee {
-                    amount: fee_proto.amount.into_iter().map(|coin| {
-                        FeeAmount {
+                    amount: fee_proto
+                        .amount
+                        .into_iter()
+                        .map(|coin| FeeAmount {
                             denom: coin.denom,
                             amount: coin.amount,
-                        }
-                    }).collect(),
+                        })
+                        .collect(),
                     gas_limit: fee_proto.gas_limit,
                     payer: fee_proto.payer,
                     granter: fee_proto.granter,
@@ -456,10 +469,7 @@ impl TxDecoder {
                 }
             };
 
-            AuthInfo {
-                signer_infos,
-                fee,
-            }
+            AuthInfo { signer_infos, fee }
         } else {
             return Err(TxDecodeError::MissingField("auth_info".to_string()));
         };
@@ -547,14 +557,17 @@ impl TxDecoder {
     /// Encode a transaction to protobuf bytes
     pub fn encode_tx(&self, tx: &RawTx) -> Result<Vec<u8>, TxDecodeError> {
         use helium_codec::protobuf::Any;
-        
+
         // Convert messages to Any types
-        let messages: Vec<Any> = tx.body.messages.iter().map(|msg| {
-            Any {
+        let messages: Vec<Any> = tx
+            .body
+            .messages
+            .iter()
+            .map(|msg| Any {
                 type_url: msg.type_url.clone(),
                 value: msg.value.clone(),
-            }
-        }).collect();
+            })
+            .collect();
 
         // Create protobuf body
         let body_proto = TxBodyProto {
@@ -566,31 +579,36 @@ impl TxDecoder {
         };
 
         // Convert signer infos
-        let signer_infos: Vec<SignerInfoProto> = tx.auth_info.signer_infos.iter().map(|info| {
-            SignerInfoProto {
+        let signer_infos: Vec<SignerInfoProto> = tx
+            .auth_info
+            .signer_infos
+            .iter()
+            .map(|info| SignerInfoProto {
                 public_key: info.public_key.as_ref().map(|pk| Any {
                     type_url: pk.type_url.clone(),
                     value: pk.value.clone(),
                 }),
-                mode_info: info.mode_info.single.as_ref().map(|single| {
-                    ModeInfoProto {
-                        sum: Some(mode_info_proto::Sum::Single(ModeInfoSingleProto {
-                            mode: single.mode as i32,
-                        })),
-                    }
+                mode_info: info.mode_info.single.as_ref().map(|single| ModeInfoProto {
+                    sum: Some(mode_info_proto::Sum::Single(ModeInfoSingleProto {
+                        mode: single.mode as i32,
+                    })),
                 }),
                 sequence: info.sequence,
-            }
-        }).collect();
+            })
+            .collect();
 
         // Convert fee
         let fee_proto = FeeProto {
-            amount: tx.auth_info.fee.amount.iter().map(|coin| {
-                CoinProto {
+            amount: tx
+                .auth_info
+                .fee
+                .amount
+                .iter()
+                .map(|coin| CoinProto {
                     denom: coin.denom.clone(),
                     amount: coin.amount.clone(),
-                }
-            }).collect(),
+                })
+                .collect(),
             gas_limit: tx.auth_info.fee.gas_limit,
             payer: tx.auth_info.fee.payer.clone(),
             granter: tx.auth_info.fee.granter.clone(),
@@ -611,14 +629,18 @@ impl TxDecoder {
 
         // Encode to bytes
         let mut buf = Vec::new();
-        tx_proto.encode(&mut buf)
-            .map_err(|e| TxDecodeError::ProtobufError(format!("failed to encode transaction: {}", e)))?;
-        
+        tx_proto.encode(&mut buf).map_err(|e| {
+            TxDecodeError::ProtobufError(format!("failed to encode transaction: {}", e))
+        })?;
+
         Ok(buf)
     }
 
     /// Decode a message from Any type using the registry
-    pub fn decode_any_message(&self, any: &helium_codec::protobuf::Any) -> Result<Box<dyn SdkMsg>, TxDecodeError> {
+    pub fn decode_any_message(
+        &self,
+        any: &helium_codec::protobuf::Any,
+    ) -> Result<Box<dyn SdkMsg>, TxDecodeError> {
         self.decode_message(&TxMessage {
             type_url: any.type_url.clone(),
             value: any.value.clone(),
@@ -970,12 +992,15 @@ mod tests {
 
         // Decode from protobuf
         let decoded = decoder.decode_protobuf_tx(&encoded).unwrap();
-        
+
         // Verify structure matches
         assert_eq!(decoded.body.messages.len(), tx.body.messages.len());
         assert_eq!(decoded.body.memo, tx.body.memo);
         assert_eq!(decoded.body.timeout_height, tx.body.timeout_height);
-        assert_eq!(decoded.auth_info.signer_infos.len(), tx.auth_info.signer_infos.len());
+        assert_eq!(
+            decoded.auth_info.signer_infos.len(),
+            tx.auth_info.signer_infos.len()
+        );
         assert_eq!(decoded.auth_info.fee.gas_limit, tx.auth_info.fee.gas_limit);
         assert_eq!(decoded.signatures.len(), tx.signatures.len());
     }
@@ -990,7 +1015,7 @@ mod tests {
 
         // Decode should use protobuf path
         let decoded = decoder.decode_tx(&protobuf_encoded).unwrap();
-        
+
         // Verify it decoded correctly
         assert_eq!(decoded.body.messages.len(), 1);
         assert_eq!(decoded.body.memo, "test transaction");
@@ -1000,8 +1025,10 @@ mod tests {
     fn test_register_standard_types() {
         let mut decoder = TxDecoder::new();
         decoder.register_standard_types();
-        
+
         // Check that MsgSend is registered
-        assert!(decoder.message_registry.contains_key("/cosmos.bank.v1beta1.MsgSend"));
+        assert!(decoder
+            .message_registry
+            .contains_key("/cosmos.bank.v1beta1.MsgSend"));
     }
 }

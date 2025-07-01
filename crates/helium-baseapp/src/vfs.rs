@@ -271,9 +271,7 @@ impl VirtualFilesystem {
         let parts: Vec<&str> = path_str.trim_start_matches('/').split('/').collect();
 
         if parts.is_empty() {
-            return Err(VfsError::InvalidPath(
-                "Path cannot be empty".to_string(),
-            ));
+            return Err(VfsError::InvalidPath("Path cannot be empty".to_string()));
         }
 
         let namespace = parts[0].to_string();
@@ -318,7 +316,8 @@ impl VirtualFilesystem {
 
         if let Some(mount) = mounts.get(path) {
             let fd = self.next_fd_id()?;
-            let file_desc = FileDescriptor::new(fd, path.to_path_buf(), "".to_string(), vec![], writable);
+            let file_desc =
+                FileDescriptor::new(fd, path.to_path_buf(), "".to_string(), vec![], writable);
             let mut fds = self
                 .file_descriptors
                 .lock()
@@ -393,7 +392,9 @@ impl VirtualFilesystem {
                     let interface = interface.lock().unwrap();
                     interface.read(&file_desc.path, buffer)
                 }
-                _ => Err(VfsError::InvalidOperation("Read not supported for this mount type".to_string())),
+                _ => Err(VfsError::InvalidOperation(
+                    "Read not supported for this mount type".to_string(),
+                )),
             };
         }
 
@@ -496,7 +497,9 @@ impl VirtualFilesystem {
                     let interface = interface.lock().unwrap();
                     interface.write(&file_desc.path, data)
                 }
-                _ => Err(VfsError::InvalidOperation("Write not supported for this mount type".to_string())),
+                _ => Err(VfsError::InvalidOperation(
+                    "Write not supported for this mount type".to_string(),
+                )),
             };
         }
 
@@ -841,7 +844,8 @@ mod tests {
 
         // List directory
         let dir_path = PathBuf::from("/auth/");
-        vfs.add_capability(Capability::Read(dir_path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(dir_path.clone()))
+            .unwrap();
         let fd = vfs.open(&dir_path, false).unwrap();
         let mut buffer = vec![0u8; 1024];
         let read = vfs.read(fd, &mut buffer).unwrap();
@@ -901,7 +905,8 @@ mod tests {
 
         // Test directory stat
         let dir_path = PathBuf::from("/auth/");
-        vfs.add_capability(Capability::Read(dir_path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(dir_path.clone()))
+            .unwrap();
         let dir_info = vfs.stat(&dir_path).unwrap();
         assert_eq!(dir_info.file_type, FileType::Directory);
     }

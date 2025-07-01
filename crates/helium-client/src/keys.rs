@@ -8,7 +8,7 @@ use crate::cli::{
     ShowKeyCmd,
 };
 use helium_keyring::{file::FileKeyring, Keyring, KeyringError};
-use helium_log::{info, warn, debug};
+use helium_log::{debug, info, warn};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use thiserror::Error;

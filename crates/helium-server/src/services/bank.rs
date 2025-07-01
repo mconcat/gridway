@@ -5,7 +5,7 @@
 
 use crate::grpc::{bank, Coin};
 use helium_baseapp::BaseApp;
-use helium_store::{StateManager, StoreError, KVStore};
+use helium_store::{KVStore, StateManager, StoreError};
 use helium_types::{msgs::bank::MsgSend, tx::SdkMsg};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -458,12 +458,16 @@ mod tests {
     async fn create_test_service() -> BankService {
         // Create StateManager with unique temp directory for each test
         let mut state_manager = StateManager::new_with_memstore();
-        
+
         // Register the bank namespace
-        state_manager.register_namespace("bank".to_string(), false).unwrap();
-        
+        state_manager
+            .register_namespace("bank".to_string(), false)
+            .unwrap();
+
         let state_manager = Arc::new(RwLock::new(state_manager));
-        let base_app = Arc::new(RwLock::new(BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp")));
+        let base_app = Arc::new(RwLock::new(
+            BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp"),
+        ));
 
         BankService::with_defaults(state_manager, base_app)
     }

@@ -1,7 +1,7 @@
 //! CLI framework for the helium blockchain client
 
 use clap::{Args, Parser, Subcommand};
-use helium_log::{info, warn, debug};
+use helium_log::{debug, info, warn};
 use helium_types::Config;
 use std::path::PathBuf;
 
@@ -9,19 +9,25 @@ use std::path::PathBuf;
 impl GlobalOpts {
     /// Get the effective node URL (from CLI arg or config)
     pub fn get_node_url(&self, config: &Config) -> String {
-        self.node.clone().unwrap_or_else(|| config.client.node_url.clone())
+        self.node
+            .clone()
+            .unwrap_or_else(|| config.client.node_url.clone())
     }
-    
+
     /// Get the effective chain ID (from CLI arg or config)
     pub fn get_chain_id(&self, config: &Config) -> String {
-        self.chain_id.clone().unwrap_or_else(|| config.chain.id.clone())
+        self.chain_id
+            .clone()
+            .unwrap_or_else(|| config.chain.id.clone())
     }
 }
 
 impl InitCmd {
     /// Get the effective moniker (from CLI arg or config)
     pub fn get_moniker(&self, config: &Config) -> String {
-        self.moniker.clone().unwrap_or_else(|| config.node.moniker.clone())
+        self.moniker
+            .clone()
+            .unwrap_or_else(|| config.node.moniker.clone())
     }
 }
 
@@ -30,15 +36,17 @@ impl StartCmd {
     pub fn get_grpc_port(&self, config: &Config) -> u16 {
         self.grpc_port.unwrap_or(config.server.grpc_port)
     }
-    
+
     /// Get the effective REST port (from CLI arg or config)
     pub fn get_rest_port(&self, config: &Config) -> u16 {
         self.rest_port.unwrap_or(config.server.rest_port)
     }
-    
+
     /// Get the effective minimum gas prices (from CLI arg or config)
     pub fn get_minimum_gas_prices(&self, config: &Config) -> String {
-        self.minimum_gas_prices.clone().unwrap_or_else(|| config.chain.min_gas_price.clone())
+        self.minimum_gas_prices
+            .clone()
+            .unwrap_or_else(|| config.chain.min_gas_price.clone())
     }
 }
 
@@ -556,7 +564,10 @@ impl CliHandler {
     pub fn new(global_opts: GlobalOpts) -> Self {
         // Load configuration, falling back to defaults if not found
         let config = Config::load().unwrap_or_default();
-        Self { global_opts, config }
+        Self {
+            global_opts,
+            config,
+        }
     }
 
     /// Execute a CLI command
@@ -577,7 +588,8 @@ impl CliHandler {
     async fn handle_init(&self, cmd: InitCmd) -> crate::Result<()> {
         info!("Initializing helium node...");
         info!(moniker = %cmd.get_moniker(&self.config), "Setting node moniker");
-        let chain_id = cmd.chain_id
+        let chain_id = cmd
+            .chain_id
             .unwrap_or_else(|| self.global_opts.get_chain_id(&self.config));
         info!(chain_id = %chain_id, "Setting chain ID");
 
@@ -736,8 +748,8 @@ impl CliHandler {
     #[tracing::instrument(skip(self))]
     async fn handle_status(&self, cmd: StatusCmd) -> crate::Result<()> {
         info!("Node status:");
-        info!(endpoint = %self.global_opts.get_node_url(&self.config), 
-              chain_id = %self.global_opts.get_chain_id(&self.config), 
+        info!(endpoint = %self.global_opts.get_node_url(&self.config),
+              chain_id = %self.global_opts.get_chain_id(&self.config),
               "Node connection details");
 
         if cmd.detailed {
@@ -759,8 +771,8 @@ impl CliHandler {
         match cmd.action {
             ConfigAction::Show => {
                 info!("Current configuration:");
-                info!(node = %self.global_opts.get_node_url(&self.config), 
-                      chain_id = %self.global_opts.get_chain_id(&self.config), 
+                info!(node = %self.global_opts.get_node_url(&self.config),
+                      chain_id = %self.global_opts.get_chain_id(&self.config),
                       output = %self.global_opts.output, "Configuration values");
                 if let Some(home) = &self.global_opts.home {
                     info!(home = ?home, "Home directory");
@@ -797,12 +809,17 @@ impl CliHandler {
 /// Parse CLI arguments and execute commands
 pub async fn run() -> crate::Result<()> {
     let cli = Cli::parse();
-    
+
     // Initialize tracing based on verbosity
-    let level = if cli.global_opts.verbose { "debug" } else { "info" };
-    helium_log::init_tracing_with_level(level)
-        .map_err(|e| crate::ClientError::InvalidResponse(format!("Failed to initialize logging: {}", e)))?;
-    
+    let level = if cli.global_opts.verbose {
+        "debug"
+    } else {
+        "info"
+    };
+    helium_log::init_tracing_with_level(level).map_err(|e| {
+        crate::ClientError::InvalidResponse(format!("Failed to initialize logging: {}", e))
+    })?;
+
     let handler = CliHandler::new(cli.global_opts);
     handler.execute(cli.command).await
 }
@@ -844,7 +861,10 @@ mod tests {
             "status",
         ]);
 
-        assert_eq!(cli.global_opts.node, Some("http://localhost:8080".to_string()));
+        assert_eq!(
+            cli.global_opts.node,
+            Some("http://localhost:8080".to_string())
+        );
         assert_eq!(cli.global_opts.chain_id, Some("test-chain".to_string()));
         assert_eq!(cli.global_opts.verbose, true);
         assert!(matches!(cli.command, Commands::Status(_)));

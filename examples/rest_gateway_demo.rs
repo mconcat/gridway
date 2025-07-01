@@ -1,6 +1,6 @@
 //! REST Gateway Demo
 //!
-//! This example demonstrates the REST gateway implementation that converts 
+//! This example demonstrates the REST gateway implementation that converts
 //! Cosmos SDK REST API calls to gRPC service calls.
 
 use helium_server::rest::{RestGateway, RestGatewayConfig};
@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start server
     let addr: SocketAddr = "127.0.0.1:1317".parse()?;
     let listener = TcpListener::bind(&addr).await?;
-    
+
     info!("🚀 REST Gateway listening on http://{}", addr);
     info!("📋 Available endpoints:");
     info!("   GET  /health                                      - Health check");

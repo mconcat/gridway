@@ -4,32 +4,32 @@
 //! dynamically loaded by the BaseApp. It handles protobuf decoding of Cosmos SDK
 //! transactions, supporting various message types and encoding formats.
 
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 use thiserror::Error;
-use prost::Message;
 
 /// Error types for transaction decoder operations
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum TxDecodeError {
     #[error("Invalid transaction format: {0}")]
     InvalidFormat(String),
-    
+
     #[error("Protobuf decode error: {0}")]
     ProtobufError(String),
-    
+
     #[error("Unknown message type: {0}")]
     UnknownMessageType(String),
-    
+
     #[error("Invalid message data: {0}")]
     InvalidMessageData(String),
-    
+
     #[error("Unsupported encoding: {0}")]
     UnsupportedEncoding(String),
-    
+
     #[error("IO error: {0}")]
     IoError(String),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(String),
 }
@@ -148,7 +148,8 @@ pub struct DecodeResponse {
 
 /// Message type registry for decoding known message types
 pub struct MessageRegistry {
-    handlers: std::collections::HashMap<String, Box<dyn Fn(&[u8]) -> TxDecodeResult<serde_json::Value>>>,
+    handlers:
+        std::collections::HashMap<String, Box<dyn Fn(&[u8]) -> TxDecodeResult<serde_json::Value>>>,
 }
 
 impl MessageRegistry {
@@ -156,7 +157,7 @@ impl MessageRegistry {
         let mut registry = Self {
             handlers: std::collections::HashMap::new(),
         };
-        
+
         // Register known message types
         registry.register_cosmos_messages();
         registry
@@ -168,29 +169,29 @@ impl MessageRegistry {
             "/cosmos.bank.v1beta1.MsgSend".to_string(),
             Box::new(|bytes| decode_msg_send(bytes)),
         );
-        
+
         self.handlers.insert(
             "/cosmos.bank.v1beta1.MsgMultiSend".to_string(),
             Box::new(|bytes| decode_msg_multi_send(bytes)),
         );
-        
+
         // Staking messages
         self.handlers.insert(
             "/cosmos.staking.v1beta1.MsgDelegate".to_string(),
             Box::new(|bytes| decode_msg_delegate(bytes)),
         );
-        
+
         self.handlers.insert(
             "/cosmos.staking.v1beta1.MsgUndelegate".to_string(),
             Box::new(|bytes| decode_msg_undelegate(bytes)),
         );
-        
+
         // Governance messages
         self.handlers.insert(
             "/cosmos.gov.v1beta1.MsgSubmitProposal".to_string(),
             Box::new(|bytes| decode_msg_submit_proposal(bytes)),
         );
-        
+
         self.handlers.insert(
             "/cosmos.gov.v1beta1.MsgVote".to_string(),
             Box::new(|bytes| decode_msg_vote(bytes)),
@@ -224,7 +225,10 @@ impl WasiTxDecoder {
 
     /// Main entry point for transaction decoding
     pub fn decode(&self, req: &DecodeRequest) -> DecodeResponse {
-        log::info!("WASI TxDecoder: Decoding transaction with {} encoding", req.encoding);
+        log::info!(
+            "WASI TxDecoder: Decoding transaction with {} encoding",
+            req.encoding
+        );
 
         match self.decode_transaction(req) {
             Ok(decoded_tx) => {
@@ -246,7 +250,7 @@ impl WasiTxDecoder {
                 decoded_tx: None,
                 error: Some(e.to_string()),
                 warnings: vec![],
-            }
+            },
         }
     }
 
@@ -280,22 +284,20 @@ impl WasiTxDecoder {
     fn decode_cosmos_tx(&self, bytes: &[u8]) -> TxDecodeResult<DecodedTx> {
         // Simplified decoding - in reality would use proper protobuf
         // For now, parse a JSON representation for demonstration
-        
+
         // This is a placeholder implementation
         // Real implementation would decode actual protobuf bytes
-        
+
         let body = TxBody {
-            messages: vec![
-                DecodedMessage {
-                    type_url: "/cosmos.bank.v1beta1.MsgSend".to_string(),
-                    value: serde_json::json!({
-                        "from_address": "cosmos1...",
-                        "to_address": "cosmos1...",
-                        "amount": [{"denom": "uatom", "amount": "1000000"}]
-                    }),
-                    raw_value: hex::encode(&bytes[0..32.min(bytes.len())]),
-                }
-            ],
+            messages: vec![DecodedMessage {
+                type_url: "/cosmos.bank.v1beta1.MsgSend".to_string(),
+                value: serde_json::json!({
+                    "from_address": "cosmos1...",
+                    "to_address": "cosmos1...",
+                    "amount": [{"denom": "uatom", "amount": "1000000"}]
+                }),
+                raw_value: hex::encode(&bytes[0..32.min(bytes.len())]),
+            }],
             memo: "Example transaction".to_string(),
             timeout_height: 0,
             extension_options: vec![],
@@ -348,7 +350,10 @@ impl WasiTxDecoder {
 
         // Check transaction size
         if tx.size_bytes > 1_000_000 {
-            warnings.push(format!("Transaction size {} exceeds recommended limit", tx.size_bytes));
+            warnings.push(format!(
+                "Transaction size {} exceeds recommended limit",
+                tx.size_bytes
+            ));
         }
 
         // Check memo length
@@ -470,7 +475,11 @@ pub extern "C" fn decode_tx() -> i32 {
         }
     }
 
-    if response.success { 0 } else { 1 }
+    if response.success {
+        0
+    } else {
+        1
+    }
 }
 
 /// Alternative entry point for testing
@@ -499,13 +508,13 @@ mod tests {
     #[test]
     fn test_decode_base64_transaction() {
         let decoder = WasiTxDecoder::new();
-        
+
         let request = DecodeRequest {
             tx_bytes: base64::encode("test transaction bytes"),
             encoding: "base64".to_string(),
             validate: true,
         };
-        
+
         let response = decoder.decode(&request);
         assert!(response.success);
         assert!(response.decoded_tx.is_some());
@@ -514,13 +523,13 @@ mod tests {
     #[test]
     fn test_decode_hex_transaction() {
         let decoder = WasiTxDecoder::new();
-        
+
         let request = DecodeRequest {
             tx_bytes: hex::encode("test transaction bytes"),
             encoding: "hex".to_string(),
             validate: false,
         };
-        
+
         let response = decoder.decode(&request);
         assert!(response.success);
         assert!(response.warnings.is_empty()); // No validation requested
@@ -529,13 +538,13 @@ mod tests {
     #[test]
     fn test_invalid_encoding() {
         let decoder = WasiTxDecoder::new();
-        
+
         let request = DecodeRequest {
             tx_bytes: "invalid".to_string(),
             encoding: "unknown".to_string(),
             validate: false,
         };
-        
+
         let response = decoder.decode(&request);
         assert!(!response.success);
         assert!(response.error.is_some());
@@ -545,7 +554,7 @@ mod tests {
     #[test]
     fn test_transaction_validation() {
         let decoder = WasiTxDecoder::new();
-        
+
         let mut tx = DecodedTx {
             body: TxBody {
                 messages: vec![],
@@ -568,7 +577,7 @@ mod tests {
             tx_hash: String::new(),
             size_bytes: 2_000_000, // Too large
         };
-        
+
         let warnings = decoder.validate_transaction(&tx);
         assert!(warnings.len() >= 4); // Size, memo, gas, empty messages
     }

@@ -127,6 +127,7 @@ impl TypeRegistry {
 
     /// Register multiple message types at once using a macro
     /// Example: register_types!(registry, [MsgSend, MsgDelegate, MsgVote]);
+    #[allow(clippy::type_complexity)]
     pub fn register_many(&self, registrations: Vec<Box<dyn Fn(&TypeRegistry)>>) {
         for register_fn in registrations {
             register_fn(self);
@@ -188,6 +189,7 @@ trait MessageDescriptor: Send + Sync {
     fn decode(&self, data: &[u8]) -> Result<Box<dyn MessageDyn>>;
 
     /// Get the type URL for this message type
+    #[allow(dead_code)]
     fn type_url(&self) -> &str;
 
     /// Create a default instance of this message type
@@ -264,6 +266,7 @@ pub mod type_urls {
 }
 
 /// Create a global type registry with standard Cosmos SDK types
+#[allow(clippy::let_and_return)]
 pub fn create_cosmos_type_registry() -> TypeRegistry {
     let registry = TypeRegistry::new();
 

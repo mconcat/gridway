@@ -12,7 +12,7 @@ use helium_types::SdkMsg;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use crate::capabilities::{CapabilityManager, CapabilityType, CapabilityError};
+use crate::capabilities::{CapabilityError, CapabilityManager, CapabilityType};
 use crate::vfs::{Capability, VfsError, VirtualFilesystem};
 use crate::wasi_host::{ModuleState, WasiHost, WasiHostError};
 
@@ -62,7 +62,7 @@ pub enum RouterError {
     /// Invalid module configuration
     #[error("invalid module configuration: {0}")]
     InvalidConfig(String),
-    
+
     /// Capability error
     #[error("capability error: {0}")]
     CapabilityError(#[from] CapabilityError),
@@ -326,22 +326,25 @@ impl ModuleRouter {
                 .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
             deps.insert(config.name.clone(), config.dependencies.clone());
         }
-        
+
         // Grant default capabilities to the module
-        self.capability_manager.grant_default_capabilities(&config.name)?;
-        
+        self.capability_manager
+            .grant_default_capabilities(&config.name)?;
+
         // Grant requested capabilities
         for cap_str in &config.capabilities {
             let capability = CapabilityType::from_string(cap_str)?;
-            self.capability_manager.grant_capability(&config.name, capability, "system", false)?;
+            self.capability_manager
+                .grant_capability(&config.name, capability, "system", false)?;
         }
-        
+
         // Grant message handling capabilities
         for message_type in &config.message_types {
             let capability = CapabilityType::ReceiveMessage(message_type.clone());
-            self.capability_manager.grant_capability(&config.name, capability, "system", false)?;
+            self.capability_manager
+                .grant_capability(&config.name, capability, "system", false)?;
         }
-        
+
         // Store configuration
         let module_name = config.name.clone();
         {
@@ -389,11 +392,12 @@ impl ModuleRouter {
         context: ExecutionContext,
     ) -> Result<ExecutionResult> {
         debug!("Executing message in module: {}", module_name);
-        
+
         // Check module has capability to receive this message type
         let receive_cap = CapabilityType::ReceiveMessage(context.message_type.clone());
-        self.capability_manager.require_capability(module_name, &receive_cap)?;
-        
+        self.capability_manager
+            .require_capability(module_name, &receive_cap)?;
+
         // Check module state
         let module_state = self.wasi_host.get_module_state(module_name)?;
         if !matches!(module_state, ModuleState::Initialized) {
@@ -453,13 +457,14 @@ impl ModuleRouter {
                 })?
                 .clone()
         };
-        
+
         // Verify module has all required capabilities
         for capability_name in &config.capabilities {
             let capability = CapabilityType::from_string(capability_name)?;
-            self.capability_manager.require_capability(module_name, &capability)?;
+            self.capability_manager
+                .require_capability(module_name, &capability)?;
         }
-        
+
         // Set up VFS capabilities for this module based on granted capabilities
         let granted_caps = self.capability_manager.list_capabilities(module_name)?;
         for cap in granted_caps {
@@ -479,7 +484,7 @@ impl ModuleRouter {
                 _ => {} // Other capabilities don't map to VFS
             }
         }
-        
+
         // TODO: Configure gas and memory limits based on capabilities
         // TODO: Set up IPC endpoints based on capabilities
         // TODO: Set up module-specific state isolation
@@ -743,11 +748,12 @@ impl ModuleRouter {
             "Sending IPC message from {} to {}",
             message.from_module, message.to_module
         );
-        
+
         // Check if sender has capability to execute the target module
         let execute_cap = CapabilityType::ExecuteModule(message.to_module.clone());
-        self.capability_manager.require_capability(&message.from_module, &execute_cap)?;
-        
+        self.capability_manager
+            .require_capability(&message.from_module, &execute_cap)?;
+
         let mut queue = self
             .ipc_queue
             .lock()
@@ -784,7 +790,7 @@ impl ModuleRouter {
     pub fn is_initialized(&self) -> bool {
         self.initialized.lock().map(|i| *i).unwrap_or(false)
     }
-    
+
     /// Get a reference to the capability manager
     pub fn capability_manager(&self) -> &Arc<CapabilityManager> {
         &self.capability_manager
@@ -901,27 +907,44 @@ mod tests {
     #[test]
     fn test_capability_granting() {
         let (router, temp_dir) = setup_test_router();
-        
+
         // Create a dummy WASM file
         let wasm_path = temp_dir.path().join("test_module.wasm");
         std::fs::write(&wasm_path, b"dummy wasm content").unwrap();
-        
+
         let config = ModuleConfig::new("test_module".to_string(), wasm_path)
             .handles_message_type("/test.Message".to_string())
             .requires_capability("read_state:auth".to_string())
             .requires_capability("write_state:bank".to_string());
-        
+
         // Register module - this should grant the capabilities
         assert!(router.register_module(config).is_ok());
-        
+
         // Check that capabilities were granted
         let cap_manager = router.capability_manager();
-        assert!(cap_manager.has_capability("test_module", &CapabilityType::ReadState("auth".to_string())).unwrap());
-        assert!(cap_manager.has_capability("test_module", &CapabilityType::WriteState("bank".to_string())).unwrap());
-        assert!(cap_manager.has_capability("test_module", &CapabilityType::ReceiveMessage("/test.Message".to_string())).unwrap());
-        
+        assert!(cap_manager
+            .has_capability(
+                "test_module",
+                &CapabilityType::ReadState("auth".to_string())
+            )
+            .unwrap());
+        assert!(cap_manager
+            .has_capability(
+                "test_module",
+                &CapabilityType::WriteState("bank".to_string())
+            )
+            .unwrap());
+        assert!(cap_manager
+            .has_capability(
+                "test_module",
+                &CapabilityType::ReceiveMessage("/test.Message".to_string())
+            )
+            .unwrap());
+
         // Check default capabilities were granted
-        assert!(cap_manager.has_capability("test_module", &CapabilityType::SystemInfo).unwrap());
+        assert!(cap_manager
+            .has_capability("test_module", &CapabilityType::SystemInfo)
+            .unwrap());
     }
 
     #[test]
@@ -942,40 +965,43 @@ mod tests {
     #[test]
     fn test_ipc_message_queuing() {
         let (router, temp_dir) = setup_test_router();
-        
+
         // Create dummy WASM files
         let module_a_path = temp_dir.path().join("module_a.wasm");
         let module_b_path = temp_dir.path().join("module_b.wasm");
         std::fs::write(&module_a_path, b"dummy wasm a").unwrap();
         std::fs::write(&module_b_path, b"dummy wasm b").unwrap();
-        
+
         // Register modules
         let config_a = ModuleConfig::new("module_a".to_string(), module_a_path)
             .handles_message_type("/test.ModuleA".to_string());
         let config_b = ModuleConfig::new("module_b".to_string(), module_b_path)
             .handles_message_type("/test.ModuleB".to_string());
-            
+
         router.register_module(config_a).unwrap();
         router.register_module(config_b).unwrap();
-        
+
         // Grant module_a capability to execute module_b
-        router.capability_manager().grant_capability(
-            "module_a",
-            CapabilityType::ExecuteModule("module_b".to_string()),
-            "system",
-            false
-        ).unwrap();
-        
+        router
+            .capability_manager()
+            .grant_capability(
+                "module_a",
+                CapabilityType::ExecuteModule("module_b".to_string()),
+                "system",
+                false,
+            )
+            .unwrap();
+
         let ipc_msg = IpcMessage {
             from_module: "module_a".to_string(),
             to_module: "module_b".to_string(),
             endpoint: "transfer".to_string(),
             payload: vec![1, 2, 3, 4],
         };
-        
+
         // Now IPC should work with proper capability
         assert!(router.send_ipc_message(ipc_msg).is_ok());
-        
+
         // Try without capability - should fail
         let ipc_msg2 = IpcMessage {
             from_module: "module_b".to_string(),
@@ -983,7 +1009,7 @@ mod tests {
             endpoint: "transfer".to_string(),
             payload: vec![1, 2, 3, 4],
         };
-        
+
         assert!(router.send_ipc_message(ipc_msg2).is_err());
     }
 }

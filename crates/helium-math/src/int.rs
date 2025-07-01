@@ -93,10 +93,6 @@ impl Int {
         Self(self.0.abs())
     }
 
-    /// Convert to string
-    pub fn to_string(&self) -> String {
-        self.0.to_string()
-    }
 }
 
 impl FromStr for Int {
