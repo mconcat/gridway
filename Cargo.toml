@@ -13,6 +13,9 @@ members = [
     "crates/helium-client",
     "crates/helium-simapp",
     "crates/wasi-modules/ante-handler",
+    "crates/wasi-modules/begin-blocker",
+    "crates/wasi-modules/end-blocker",
+    "crates/wasi-modules/tx-decoder",
 ]
 
 [workspace.package]
