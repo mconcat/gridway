@@ -99,7 +99,7 @@ impl TransactionVerifier {
 
     /// Add expected signer data for verification
     pub fn add_signer(&mut self, signer: SignerData) {
-        self.signer_data.insert(signer.address.clone(), signer);
+        self.signer_data.insert(signer.address, signer);
     }
 
     /// Verify a transaction's signatures

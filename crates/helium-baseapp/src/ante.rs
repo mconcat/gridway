@@ -5,7 +5,7 @@
 //! the ante handler as a WASM module following the microkernel architecture.
 
 use crate::wasi_host::WasiHost;
-use helium_types::{AccAddress, RawTx, SdkError};
+use helium_types::{RawTx, SdkError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;

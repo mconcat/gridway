@@ -8,7 +8,7 @@
 //! different namespaces: `/state/auth/`, `/state/bank/`, etc.
 
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;

@@ -189,9 +189,8 @@ impl WasiBeginBlockHandler {
                 {
                     missed_validators.push(hex::encode(&validator_addr));
                     log::warn!(
-                        "Validator {} missed {} blocks in window of {}",
+                        "Validator {} missed {missed_count} blocks in window of {}",
                         hex::encode(&validator_addr),
-                        missed_count,
                         self.slash_window
                     );
                 }
@@ -335,10 +334,7 @@ impl WasiBeginBlockHandler {
         // In a real implementation, we would track block heights
         // and clean up records older than slash_window
         if current_height % 1000 == 0 {
-            log::info!(
-                "Cleaning up old missed block records at height {}",
-                current_height
-            );
+            log::info!("Cleaning up old missed block records at height {current_height}");
             // Simplified: just clear if too many entries
             if self.missed_blocks.len() > 1000 {
                 self.missed_blocks.clear();
@@ -359,7 +355,7 @@ pub extern "C" fn begin_block() -> i32 {
     // Read input from stdin (begin block request)
     let mut input = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut input) {
-        log::error!("Failed to read input: {}", e);
+        log::error!("Failed to read input: {e}");
         return 1;
     }
 
@@ -367,7 +363,7 @@ pub extern "C" fn begin_block() -> i32 {
     let request: BeginBlockRequest = match serde_json::from_str(&input) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("Failed to parse input JSON: {}", e);
+            log::error!("Failed to parse input JSON: {e}");
             return 1;
         }
     };
@@ -382,12 +378,12 @@ pub extern "C" fn begin_block() -> i32 {
     match serde_json::to_string(&response) {
         Ok(output) => {
             if let Err(e) = io::stdout().write_all(output.as_bytes()) {
-                log::error!("Failed to write output: {}", e);
+                log::error!("Failed to write output: {e}");
                 return 1;
             }
         }
         Err(e) => {
-            log::error!("Failed to serialize response: {}", e);
+            log::error!("Failed to serialize response: {e}");
             return 1;
         }
     }

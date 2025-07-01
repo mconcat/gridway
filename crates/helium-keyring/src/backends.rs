@@ -102,7 +102,7 @@ impl Keyring for MemoryKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
 
         self.keys.insert(name.to_string(), stored_key);
@@ -126,7 +126,7 @@ impl Keyring for MemoryKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
 
         self.keys.insert(name.to_string(), stored_key);
@@ -145,7 +145,7 @@ impl Keyring for MemoryKeyring {
             .map(|(name, key)| KeyInfo {
                 name: name.clone(),
                 pubkey: key.pubkey.clone(),
-                address: key.address.clone(),
+                address: key.address,
             })
             .collect())
     }
@@ -159,7 +159,7 @@ impl Keyring for MemoryKeyring {
         Ok(KeyInfo {
             name: name.to_string(),
             pubkey: key.pubkey.clone(),
-            address: key.address.clone(),
+            address: key.address,
         })
     }
 
@@ -222,7 +222,7 @@ impl Keyring for MemoryKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
 
         self.keys.insert(name.to_string(), stored_key);
@@ -612,7 +612,7 @@ impl Keyring for OsKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
 
         // Store in OS secure storage
@@ -649,7 +649,7 @@ impl Keyring for OsKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
 
         // Store in OS secure storage
@@ -695,7 +695,7 @@ impl Keyring for OsKeyring {
             return Ok(KeyInfo {
                 name: name.to_string(),
                 pubkey: key.pubkey.clone(),
-                address: key.address.clone(),
+                address: key.address,
             });
         }
 
@@ -784,7 +784,7 @@ impl Keyring for OsKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
 
         // Store in OS secure storage

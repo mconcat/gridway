@@ -2,7 +2,7 @@
 
 use helium_baseapp::BaseApp;
 use helium_server::grpc::services::*;
-use helium_store::{GlobalAppStore, JMTStore, StateManager};
+use helium_store::StateManager;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -13,13 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // Create state manager and baseapp
-    let jmt_store = JMTStore::new("example_store".to_string(), "/tmp/helium_grpc_example")?;
-    let global_store = GlobalAppStore::new(jmt_store);
-    global_store.register_namespace("bank", false)?;
-    global_store.register_namespace("auth", false)?;
-    global_store.register_namespace("tx", false)?;
-
-    let state_manager = StateManager::new();
+    let state_manager = StateManager::new_with_memstore();
     let _state_manager = Arc::new(RwLock::new(state_manager));
     let base_app = Arc::new(RwLock::new(BaseApp::new("example-app".to_string())?));
 

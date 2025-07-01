@@ -193,7 +193,10 @@ impl WasiEndBlockHandler {
 
             // Validate update
             if update.power < 0 {
-                log::warn!("Invalid negative power {} for validator", update.power);
+                log::warn!(
+                    "Invalid negative power {power} for validator",
+                    power = update.power
+                );
                 continue;
             }
 

@@ -202,7 +202,7 @@ pub struct ModeInfoProto {
 }
 
 /// Nested module for mode info variants
-mod mode_info_proto {
+pub mod mode_info_proto {
     use super::*;
 
     #[derive(Clone, PartialEq, prost::Oneof)]
@@ -223,7 +223,7 @@ pub struct ModeInfoSingleProto {
 
 /// Protobuf representation of multi mode info
 #[derive(Clone, PartialEq, Message)]
-pub(crate) struct ModeInfoMultiProto {
+pub struct ModeInfoMultiProto {
     #[prost(message, optional, tag = "1")]
     pub bitarray: Option<CompactBitArrayProto>,
     #[prost(message, repeated, tag = "2")]
@@ -232,7 +232,7 @@ pub(crate) struct ModeInfoMultiProto {
 
 /// Protobuf representation of compact bit array
 #[derive(Clone, PartialEq, Message)]
-pub(crate) struct CompactBitArrayProto {
+pub struct CompactBitArrayProto {
     #[prost(uint32, tag = "1")]
     pub extra_bits_stored: u32,
     #[prost(bytes = "vec", tag = "2")]

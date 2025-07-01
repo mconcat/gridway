@@ -342,7 +342,7 @@ pub async fn run_cli() -> Result<()> {
             };
 
             let mut simulator = Simulator::new(sim_config);
-            let stats = simulator.run().await?;
+            let _stats = simulator.run().await?;
             if let Some(output_path) = output {
                 simulator.export_results(&output_path)?;
                 info!(path = %output_path, "Results exported");

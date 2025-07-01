@@ -13,8 +13,7 @@ pub mod vfs;
 pub mod wasi_host;
 
 use helium_store::{KVStore, MemStore};
-use helium_types::{tx::TxDecodeError, SdkMsg};
-use serde_json::Value;
+use helium_types::SdkMsg;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -22,7 +21,7 @@ use thiserror::Error;
 // Import microkernel components
 use crate::capabilities::CapabilityManager;
 use crate::module_governance::ModuleGovernance;
-use crate::module_router::{ExecutionContext, ExecutionResult, ModuleRouter};
+use crate::module_router::{ExecutionContext, ModuleRouter};
 use crate::vfs::VirtualFilesystem;
 use crate::wasi_host::WasiHost;
 
