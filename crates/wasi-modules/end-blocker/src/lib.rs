@@ -430,7 +430,7 @@ pub extern "C" fn end_block() -> i32 {
     // Read input from stdin
     let mut input = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut input) {
-        log::error!("Failed to read input: {}", e);
+        log::error!("Failed to read input: {e}");
         return 1;
     }
 
@@ -438,7 +438,7 @@ pub extern "C" fn end_block() -> i32 {
     let (request, state): (EndBlockRequest, ModuleState) = match serde_json::from_str(&input) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("Failed to parse input JSON: {}", e);
+            log::error!("Failed to parse input JSON: {e}");
             return 1;
         }
     };
@@ -450,12 +450,12 @@ pub extern "C" fn end_block() -> i32 {
     match serde_json::to_string(&response) {
         Ok(output) => {
             if let Err(e) = io::stdout().write_all(output.as_bytes()) {
-                log::error!("Failed to write output: {}", e);
+                log::error!("Failed to write output: {e}");
                 return 1;
             }
         }
         Err(e) => {
-            log::error!("Failed to serialize response: {}", e);
+            log::error!("Failed to serialize response: {e}");
             return 1;
         }
     }
@@ -464,6 +464,7 @@ pub extern "C" fn end_block() -> i32 {
 }
 
 /// Alternative entry point for testing
+#[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn _start() {
     std::process::exit(end_block());

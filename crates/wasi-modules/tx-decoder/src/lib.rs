@@ -493,6 +493,7 @@ pub extern "C" fn decode_tx() -> i32 {
 }
 
 /// Alternative entry point for testing
+#[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn _start() {
     std::process::exit(decode_tx());

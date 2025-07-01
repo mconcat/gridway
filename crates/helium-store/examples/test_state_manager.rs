@@ -2,7 +2,7 @@ use helium_store::{KVStore, MemStore, StateManager};
 
 fn main() {
     // Create state manager and mount store
-    let mut state_manager = StateManager::new();
+    let mut state_manager = StateManager::new_with_memstore();
     state_manager.mount_store("bank".to_string(), Box::new(MemStore::new()));
 
     // First, set data through get_store_mut

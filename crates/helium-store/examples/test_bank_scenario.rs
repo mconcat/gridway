@@ -4,7 +4,7 @@ fn main() {
     println!("Testing bank service scenario with StateManager...\n");
 
     // Create state manager and mount bank store
-    let mut state_manager = StateManager::new();
+    let mut state_manager = StateManager::new_with_memstore();
     state_manager.mount_store("bank".to_string(), Box::new(MemStore::new()));
 
     // Simulate bank service setting balances
