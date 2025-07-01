@@ -350,11 +350,7 @@ impl TxDecoder {
     }
 
     /// Register a message type decoder
-    pub fn register_message_type<T>(
-        &mut self,
-        type_url: &str,
-        decoder: MessageDecoder,
-    ) {
+    pub fn register_message_type<T>(&mut self, type_url: &str, decoder: MessageDecoder) {
         self.message_registry.insert(type_url.to_string(), decoder);
     }
 
