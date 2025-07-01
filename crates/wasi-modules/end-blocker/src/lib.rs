@@ -5,7 +5,6 @@
 //! validator set updates, reward distribution triggers, and governance tallying.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use thiserror::Error;
 

@@ -392,11 +392,11 @@ impl WasiAnteHandler {
         let message_hash = Sha256::digest(message);
 
         let verifying_key = VerifyingKey::from_sec1_bytes(public_key).map_err(|e| {
-            AnteError::InvalidSignature(format!("invalid secp256k1 public key: {}", e))
+            AnteError::InvalidSignature(format!("invalid secp256k1 public key: {e}"))
         })?;
 
         let signature = Signature::from_bytes(signature.into()).map_err(|e| {
-            AnteError::InvalidSignature(format!("invalid secp256k1 signature: {}", e))
+            AnteError::InvalidSignature(format!("invalid secp256k1 signature: {e}"))
         })?;
 
         verifying_key
@@ -419,7 +419,7 @@ impl WasiAnteHandler {
         let verifying_key = VerifyingKey::from_bytes(public_key.try_into().map_err(|_| {
             AnteError::InvalidSignature("invalid ed25519 public key length".to_string())
         })?)
-        .map_err(|e| AnteError::InvalidSignature(format!("invalid ed25519 public key: {}", e)))?;
+        .map_err(|e| AnteError::InvalidSignature(format!("invalid ed25519 public key: {e}")))?;
 
         let signature = Signature::from_bytes(signature.try_into().map_err(|_| {
             AnteError::InvalidSignature("invalid ed25519 signature length".to_string())
@@ -481,7 +481,7 @@ pub extern "C" fn ante_handle() -> i32 {
     // Read input from stdin (transaction context and data)
     let mut input = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut input) {
-        log::error!("Failed to read input: {}", e);
+        log::error!("Failed to read input: {e}");
         return 1;
     }
 
@@ -489,7 +489,7 @@ pub extern "C" fn ante_handle() -> i32 {
     let (ctx, tx): (TxContext, Transaction) = match serde_json::from_str(&input) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("Failed to parse input JSON: {}", e);
+            log::error!("Failed to parse input JSON: {e}");
             return 1;
         }
     };
@@ -501,12 +501,12 @@ pub extern "C" fn ante_handle() -> i32 {
     match serde_json::to_string(&response) {
         Ok(output) => {
             if let Err(e) = io::stdout().write_all(output.as_bytes()) {
-                log::error!("Failed to write output: {}", e);
+                log::error!("Failed to write output: {e}");
                 return 1;
             }
         }
         Err(e) => {
-            log::error!("Failed to serialize response: {}", e);
+            log::error!("Failed to serialize response: {e}");
             return 1;
         }
     }
