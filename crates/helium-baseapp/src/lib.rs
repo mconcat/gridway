@@ -11,6 +11,7 @@ pub mod vfs;
 pub mod module_router;
 pub mod capabilities;
 pub mod module_governance;
+pub mod module_loader;
 
 use thiserror::Error;
 use std::sync::Arc;
