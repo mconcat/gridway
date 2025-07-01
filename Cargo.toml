@@ -103,8 +103,8 @@ helium-client = { workspace = true }
 helium-simapp = { workspace = true }
 
 # ABCI interface
-cometbft = "0.4"
-cometbft-proto = "0.4"
+cometbft = "0.1.0-alpha.2"
+cometbft-proto = "0.1.0-alpha.2"
 
 # External dependencies from workspace
 serde = { workspace = true }

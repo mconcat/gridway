@@ -28,7 +28,7 @@ jobs:
     - name: Install CometBFT
       run: |
         # Install CometBFT for ABCI testing
-        COMETBFT_VERSION="2.0.0-rc1"
+        COMETBFT_VERSION="1.0.1"
         wget https://github.com/cometbft/cometbft/releases/download/v${COMETBFT_VERSION}/cometbft_${COMETBFT_VERSION}_linux_amd64.tar.gz
         tar -xzf cometbft_${COMETBFT_VERSION}_linux_amd64.tar.gz
         sudo mv cometbft /usr/local/bin/
