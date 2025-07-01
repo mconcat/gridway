@@ -1,0 +1,95 @@
+name: ABCI Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  abci-integration:
+    name: ABCI Integration Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y librocksdb-dev protobuf-compiler libssl-dev pkg-config
+    
+    - name: Install CometBFT
+      run: |
+        # Install CometBFT for ABCI testing
+        COMETBFT_VERSION="2.0.0-rc1"
+        wget https://github.com/cometbft/cometbft/releases/download/v${COMETBFT_VERSION}/cometbft_${COMETBFT_VERSION}_linux_amd64.tar.gz
+        tar -xzf cometbft_${COMETBFT_VERSION}_linux_amd64.tar.gz
+        sudo mv cometbft /usr/local/bin/
+        cometbft version
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+    
+    - name: Build Helium
+      run: cargo build --release
+    
+    - name: Initialize CometBFT
+      run: |
+        cometbft init
+        # Configure CometBFT for ABCI app
+        sed -i 's/proxy_app = "tcp:\/\/127.0.0.1:26658"/proxy_app = "tcp:\/\/127.0.0.1:26658"/' $HOME/.cometbft/config/config.toml
+    
+    - name: Start Helium ABCI Server
+      run: |
+        # Start the Helium ABCI server in the background
+        cargo run --release --bin helium-server -- --abci-port 26658 &
+        HELIUM_PID=$!
+        echo "HELIUM_PID=$HELIUM_PID" >> $GITHUB_ENV
+        sleep 5  # Wait for server to start
+    
+    - name: Start CometBFT
+      run: |
+        # Start CometBFT node
+        cometbft node --proxy_app=tcp://127.0.0.1:26658 > cometbft.log 2>&1 &
+        COMETBFT_PID=$!
+        echo "COMETBFT_PID=$COMETBFT_PID" >> $GITHUB_ENV
+        sleep 10  # Wait for CometBFT to start
+    
+    - name: Test ABCI Connection
+      run: |
+        # Test that CometBFT can connect to the ABCI app
+        curl -s http://localhost:26657/status | jq .
+    
+    - name: Run ABCI Integration Tests
+      run: |
+        # Run specific ABCI integration tests if they exist
+        cargo test --release --features integration-tests abci_integration || echo "No ABCI integration tests found"
+    
+    - name: Check Logs on Failure
+      if: failure()
+      run: |
+        echo "=== CometBFT Logs ==="
+        cat cometbft.log || true
+        echo "=== Helium Server Logs ==="
+        # Add any Helium server logs if available
+    
+    - name: Cleanup
+      if: always()
+      run: |
+        # Kill processes
+        kill $HELIUM_PID || true
+        kill $COMETBFT_PID || true

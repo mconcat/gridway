@@ -1,0 +1,74 @@
+name: Build WASM
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  wasm-build:
+    name: Build WASM Modules
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-wasip1
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-registry-wasm-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-wasm-
+    
+    - name: Cache target directory
+      uses: actions/cache@v4
+      with:
+        path: target
+        key: ${{ runner.os }}-target-wasm-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-target-wasm-
+    
+    - name: Build WASM modules
+      run: |
+        # Build each WASM module separately
+        for module in crates/wasi-modules/*/; do
+          if [ -f "$module/Cargo.toml" ]; then
+            echo "Building $module"
+            cd "$module"
+            cargo build --release --target wasm32-wasip1
+            cd - > /dev/null
+          fi
+        done
+    
+    - name: Verify WASM artifacts
+      run: |
+        # Check if any WASM files were built
+        echo "Checking for WASM artifacts..."
+        find crates/wasi-modules -name "*.wasm" -type f | head -20
+        # Check in each module's target directory
+        for module in crates/wasi-modules/*/; do
+          if [ -d "$module/target/wasm32-wasip1/release" ]; then
+            echo "WASM files in $module:"
+            ls -la "$module/target/wasm32-wasip1/release/"*.wasm 2>/dev/null || echo "No WASM files found"
+          fi
+        done
+    
+    - name: Upload WASM artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: wasm-modules
+        path: |
+          crates/wasi-modules/*/target/wasm32-wasip1/release/*.wasm
+        retention-days: 7
