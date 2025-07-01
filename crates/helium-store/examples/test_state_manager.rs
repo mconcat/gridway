@@ -1,15 +1,21 @@
-use helium_store::{KVStore, MemStore, StateManager};
+use helium_store::{KVStore, MemStore, StateManager, GlobalAppStore, JMTStore};
+use std::sync::{Arc, Mutex};
+use tempfile::tempdir;
 
 fn main() {
     // Create state manager and mount store
-    let mut state_manager = StateManager::new();
+    // Create a JMT store first
+    let temp_dir = tempdir().unwrap();
+    let jmt = JMTStore::new("test".to_string(), temp_dir.path()).unwrap();
+    let global_store = GlobalAppStore::new(jmt);
+    let mut state_manager = StateManager::new(global_store);
     state_manager.mount_store("bank".to_string(), Box::new(MemStore::new()));
     
     // First, set data through get_store_mut
     {
         let store = state_manager.get_store_mut("bank").unwrap();
-        store.set(b"balance_cosmos1test_stake".to_vec(), b"1000".to_vec()).unwrap();
-        store.set(b"balance_cosmos1test_atom".to_vec(), b"500".to_vec()).unwrap();
+        store.set(b"balance_cosmos1test_stake", b"1000").unwrap();
+        store.set(b"balance_cosmos1test_atom", b"500").unwrap();
     }
     
     println!("Initial data set directly on store");
@@ -40,7 +46,7 @@ fn main() {
         }
         
         // Add more data
-        store.set(b"balance_cosmos1other_stake".to_vec(), b"2000".to_vec()).unwrap();
+        store.set(b"balance_cosmos1other_stake", b"2000").unwrap();
     }
     
     // Now try to read again (store is in cache now)

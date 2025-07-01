@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
+use helium_store::StorageConfig;
 
 /// Configuration errors
 #[derive(Error, Debug)]
@@ -36,6 +37,7 @@ pub struct Config {
     pub genesis: GenesisConfig,
     pub simulation: SimulationConfig,
     pub app: AppConfig,
+    pub storage: StorageConfig,
 }
 
 /// Chain-related configuration
@@ -215,6 +217,7 @@ impl Default for Config {
             app: AppConfig {
                 version: "0.1.0".to_string(),
             },
+            storage: StorageConfig::default(),
         }
     }
 }
@@ -429,6 +432,7 @@ mod tests {
         
         assert_eq!(config.chain.id, parsed_config.chain.id);
         assert_eq!(config.gas.default_limit, parsed_config.gas.default_limit);
+        assert_eq!(config.storage.cache_size, parsed_config.storage.cache_size);
     }
 
     #[test]

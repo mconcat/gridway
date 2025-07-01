@@ -1,20 +1,26 @@
-use helium_store::{KVStore, MemStore, StateManager};
+use helium_store::{KVStore, MemStore, StateManager, GlobalAppStore, JMTStore};
+use std::sync::{Arc, Mutex};
+use tempfile::tempdir;
 
 fn main() {
     println!("Testing bank service scenario with StateManager...\n");
     
     // Create state manager and mount bank store
-    let mut state_manager = StateManager::new();
+    // Create a JMT store first
+    let temp_dir = tempdir().unwrap();
+    let jmt = JMTStore::new("test".to_string(), temp_dir.path()).unwrap();
+    let global_store = GlobalAppStore::new(jmt);
+    let mut state_manager = StateManager::new(global_store);
     state_manager.mount_store("bank".to_string(), Box::new(MemStore::new()));
     
     // Simulate bank service setting balances
     println!("1. Setting initial balances...");
     {
         let store = state_manager.get_store_mut("bank").unwrap();
-        store.set(b"balance_cosmos1test_stake".to_vec(), b"1000".to_vec()).unwrap();
-        store.set(b"balance_cosmos1test_atom".to_vec(), b"500".to_vec()).unwrap();
-        store.set(b"balance_cosmos1other_stake".to_vec(), b"2000".to_vec()).unwrap();
-        store.set(b"balance_cosmos1other_atom".to_vec(), b"750".to_vec()).unwrap();
+        store.set(b"balance_cosmos1test_stake", b"1000").unwrap();
+        store.set(b"balance_cosmos1test_atom", b"500").unwrap();
+        store.set(b"balance_cosmos1other_stake", b"2000").unwrap();
+        store.set(b"balance_cosmos1other_atom", b"750").unwrap();
     }
     
     // Commit the changes
@@ -55,8 +61,8 @@ fn main() {
         let new_test_stake = test_stake - 100;
         let new_other_stake = other_stake + 100;
         
-        store.set(b"balance_cosmos1test_stake".to_vec(), new_test_stake.to_string().into_bytes()).unwrap();
-        store.set(b"balance_cosmos1other_stake".to_vec(), new_other_stake.to_string().into_bytes()).unwrap();
+        store.set(b"balance_cosmos1test_stake", &new_test_stake.to_string().into_bytes()).unwrap();
+        store.set(b"balance_cosmos1other_stake", &new_other_stake.to_string().into_bytes()).unwrap();
         
         println!("   New balances: test={}, other={}", new_test_stake, new_other_stake);
     }

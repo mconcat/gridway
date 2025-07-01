@@ -249,8 +249,8 @@ impl KVStore for JMTStore {
         self.get_from_storage(key)
     }
 
-    fn set(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
-        self.stage_change(key, Some(value));
+    fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
+        self.stage_change(key.to_vec(), Some(value.to_vec()));
         Ok(())
     }
 
@@ -259,7 +259,7 @@ impl KVStore for JMTStore {
         Ok(())
     }
 
-    fn prefix_iterator(&self, prefix: &[u8]) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>> {
+    fn prefix_iterator(&self, prefix: &[u8]) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + '_> {
         let mut items = Vec::new();
 
         // Add pending items with prefix
@@ -372,7 +372,7 @@ mod tests {
         let mut store = temp_store("test");
 
         // Test set and get
-        assert!(store.set(b"key1".to_vec(), b"value1".to_vec()).is_ok());
+        assert!(store.set(b"key1", b"value1").is_ok());
 
         // Should be available in pending
         assert_eq!(store.get(b"key1").unwrap().unwrap(), b"value1");
@@ -391,7 +391,7 @@ mod tests {
         let mut store = temp_store("test");
 
         // Set a value and commit
-        store.set(b"key1".to_vec(), b"value1".to_vec()).unwrap();
+        store.set(b"key1", b"value1").unwrap();
         store.commit().unwrap();
         assert!(store.get(b"key1").unwrap().is_some());
 
@@ -431,7 +431,7 @@ mod tests {
         let mut store = temp_store("test");
 
         // Set some data and commit
-        store.set(b"key1".to_vec(), b"value1".to_vec()).unwrap();
+        store.set(b"key1", b"value1").unwrap();
         store.commit().unwrap();
 
         // Get with proof
@@ -459,7 +459,7 @@ mod tests {
         {
             let mut store = JMTStore::new("test".to_string(), db_path).unwrap();
             store
-                .set(b"persistent_key".to_vec(), b"persistent_value".to_vec())
+                .set(b"persistent_key", b"persistent_value")
                 .unwrap();
             store.commit().unwrap();
         }
@@ -487,7 +487,7 @@ mod tests {
         // Add data and create version
         versioned_store
             .store_mut()
-            .set(b"key1".to_vec(), b"value1".to_vec())
+            .set(b"key1", b"value1")
             .unwrap();
         let version1 = versioned_store.new_version().unwrap();
         assert_eq!(version1, 1);
@@ -501,7 +501,7 @@ mod tests {
         // Add more data and create another version
         versioned_store
             .store_mut()
-            .set(b"key2".to_vec(), b"value2".to_vec())
+            .set(b"key2", b"value2")
             .unwrap();
         let version2 = versioned_store.new_version().unwrap();
         assert_eq!(version2, 2);
@@ -523,13 +523,13 @@ mod tests {
 
         // Set some data with common prefix
         store
-            .set(b"prefix_key1".to_vec(), b"value1".to_vec())
+            .set(b"prefix_key1", b"value1")
             .unwrap();
         store
-            .set(b"prefix_key2".to_vec(), b"value2".to_vec())
+            .set(b"prefix_key2", b"value2")
             .unwrap();
         store
-            .set(b"other_key".to_vec(), b"value3".to_vec())
+            .set(b"other_key", b"value3")
             .unwrap();
         store.commit().unwrap();
 
@@ -551,12 +551,12 @@ mod tests {
         assert_eq!(v0_hash, [0u8; 32]);
 
         // Commit some data
-        store.set(b"key1".to_vec(), b"value1".to_vec()).unwrap();
+        store.set(b"key1", b"value1").unwrap();
         store.commit().unwrap();
         let v1_hash = store.get_root_hash(1).unwrap();
 
         // Add more data
-        store.set(b"key2".to_vec(), b"value2".to_vec()).unwrap();
+        store.set(b"key2", b"value2").unwrap();
         store.commit().unwrap();
         let v2_hash = store.get_root_hash(2).unwrap();
 
