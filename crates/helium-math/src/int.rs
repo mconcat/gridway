@@ -92,7 +92,6 @@ impl Int {
     pub fn abs(&self) -> Self {
         Self(self.0.abs())
     }
-
 }
 
 impl FromStr for Int {
