@@ -106,4 +106,3 @@ jobs:
               body: `👋 Hey @${pr.user.login}! Please add a more detailed description to your PR (at least ${minLength} characters). This helps reviewers understand your changes better.`
             });
           }
-    
