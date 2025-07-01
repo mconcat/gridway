@@ -4,10 +4,10 @@
 //! dynamically loaded by the BaseApp. It handles protobuf decoding of Cosmos SDK
 //! transactions, supporting various message types and encoding formats.
 
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 use thiserror::Error;
-use base64::{engine::general_purpose::STANDARD, Engine};
 
 /// Error types for transaction decoder operations
 #[derive(Error, Debug, Serialize, Deserialize)]
@@ -267,7 +267,8 @@ impl WasiTxDecoder {
         // Decode input based on encoding
         let raw_bytes = match req.encoding.as_str() {
             "raw" => req.tx_bytes.as_bytes().to_vec(),
-            "base64" => STANDARD.decode(&req.tx_bytes)
+            "base64" => STANDARD
+                .decode(&req.tx_bytes)
                 .map_err(|e| TxDecodeError::InvalidFormat(format!("Invalid base64: {e}")))?,
             "hex" => hex::decode(&req.tx_bytes)
                 .map_err(|e| TxDecodeError::InvalidFormat(format!("Invalid hex: {e}")))?,
