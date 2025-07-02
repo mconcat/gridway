@@ -10,7 +10,7 @@ use std::fs::OpenOptions;
 use std::fs::Permissions;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -320,7 +320,7 @@ fn get_home_dir(home: Option<PathBuf>) -> Result<PathBuf> {
     .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))
 }
 
-fn create_directories(home_dir: &PathBuf) -> Result<()> {
+fn create_directories(home_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(home_dir)?;
     std::fs::create_dir_all(home_dir.join("config"))?;
     std::fs::create_dir_all(home_dir.join("data"))?;
@@ -328,7 +328,7 @@ fn create_directories(home_dir: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn init_config_files(home_dir: &PathBuf, chain_id: &str) -> Result<()> {
+fn init_config_files(home_dir: &Path, chain_id: &str) -> Result<()> {
     let app_config_path = home_dir.join("config").join("app.toml");
     let config_path = home_dir.join("config").join("config.toml");
 
@@ -391,7 +391,7 @@ persistent_peers = ""
     .to_string()
 }
 
-fn init_node_key(home_dir: &PathBuf) -> Result<()> {
+fn init_node_key(home_dir: &Path) -> Result<()> {
     let key_path = home_dir.join("config").join("node_key.json");
     if !key_path.exists() {
         // Generate actual node key using helium-crypto
@@ -435,7 +435,7 @@ fn init_node_key(home_dir: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn init_genesis_file(home_dir: &PathBuf, genesis_path: &PathBuf) -> Result<()> {
+fn init_genesis_file(home_dir: &Path, genesis_path: &Path) -> Result<()> {
     let dest_path = home_dir.join("config").join("genesis.json");
 
     // Validate genesis file
@@ -448,14 +448,14 @@ fn init_genesis_file(home_dir: &PathBuf, genesis_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn validate_genesis_file(path: &PathBuf) -> Result<()> {
+fn validate_genesis_file(path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(path)?;
     let _: serde_json::Value = serde_json::from_str(&content)?;
     // TODO: Add proper genesis validation using helium types
     Ok(())
 }
 
-fn export_genesis(home_dir: &PathBuf, output_path: &PathBuf) -> Result<()> {
+fn export_genesis(home_dir: &Path, output_path: &Path) -> Result<()> {
     let genesis_path = home_dir.join("config").join("genesis.json");
 
     // Check if genesis file exists
@@ -481,13 +481,13 @@ fn export_genesis(home_dir: &PathBuf, output_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn load_config(path: &PathBuf) -> Result<AppConfig> {
+fn load_config(path: &Path) -> Result<AppConfig> {
     let content = std::fs::read_to_string(path)?;
     let config: AppConfig = toml::from_str(&content)?;
     Ok(config)
 }
 
-fn init_storage(_home_dir: &PathBuf, _config: &AppConfig) -> Result<()> {
+fn init_storage(_home_dir: &Path, _config: &AppConfig) -> Result<()> {
     // TODO: Initialize storage backends using helium-store
     tracing::info!("Storage backends initialized");
     Ok(())
@@ -499,7 +499,7 @@ fn load_wasm_modules(_config: &AppConfig) -> Result<()> {
     Ok(())
 }
 
-async fn start_abci_server(_home_dir: &PathBuf, _config: &AppConfig) -> Result<()> {
+async fn start_abci_server(_home_dir: &Path, _config: &AppConfig) -> Result<()> {
     // TODO: Start ABCI server using helium-server
     tracing::info!("ABCI server started");
 
@@ -648,14 +648,14 @@ async fn get_keyring() -> Result<MemoryKeyring> {
 
 // Config functions
 
-fn show_config(home_dir: &PathBuf) -> Result<()> {
+fn show_config(home_dir: &Path) -> Result<()> {
     let app_config_path = home_dir.join("config").join("app.toml");
     let content = std::fs::read_to_string(app_config_path)?;
     println!("{content}");
     Ok(())
 }
 
-fn validate_config(path: &PathBuf) -> Result<()> {
+fn validate_config(path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(path)?;
     let _: AppConfig = toml::from_str(&content)?;
     Ok(())
