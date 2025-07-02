@@ -5,20 +5,17 @@
 //! the necessary ABCI++ methods including the new PrepareProposal and
 //! ProcessProposal for block proposal handling.
 
-use prost::Message;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tonic::{transport::Server, Request, Response, Status};
 // use prost_types::Any;
 
-use helium_baseapp::{Attribute, BaseApp, Event, QueryResponse, TxResponse};
-use helium_types::SdkError;
+use helium_baseapp::{BaseApp, Event};
 
 use crate::config::AbciConfig;
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// ABCI++ server errors
 #[derive(Error, Debug)]
@@ -94,6 +91,7 @@ pub struct AbciServer {
     /// Chain ID
     chain_id: String,
     /// Initial height
+    #[allow(dead_code)]
     initial_height: i64,
     /// Server configuration
     config: AbciConfig,
@@ -263,7 +261,7 @@ impl AbciService for AbciServer {
             .map_err(|e| Status::internal(format!("Failed to initialize chain: {}", e)))?;
 
         // Store initial height
-        let initial_height = if req.initial_height > 0 {
+        let _initial_height = if req.initial_height > 0 {
             req.initial_height
         } else {
             1
@@ -353,7 +351,7 @@ impl AbciService for AbciServer {
             index: 0,
             key: req.data,
             value: response.value,
-            proof_ops: response.proof.map(|p| {
+            proof_ops: response.proof.map(|_p| {
                 // TODO: Convert proof to ProofOps when merkle proofs are implemented
                 abci::ProofOps { ops: vec![] }
             }),
@@ -395,7 +393,7 @@ impl AbciService for AbciServer {
         debug!("ABCI Commit");
 
         let mut app = self.app.write().await;
-        let app_hash = app
+        let _app_hash = app
             .commit()
             .map_err(|e| Status::internal(format!("Commit failed: {}", e)))?;
 
@@ -511,7 +509,7 @@ impl AbciService for AbciServer {
 
         // Basic validation
         // TODO: Implement full proposal validation via WASI modules
-        let mut app = self.app.write().await;
+        let _app = self.app.write().await;
 
         // For now, accept all valid proposals
         let status = ProcessProposalStatus::AcceptProposal;
@@ -840,8 +838,8 @@ mod tests {
 
 /// Handle ABCI connection - placeholder for TCP connection handling
 async fn handle_abci_connection(
-    server: AbciServer,
-    mut stream: tokio::net::TcpStream,
+    _server: AbciServer,
+    _stream: tokio::net::TcpStream,
     peer_addr: std::net::SocketAddr,
 ) -> Result<()> {
     info!("New ABCI connection from {}", peer_addr);

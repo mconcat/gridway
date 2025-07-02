@@ -249,7 +249,7 @@ impl WasiHost {
 
         // Compile the module to validate it
         let module = Module::new(&self.engine, wasm_bytes)
-            .map_err(|e| WasiHostError::ModuleCompilation(e.into()))?;
+            .map_err(WasiHostError::ModuleCompilation)?;
 
         // Validate module exports
         self.validate_module_exports(&module)?;
@@ -391,7 +391,7 @@ impl WasiHost {
                 Err(e) => {
                     // Check if this is a trap
                     if let Some(trap) = e.downcast_ref::<wasmtime::Trap>() {
-                        let error = WasiHostError::WasmTrap(trap.clone());
+                        let error = WasiHostError::WasmTrap(*trap);
                         self.set_module_error(module_name, error.to_string()).ok();
                         return Err(error);
                     }
@@ -642,7 +642,7 @@ impl WasiHost {
 
         // Compile the module
         let module = Module::new(&self.engine, wasm_bytes)
-            .map_err(|e| WasiHostError::ModuleCompilation(e.into()))?;
+            .map_err(WasiHostError::ModuleCompilation)?;
 
         // For now, use a simplified approach with inherit_stdio
         // TODO: Implement proper I/O capture using MemoryPipe when API is stable

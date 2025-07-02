@@ -3,7 +3,7 @@
 use crate::{Client, ClientError, Result};
 use helium_crypto::verify::create_sign_bytes_direct;
 use helium_crypto::{
-    create_sign_doc, sign_message, verify_signature, PrivateKey, PublicKey, SignDoc, SignMode,
+    create_sign_doc, sign_message, verify_signature, PrivateKey, PublicKey, SignMode,
 };
 use helium_math::Coins;
 use helium_types::{
@@ -84,8 +84,8 @@ impl Clone for TxBuilder {
             sequence: self.sequence,
             gas_limit: self.gas_limit,
             fee_amount: self.fee_amount.clone(),
-            fee_payer: self.fee_payer.clone(),
-            fee_granter: self.fee_granter.clone(),
+            fee_payer: self.fee_payer,
+            fee_granter: self.fee_granter,
             memo: self.memo.clone(),
             timeout_height: self.timeout_height,
             // Note: We cannot clone trait objects, so we'll create an empty vec

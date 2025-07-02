@@ -580,8 +580,8 @@ mod tests {
 
     #[test]
     fn test_basic_validation() {
-        let mut handler = WasiAnteHandler::new();
-        let ctx = create_test_context();
+        let handler = WasiAnteHandler::new();
+        let _ctx = create_test_context();
         let tx = create_test_transaction();
 
         let result = handler.validate_basic_tx(&tx);

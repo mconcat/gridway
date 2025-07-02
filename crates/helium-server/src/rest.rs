@@ -673,6 +673,7 @@ async fn status_check(State(state): State<Arc<RestGatewayState>>) -> Json<serde_
 
 /// REST Gateway server
 pub struct RestGateway {
+    #[allow(dead_code)]
     config: RestGatewayConfig,
     router: Router,
 }

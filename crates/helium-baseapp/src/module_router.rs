@@ -180,8 +180,10 @@ impl ModuleConfig {
 #[derive(Debug)]
 struct ModuleRuntime {
     /// Module configuration
+    #[allow(dead_code)]
     config: ModuleConfig,
     /// Current execution state
+    #[allow(dead_code)]
     state: ModuleState,
     /// Number of times module has been called
     call_count: u64,
@@ -440,7 +442,7 @@ impl ModuleRouter {
     fn setup_module_environment(
         &self,
         module_name: &str,
-        context: &ExecutionContext,
+        _context: &ExecutionContext,
     ) -> Result<()> {
         debug!("Setting up environment for module: {}", module_name);
 
@@ -608,6 +610,7 @@ impl ModuleRouter {
     }
 
     /// Depth-first search for dependency resolution
+    #[allow(clippy::only_used_in_recursion)]
     fn dependency_dfs(
         &self,
         module: &str,
@@ -713,6 +716,7 @@ impl ModuleRouter {
     }
 
     /// Parse capability string into VFS capability
+    #[allow(dead_code)]
     fn parse_capability(&self, capability_str: &str) -> Result<Capability> {
         let parts: Vec<&str> = capability_str.split(':').collect();
         if parts.len() != 2 {

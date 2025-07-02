@@ -297,6 +297,7 @@ pub struct ModuleGovernance {
     /// Module router for managing modules
     router: Arc<ModuleRouter>,
     /// Virtual filesystem for storage
+    #[allow(dead_code)]
     vfs: Arc<VirtualFilesystem>,
     /// On-chain code registry
     code_registry: Arc<Mutex<HashMap<u64, StoredCode>>>,
@@ -640,7 +641,7 @@ impl ModuleGovernance {
     }
 
     /// Run module initialization
-    fn run_module_init(&self, module_name: &str, init_data: &[u8]) -> Result<()> {
+    fn run_module_init(&self, module_name: &str, _init_data: &[u8]) -> Result<()> {
         // TODO: Execute module init function with init_data
         debug!("Running init for module: {}", module_name);
         Ok(())
@@ -672,7 +673,7 @@ impl ModuleGovernance {
     }
 
     /// Run pre-upgrade migration
-    fn run_pre_upgrade_migration(&self, module_name: &str, migration_data: &[u8]) -> Result<()> {
+    fn run_pre_upgrade_migration(&self, module_name: &str, _migration_data: &[u8]) -> Result<()> {
         // TODO: Execute module's pre-upgrade migration function
         debug!("Running pre-upgrade migration for module: {}", module_name);
         Ok(())
@@ -692,7 +693,7 @@ impl ModuleGovernance {
             .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
 
-        let serialized = serde_json::to_vec(&*registry)
+        let _serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed: {}", e)))?;
 
         // TODO: Write to VFS at /system/code_registry
@@ -707,7 +708,7 @@ impl ModuleGovernance {
             .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
 
-        let serialized = serde_json::to_vec(&*registry)
+        let _serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed: {}", e)))?;
 
         // TODO: Write to VFS at /system/module_registry
@@ -752,7 +753,7 @@ impl ModuleGovernance {
     }
 
     /// Helper method to unload a module from the router
-    fn unload_module_from_router(&self, module_name: &str) -> Result<()> {
+    fn unload_module_from_router(&self, _module_name: &str) -> Result<()> {
         // For now, we'll rely on the router's existing capability to unregister modules
         // In a real implementation, we'd need to add unload functionality to ModuleRouter
         warn!("Module unloading not fully implemented - registry cleanup only");
@@ -760,12 +761,12 @@ impl ModuleGovernance {
     }
 
     /// Helper method to load a module in the router
-    fn load_module_in_router(&self, module_name: &str) -> Result<()> {
+    fn load_module_in_router(&self, _module_name: &str) -> Result<()> {
         // Use the router's internal load_module method through a workaround
         // Since we can't access private methods, we'll trigger initialization
         self.router
             .initialize()
-            .map_err(|e| GovernanceError::RouterError(e))?;
+            .map_err(GovernanceError::RouterError)?;
         Ok(())
     }
 }

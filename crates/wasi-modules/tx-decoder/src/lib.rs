@@ -521,7 +521,7 @@ mod tests {
         let decoder = WasiTxDecoder::new();
 
         let request = DecodeRequest {
-            tx_bytes: base64::encode("test transaction bytes"),
+            tx_bytes: base64::engine::general_purpose::STANDARD.encode("test transaction bytes"),
             encoding: "base64".to_string(),
             validate: true,
         };
@@ -566,7 +566,7 @@ mod tests {
     fn test_transaction_validation() {
         let decoder = WasiTxDecoder::new();
 
-        let mut tx = DecodedTx {
+        let tx = DecodedTx {
             body: TxBody {
                 messages: vec![],
                 memo: "x".repeat(300), // Too long

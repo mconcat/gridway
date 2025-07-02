@@ -10,7 +10,6 @@
 //! - Stderr capture: Detailed error messages captured from guest
 //! - Capability-based security: Host functions require proper capabilities
 
-use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use helium_store::KVStore;
@@ -780,7 +779,7 @@ impl HostFunctions {
             .func_wrap(
                 "env",
                 "host_get_tx_data",
-                |caller: Caller<'_, AbiContext>, ptr: u32, len_ptr: u32| -> i32 {
+                |caller: Caller<'_, AbiContext>, _ptr: u32, _len_ptr: u32| -> i32 {
                     let context = caller.data();
 
                     // Check transaction access capability
@@ -966,8 +965,8 @@ impl HostFunctions {
                 "env",
                 "host_ipc_receive",
                 |mut caller: Caller<'_, AbiContext>,
-                 buffer_ptr: u32,
-                 buffer_len: u32,
+                 _buffer_ptr: u32,
+                 _buffer_len: u32,
                  actual_len_ptr: u32|
                  -> i32 {
                     let module_id = caller.data().module_id.clone();

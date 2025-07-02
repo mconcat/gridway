@@ -484,6 +484,7 @@ impl Default for WasiEndBlockHandler {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn create_test_request() -> EndBlockRequest {
         EndBlockRequest {
             height: 10000,
@@ -494,6 +495,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn create_test_state() -> ModuleState {
         ModuleState {
             pending_validator_updates: vec![],

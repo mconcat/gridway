@@ -299,6 +299,7 @@ impl CapabilityType {
     }
 
     /// Convert capability to string representation
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         match self {
             CapabilityType::ReadState(ns) => format!("read_state:{}", ns),
@@ -396,6 +397,7 @@ pub struct CapabilityManager {
     delegation_chains: Arc<Mutex<HashMap<String, Vec<String>>>>,
 
     /// System capabilities (granted by the system, not modules)
+    #[allow(dead_code)]
     system_capabilities: Arc<Mutex<HashSet<CapabilityType>>>,
 }
 

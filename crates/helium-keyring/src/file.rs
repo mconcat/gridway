@@ -202,7 +202,7 @@ impl FileKeyring {
             name: String::new(), // Will be set by caller
             key_type: key_type.to_string(),
             encrypted_data: general_purpose::STANDARD.encode(&ciphertext),
-            nonce: general_purpose::STANDARD.encode(&nonce),
+            nonce: general_purpose::STANDARD.encode(nonce),
             salt: salt.to_string(),
             pubkey: privkey.public_key(),
             address: privkey.public_key().to_address().to_string(),
@@ -396,7 +396,7 @@ impl FileKeyring {
             let stored_key = StoredKey {
                 privkey,
                 pubkey: pubkey.clone(),
-                address: address.clone(),
+                address,
             };
             self.keys.insert(exported.name.clone(), stored_key);
 
@@ -434,7 +434,7 @@ impl Keyring for FileKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
         self.keys.insert(name.to_string(), stored_key);
 
@@ -467,7 +467,7 @@ impl Keyring for FileKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
         self.keys.insert(name.to_string(), stored_key);
 
@@ -485,7 +485,7 @@ impl Keyring for FileKeyring {
             .map(|(name, key)| KeyInfo {
                 name: name.clone(),
                 pubkey: key.pubkey.clone(),
-                address: key.address.clone(),
+                address: key.address,
             })
             .collect())
     }
@@ -499,7 +499,7 @@ impl Keyring for FileKeyring {
         Ok(KeyInfo {
             name: name.to_string(),
             pubkey: key.pubkey.clone(),
-            address: key.address.clone(),
+            address: key.address,
         })
     }
 
@@ -578,7 +578,7 @@ impl Keyring for FileKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
         self.keys.insert(name.to_string(), stored_key);
 

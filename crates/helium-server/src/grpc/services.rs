@@ -30,6 +30,12 @@ impl BankQueryService {
     }
 }
 
+impl Default for BankQueryService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[tonic::async_trait]
 impl bank::Query for BankQueryService {
     async fn balance(
@@ -157,6 +163,12 @@ impl AuthQueryService {
     }
 }
 
+impl Default for AuthQueryService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[tonic::async_trait]
 impl auth::Query for AuthQueryService {
     async fn account(
@@ -215,6 +227,12 @@ impl TxService {
             txs: Arc::new(RwLock::new(HashMap::new())),
             baseapp,
         }
+    }
+}
+
+impl Default for TxService {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

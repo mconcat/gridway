@@ -453,10 +453,10 @@ mod tests {
         let changes = cache.get_cached_changes();
         assert_eq!(changes.len(), 2);
         assert_eq!(
-            changes.get(&b"add".to_vec()),
+            changes.get(b"add".as_slice()),
             Some(&Some(b"new_value".to_vec()))
         );
-        assert_eq!(changes.get(&b"remove".to_vec()), Some(&None));
+        assert_eq!(changes.get(b"remove".as_slice()), Some(&None));
     }
 
     #[test]

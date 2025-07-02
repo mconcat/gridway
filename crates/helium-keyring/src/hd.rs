@@ -13,7 +13,6 @@ use hmac::{Hmac, Mac};
 use k256::ecdsa::SigningKey as Secp256k1PrivKey;
 use sha2::{Digest, Sha256, Sha512};
 
-type HmacSha256 = Hmac<Sha256>;
 type HmacSha512 = Hmac<Sha512>;
 
 /// Cosmos SDK coin type as defined in SLIP-0044
@@ -33,8 +32,10 @@ pub struct ExtendedPrivateKey {
     /// Depth in the derivation tree
     depth: u8,
     /// Parent key fingerprint (first 4 bytes of parent public key hash)
+    #[allow(dead_code)]
     parent_fingerprint: [u8; 4],
     /// Child index for this key
+    #[allow(dead_code)]
     child_index: u32,
 }
 
@@ -190,7 +191,7 @@ impl ExtendedPrivateKey {
 
         // Add tweak to parent private key (mod curve order)
         let mut new_private_key = self.private_key;
-        if let Err(_) = add_scalar(&mut new_private_key, &tweak) {
+        if add_scalar(&mut new_private_key, &tweak).is_err() {
             return Err(KeyringError::BackendError(
                 "Child key derivation resulted in invalid key".to_string(),
             ));
@@ -306,7 +307,7 @@ pub fn generate_mnemonic() -> Result<Mnemonic, KeyringError> {
 pub fn generate_mnemonic_with_entropy(entropy_bits: usize) -> Result<Mnemonic, KeyringError> {
     use rand::RngCore;
 
-    if entropy_bits % 32 != 0 || entropy_bits < 128 || entropy_bits > 256 {
+    if entropy_bits % 32 != 0 || !(128..=256).contains(&entropy_bits) {
         return Err(KeyringError::BackendError(
             "Entropy must be 128, 160, 192, 224, or 256 bits".to_string(),
         ));

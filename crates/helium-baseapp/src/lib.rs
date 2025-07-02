@@ -13,7 +13,6 @@ pub mod vfs;
 pub mod wasi_host;
 
 use helium_store::{KVStore, MemStore};
-use helium_types::SdkMsg;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -182,16 +181,19 @@ impl Context {
 /// Base application - acts as microkernel host for WASM modules
 pub struct BaseApp {
     /// Application name
+    #[allow(dead_code)]
     name: String,
     /// Current context
     context: Option<Context>,
     /// WASI runtime host for module execution
     wasi_host: Arc<WasiHost>,
     /// Virtual filesystem for state access
+    #[allow(dead_code)]
     vfs: Arc<VirtualFilesystem>,
     /// Module router for message dispatch
     module_router: Arc<ModuleRouter>,
     /// Capability manager for module security
+    #[allow(dead_code)]
     capability_manager: Arc<CapabilityManager>,
     /// Module governance for WASM module lifecycle management
     module_governance: Arc<ModuleGovernance>,
@@ -503,11 +505,13 @@ impl BaseApp {
         #[derive(Debug, Deserialize)]
         struct EndBlockResponse {
             validator_updates: Vec<ValidatorUpdate>,
+            #[allow(dead_code)]
             consensus_param_updates: Option<ConsensusParams>,
             events: Vec<WasiEvent>,
         }
 
         #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
         struct ConsensusParams {
             block_max_bytes: i64,
             block_max_gas: i64,
@@ -613,7 +617,8 @@ impl BaseApp {
         if decoded_tx
             .get("body")
             .and_then(|b| b.get("messages"))
-            .map_or(true, |m| m.as_array().map_or(true, |a| a.is_empty()))
+            .and_then(|m| m.as_array())
+            .is_none_or(|a| a.is_empty())
         {
             return Ok(TxResponse {
                 code: 1,
@@ -1005,7 +1010,7 @@ impl BaseApp {
                 }
                 _ => {
                     // Route to module router for other message types
-                    let execution_context = ExecutionContext {
+                    let _execution_context = ExecutionContext {
                         message_type: type_url.to_string(),
                         message_data: serde_json::to_vec(msg_value).map_err(|e| {
                             BaseAppError::InvalidTx(format!("failed to serialize message: {}", e))

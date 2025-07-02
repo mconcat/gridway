@@ -460,13 +460,13 @@ mod tests {
         // Setup verifier with expected signers
         let mut verifier = TransactionVerifier::new();
         verifier.add_signer(SignerData {
-            address: address1.clone(),
+            address: address1,
             sequence: 1,
             account_number: 100,
             chain_id: "test-chain".to_string(),
         });
         verifier.add_signer(SignerData {
-            address: address2.clone(),
+            address: address2,
             sequence: 2,
             account_number: 200,
             chain_id: "test-chain".to_string(),
@@ -543,7 +543,7 @@ mod tests {
 
         // Setup verifier expecting sequence 5
         let signer_data = SignerData {
-            address: address.clone(),
+            address,
             sequence: 5,
             account_number: 100,
             chain_id: "test-chain".to_string(),

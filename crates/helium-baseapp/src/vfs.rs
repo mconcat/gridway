@@ -8,7 +8,7 @@
 //! different namespaces: `/state/auth/`, `/state/bank/`, etc.
 
 use std::collections::HashMap;
-use std::io::{Read, SeekFrom, Write};
+use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -151,6 +151,11 @@ pub trait VfsInterface: Send + Sync {
     fn write(&self, path: &Path, data: &[u8]) -> Result<usize>;
 }
 
+// Type aliases to simplify complex types
+type StoreMap = HashMap<String, Arc<Mutex<dyn KVStore>>>;
+type MountMap = HashMap<PathBuf, Mount>;
+type FileDescriptorMap = HashMap<u32, FileDescriptor>;
+
 /// Virtual Filesystem for WASI State Access
 ///
 /// The VFS maps blockchain state stores to a filesystem-like interface where:
@@ -159,11 +164,11 @@ pub trait VfsInterface: Send + Sync {
 /// - Special paths can be mounted to provide access to other interfaces (e.g., IBC)
 pub struct VirtualFilesystem {
     /// Mapping from namespace to store
-    stores: Arc<Mutex<HashMap<String, Arc<Mutex<dyn KVStore>>>>>,
+    stores: Arc<Mutex<StoreMap>>,
     /// Mounted interfaces
-    mounts: Arc<Mutex<HashMap<PathBuf, Mount>>>,
+    mounts: Arc<Mutex<MountMap>>,
     /// Open file descriptors
-    file_descriptors: Arc<Mutex<HashMap<u32, FileDescriptor>>>,
+    file_descriptors: Arc<Mutex<FileDescriptorMap>>,
     /// Next available file descriptor ID
     next_fd: Arc<Mutex<u32>>,
     /// Capability-based access control
@@ -382,7 +387,7 @@ impl VirtualFilesystem {
             .lock()
             .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
-        let file_desc = fds.get_mut(&fd).ok_or_else(|| VfsError::FdNotFound(fd))?;
+        let file_desc = fds.get_mut(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
         let mounts = self
             .mounts
@@ -481,7 +486,7 @@ impl VirtualFilesystem {
             .lock()
             .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
-        let file_desc = fds.get_mut(&fd).ok_or_else(|| VfsError::FdNotFound(fd))?;
+        let file_desc = fds.get_mut(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
         if !file_desc.writable {
             return Err(VfsError::AccessDenied(
@@ -536,7 +541,7 @@ impl VirtualFilesystem {
             .lock()
             .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
-        let file_desc = fds.get_mut(&fd).ok_or_else(|| VfsError::FdNotFound(fd))?;
+        let file_desc = fds.get_mut(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
         let new_pos = match pos {
             SeekFrom::Start(offset) => offset,
@@ -627,7 +632,7 @@ impl VirtualFilesystem {
             .lock()
             .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
-        let file_desc = fds.remove(&fd).ok_or_else(|| VfsError::FdNotFound(fd))?;
+        let file_desc = fds.remove(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
         // If file was writable and has content, write back to store
         if file_desc.writable && !file_desc.key.is_empty() {
