@@ -45,18 +45,22 @@ impl StateManager {
     pub fn new_with_memstore() -> Self {
         use crate::JMTStore;
         use std::sync::atomic::{AtomicU64, Ordering};
-        
+
         // Use a unique counter to avoid conflicts between test instances
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let instance_id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        
+
         // Create a temporary directory that will be cleaned up on drop
-        let temp_dir = std::env::temp_dir().join(format!("helium_test_{}_{}", std::process::id(), instance_id));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "helium_test_{}_{}",
+            std::process::id(),
+            instance_id
+        ));
         std::fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
-        
-        let jmt_store = JMTStore::new("state".to_string(), &temp_dir)
-            .expect("Failed to create JMT store");
-        
+
+        let jmt_store =
+            JMTStore::new("state".to_string(), &temp_dir).expect("Failed to create JMT store");
+
         let global_store = GlobalAppStore::new(jmt_store);
         Self::new(global_store)
     }
@@ -97,7 +101,7 @@ impl StateManager {
         let namespace = self.global_store.get_namespace(name)?;
         self.cached_stores.insert(name.to_string(), namespace);
         self.has_pending_changes = true;
-        
+
         Ok(self.cached_stores.get_mut(name).unwrap())
     }
 
@@ -179,8 +183,7 @@ impl StateManager {
         // Check if snapshot exists first
         if !self.snapshots.contains_key(&height) {
             return Err(StoreError::InvalidValue(format!(
-                "No snapshot found for height {}",
-                height
+                "No snapshot found for height {height}"
             )));
         }
 
@@ -243,7 +246,9 @@ mod tests {
         assert!(!state_manager.has_pending_changes());
 
         // Register a namespace
-        state_manager.register_namespace("bank".to_string(), false).unwrap();
+        state_manager
+            .register_namespace("bank".to_string(), false)
+            .unwrap();
 
         // Get read-only access
         assert!(state_manager.get_store("bank").is_ok());
@@ -253,7 +258,9 @@ mod tests {
     #[test]
     fn test_state_manager_caching() {
         let mut state_manager = StateManager::default();
-        state_manager.register_namespace("bank".to_string(), false).unwrap();
+        state_manager
+            .register_namespace("bank".to_string(), false)
+            .unwrap();
 
         // Getting mutable access should create cache
         assert!(!state_manager.has_pending_changes());
@@ -287,7 +294,9 @@ mod tests {
     #[test]
     fn test_commit_rollback() {
         let mut state_manager = StateManager::default();
-        state_manager.register_namespace("bank".to_string(), false).unwrap();
+        state_manager
+            .register_namespace("bank".to_string(), false)
+            .unwrap();
 
         let initial_height = state_manager.block_height();
 
@@ -341,26 +350,34 @@ mod tests {
     #[test]
     fn test_namespace_isolation() {
         let mut state_manager = StateManager::default();
-        
+
         // Register multiple namespaces
-        state_manager.register_namespace("auth".to_string(), false).unwrap();
-        state_manager.register_namespace("bank".to_string(), false).unwrap();
-        
+        state_manager
+            .register_namespace("auth".to_string(), false)
+            .unwrap();
+        state_manager
+            .register_namespace("bank".to_string(), false)
+            .unwrap();
+
         // Write to different namespaces
         {
             let auth_store = state_manager.get_store_mut("auth").unwrap();
-            auth_store.set(b"key1".to_vec(), b"auth_value".to_vec()).unwrap();
+            auth_store
+                .set(b"key1".to_vec(), b"auth_value".to_vec())
+                .unwrap();
         }
-        
+
         {
             let bank_store = state_manager.get_store_mut("bank").unwrap();
-            bank_store.set(b"key1".to_vec(), b"bank_value".to_vec()).unwrap();
+            bank_store
+                .set(b"key1".to_vec(), b"bank_value".to_vec())
+                .unwrap();
         }
-        
+
         // Verify isolation
         let auth_store = state_manager.get_store("auth").unwrap();
         let bank_store = state_manager.get_store("bank").unwrap();
-        
+
         assert_eq!(auth_store.get(b"key1").unwrap().unwrap(), b"auth_value");
         assert_eq!(bank_store.get(b"key1").unwrap().unwrap(), b"bank_value");
     }

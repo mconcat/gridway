@@ -30,6 +30,12 @@ impl BankQueryService {
     }
 }
 
+impl Default for BankQueryService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[tonic::async_trait]
 impl bank::Query for BankQueryService {
     async fn balance(
@@ -157,6 +163,12 @@ impl AuthQueryService {
     }
 }
 
+impl Default for AuthQueryService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[tonic::async_trait]
 impl auth::Query for AuthQueryService {
     async fn account(
@@ -203,7 +215,10 @@ impl TxService {
     pub fn new() -> Self {
         Self {
             txs: Arc::new(RwLock::new(HashMap::new())),
-            baseapp: Arc::new(RwLock::new(helium_baseapp::BaseApp::new("tx-service".to_string()).expect("Failed to create BaseApp"))),
+            baseapp: Arc::new(RwLock::new(
+                helium_baseapp::BaseApp::new("tx-service".to_string())
+                    .expect("Failed to create BaseApp"),
+            )),
         }
     }
 
@@ -212,6 +227,12 @@ impl TxService {
             txs: Arc::new(RwLock::new(HashMap::new())),
             baseapp,
         }
+    }
+}
+
+impl Default for TxService {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -225,7 +246,7 @@ impl tx::Service for TxService {
 
         // Use BaseApp for real simulation
         let baseapp = self.baseapp.read().await;
-        
+
         match baseapp.simulate_tx(&req.tx_bytes) {
             Ok(tx_response) => {
                 let gas_info = GasInfo {
@@ -236,14 +257,22 @@ impl tx::Service for TxService {
                 let result = Result_ {
                     data: vec![],
                     log: tx_response.log,
-                    events: tx_response.events.into_iter().map(|event| Event {
-                        type_: event.event_type,
-                        attributes: event.attributes.into_iter().map(|attr| EventAttribute {
-                            key: attr.key,
-                            value: attr.value,
-                            index: true, // Default to true for indexing
-                        }).collect(),
-                    }).collect(),
+                    events: tx_response
+                        .events
+                        .into_iter()
+                        .map(|event| Event {
+                            type_: event.event_type,
+                            attributes: event
+                                .attributes
+                                .into_iter()
+                                .map(|attr| EventAttribute {
+                                    key: attr.key,
+                                    value: attr.value,
+                                    index: true, // Default to true for indexing
+                                })
+                                .collect(),
+                        })
+                        .collect(),
                 };
 
                 Ok(Response::new(tx::SimulateResponse {
@@ -253,7 +282,7 @@ impl tx::Service for TxService {
             }
             Err(e) => {
                 tracing::error!("Transaction simulation failed: {}", e);
-                Err(Status::internal(format!("Simulation failed: {}", e)))
+                Err(Status::internal(format!("Simulation failed: {e}")))
             }
         }
     }

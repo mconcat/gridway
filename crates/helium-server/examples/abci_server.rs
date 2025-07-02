@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // Create a base application
-    let app = BaseApp::new("helium-example".to_string());
+    let app = BaseApp::new("helium-example".to_string())?;
 
     // Build and start the ABCI++ server
     AbciServerBuilder::new()

@@ -13,6 +13,9 @@ members = [
     "crates/helium-client",
     "crates/helium-simapp",
     "crates/wasi-modules/ante-handler",
+    "crates/wasi-modules/begin-blocker",
+    "crates/wasi-modules/end-blocker",
+    "crates/wasi-modules/tx-decoder",
 ]
 
 [workspace.package]
@@ -103,8 +106,8 @@ helium-client = { workspace = true }
 helium-simapp = { workspace = true }
 
 # ABCI interface
-tendermint-abci = "0.34"
-tendermint-proto = "0.34"
+cometbft = "0.1.0-alpha.2"
+cometbft-proto = "0.1.0-alpha.2"
 
 # External dependencies from workspace
 serde = { workspace = true }

@@ -39,33 +39,62 @@ jobs:
     
     - name: Build WASM modules
       run: |
-        cd crates/wasi-modules
-        cargo build --release --target wasm32-wasip1
+        # Build each WASM module separately
+        for module in crates/wasi-modules/*/; do
+          if [ -f "$module/Cargo.toml" ]; then
+            echo "Building $module"
+            cd "$module"
+            cargo build --release --target wasm32-wasip1
+            cd - > /dev/null
+          fi
+        done
     
     - name: Test WASM module loading
       run: |
         # Test that WASM modules can be loaded
-        for wasm in crates/wasi-modules/target/wasm32-wasip1/release/*.wasm; do
-          echo "Testing WASM module: $wasm"
-          wasmtime compile "$wasm"
+        for module in crates/wasi-modules/*/; do
+          if [ -d "$module/target/wasm32-wasip1/release" ]; then
+            for wasm in "$module"/target/wasm32-wasip1/release/*.wasm; do
+              if [ -f "$wasm" ]; then
+                echo "Testing WASM module: $wasm"
+                wasmtime compile "$wasm"
+              fi
+            done
+          fi
         done
     
     - name: Validate WASM modules
       run: |
         # Validate WASM module structure
-        for wasm in crates/wasi-modules/target/wasm32-wasip1/release/*.wasm; do
-          echo "Validating WASM module: $wasm"
-          wasmtime wasm2wat "$wasm" > /dev/null
+        for module in crates/wasi-modules/*/; do
+          if [ -d "$module/target/wasm32-wasip1/release" ]; then
+            for wasm in "$module"/target/wasm32-wasip1/release/*.wasm; do
+              if [ -f "$wasm" ]; then
+                echo "Validating WASM module: $wasm"
+                wasmtime wasm2wat "$wasm" > /dev/null
+              fi
+            done
+          fi
         done
     
     - name: Check WASM module sizes
       run: |
         # Report WASM module sizes
         echo "WASM Module Sizes:"
-        ls -lh crates/wasi-modules/target/wasm32-wasip1/release/*.wasm
+        for module in crates/wasi-modules/*/; do
+          if [ -d "$module/target/wasm32-wasip1/release" ]; then
+            ls -lh "$module"/target/wasm32-wasip1/release/*.wasm 2>/dev/null || true
+          fi
+        done
     
     - name: Run WASM-specific tests
       run: |
         # Run any WASM-specific tests if they exist
-        cd crates/wasi-modules
-        cargo test --target wasm32-wasip1 || echo "No WASM-specific tests found"
+        for module in crates/wasi-modules/*/; do
+          if [ -f "$module/Cargo.toml" ]; then
+            echo "Running tests for $module"
+            cd "$module"
+            cargo test --target wasm32-wasip1 || echo "No WASM-specific tests found for $module"
+            cd - > /dev/null
+          fi
+        done

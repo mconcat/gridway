@@ -85,7 +85,7 @@ impl FileKeyring {
 
         // Create directory if it doesn't exist
         fs::create_dir_all(&dir).await.map_err(|e| {
-            KeyringError::BackendError(format!("Failed to create keyring directory: {}", e))
+            KeyringError::BackendError(format!("Failed to create keyring directory: {e}"))
         })?;
 
         let mut keyring = FileKeyring {
@@ -111,11 +111,11 @@ impl FileKeyring {
     /// Load all keys from disk
     async fn load_keys(&mut self) -> Result<(), KeyringError> {
         let mut entries = fs::read_dir(&self.dir).await.map_err(|e| {
-            KeyringError::BackendError(format!("Failed to read keyring directory: {}", e))
+            KeyringError::BackendError(format!("Failed to read keyring directory: {e}"))
         })?;
 
         while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            KeyringError::BackendError(format!("Failed to read directory entry: {}", e))
+            KeyringError::BackendError(format!("Failed to read directory entry: {e}"))
         })? {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
@@ -140,10 +140,10 @@ impl FileKeyring {
         let path = self.key_path(name);
         let data = fs::read_to_string(&path)
             .await
-            .map_err(|e| KeyringError::BackendError(format!("Failed to read key file: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to read key file: {e}")))?;
 
         let encrypted_file: EncryptedKeyFile = serde_json::from_str(&data)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to parse key file: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to parse key file: {e}")))?;
 
         // Decrypt the private key
         let privkey = self.decrypt_key(&encrypted_file)?;
@@ -152,7 +152,7 @@ impl FileKeyring {
             privkey,
             pubkey: encrypted_file.pubkey,
             address: AccAddress::from_bech32(&encrypted_file.address)
-                .map_err(|e| KeyringError::BackendError(format!("Invalid address: {}", e)))?
+                .map_err(|e| KeyringError::BackendError(format!("Invalid address: {e}")))?
                 .1,
         };
 
@@ -169,7 +169,7 @@ impl FileKeyring {
         let argon2 = Argon2::default();
         let password_hash = argon2
             .hash_password(self.password.0.as_bytes(), &salt)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to hash password: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to hash password: {e}")))?;
 
         // Use the hash as encryption key (take first 32 bytes)
         let hash = password_hash.hash.unwrap();
@@ -191,7 +191,7 @@ impl FileKeyring {
         // Encrypt
         let ciphertext = cipher
             .encrypt(&nonce, privkey_bytes.as_ref())
-            .map_err(|e| KeyringError::BackendError(format!("Failed to encrypt key: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to encrypt key: {e}")))?;
 
         let key_type = match privkey {
             PrivateKey::Secp256k1(_) => "secp256k1",
@@ -202,7 +202,7 @@ impl FileKeyring {
             name: String::new(), // Will be set by caller
             key_type: key_type.to_string(),
             encrypted_data: general_purpose::STANDARD.encode(&ciphertext),
-            nonce: general_purpose::STANDARD.encode(&nonce),
+            nonce: general_purpose::STANDARD.encode(nonce),
             salt: salt.to_string(),
             pubkey: privkey.public_key(),
             address: privkey.public_key().to_address().to_string(),
@@ -213,13 +213,13 @@ impl FileKeyring {
     fn decrypt_key(&self, encrypted_file: &EncryptedKeyFile) -> Result<PrivateKey, KeyringError> {
         // Parse salt
         let salt = SaltString::from_b64(&encrypted_file.salt)
-            .map_err(|e| KeyringError::BackendError(format!("Invalid salt: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Invalid salt: {e}")))?;
 
         // Derive decryption key from password
         let argon2 = Argon2::default();
         let password_hash = argon2
             .hash_password(self.password.0.as_bytes(), &salt)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to hash password: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to hash password: {e}")))?;
 
         // Use the hash as decryption key
         let hash = password_hash.hash.unwrap();
@@ -232,12 +232,12 @@ impl FileKeyring {
         // Decode nonce and ciphertext
         let nonce_bytes = general_purpose::STANDARD
             .decode(&encrypted_file.nonce)
-            .map_err(|e| KeyringError::BackendError(format!("Invalid nonce: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Invalid nonce: {e}")))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let ciphertext = general_purpose::STANDARD
             .decode(&encrypted_file.encrypted_data)
-            .map_err(|e| KeyringError::BackendError(format!("Invalid encrypted data: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Invalid encrypted data: {e}")))?;
 
         // Decrypt
         let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|_| {
@@ -248,7 +248,7 @@ impl FileKeyring {
         match encrypted_file.key_type.as_str() {
             "secp256k1" => {
                 let key = Secp256k1PrivKey::from_slice(&plaintext).map_err(|e| {
-                    KeyringError::BackendError(format!("Invalid secp256k1 key: {}", e))
+                    KeyringError::BackendError(format!("Invalid secp256k1 key: {e}"))
                 })?;
                 Ok(PrivateKey::Secp256k1(key))
             }
@@ -270,7 +270,7 @@ impl FileKeyring {
 
     /// Get the file path for a key
     fn key_path(&self, name: &str) -> PathBuf {
-        self.dir.join(format!("{}.json", name))
+        self.dir.join(format!("{name}.json"))
     }
 
     /// Save a key to disk
@@ -279,12 +279,12 @@ impl FileKeyring {
         encrypted_file.name = name.to_string();
 
         let json = serde_json::to_string_pretty(&encrypted_file)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to serialize key: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to serialize key: {e}")))?;
 
         let path = self.key_path(name);
         fs::write(&path, json)
             .await
-            .map_err(|e| KeyringError::BackendError(format!("Failed to write key file: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to write key file: {e}")))?;
 
         Ok(())
     }
@@ -357,14 +357,13 @@ impl FileKeyring {
 
         // Import from private key hex
         if let Some(privkey_hex) = &exported.privkey_hex {
-            let privkey_bytes = hex::decode(privkey_hex).map_err(|e| {
-                KeyringError::BackendError(format!("Invalid hex private key: {}", e))
-            })?;
+            let privkey_bytes = hex::decode(privkey_hex)
+                .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {e}")))?;
 
             let privkey = match exported.key_type.as_str() {
                 "secp256k1" => {
                     let key = Secp256k1PrivKey::from_slice(&privkey_bytes).map_err(|e| {
-                        KeyringError::BackendError(format!("Invalid secp256k1 key: {}", e))
+                        KeyringError::BackendError(format!("Invalid secp256k1 key: {e}"))
                     })?;
                     PrivateKey::Secp256k1(key)
                 }
@@ -396,7 +395,7 @@ impl FileKeyring {
             let stored_key = StoredKey {
                 privkey,
                 pubkey: pubkey.clone(),
-                address: address.clone(),
+                address,
             };
             self.keys.insert(exported.name.clone(), stored_key);
 
@@ -434,7 +433,7 @@ impl Keyring for FileKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
         self.keys.insert(name.to_string(), stored_key);
 
@@ -467,7 +466,7 @@ impl Keyring for FileKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
         self.keys.insert(name.to_string(), stored_key);
 
@@ -485,7 +484,7 @@ impl Keyring for FileKeyring {
             .map(|(name, key)| KeyInfo {
                 name: name.clone(),
                 pubkey: key.pubkey.clone(),
-                address: key.address.clone(),
+                address: key.address,
             })
             .collect())
     }
@@ -499,7 +498,7 @@ impl Keyring for FileKeyring {
         Ok(KeyInfo {
             name: name.to_string(),
             pubkey: key.pubkey.clone(),
-            address: key.address.clone(),
+            address: key.address,
         })
     }
 
@@ -512,7 +511,7 @@ impl Keyring for FileKeyring {
         // Sign the data using the private key
         use helium_crypto::signature::sign_message;
         let signature = sign_message(&key.privkey, data)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to sign: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to sign: {e}")))?;
 
         Ok(signature)
     }
@@ -528,22 +527,25 @@ impl Keyring for FileKeyring {
         let path = self.key_path(name);
         if path.exists() {
             fs::remove_file(&path).await.map_err(|e| {
-                KeyringError::BackendError(format!("Failed to delete key file: {}", e))
+                KeyringError::BackendError(format!("Failed to delete key file: {e}"))
             })?;
         }
 
         Ok(())
     }
 
-    async fn import_private_key(&mut self, name: &str, private_key_hex: &str) -> Result<KeyInfo, KeyringError> {
+    async fn import_private_key(
+        &mut self,
+        name: &str,
+        private_key_hex: &str,
+    ) -> Result<KeyInfo, KeyringError> {
         // Check if key already exists
         if self.keys.contains_key(name) || self.key_path(name).exists() {
             return Err(KeyringError::KeyExists(name.to_string()));
         }
 
-        let privkey_bytes = hex::decode(private_key_hex).map_err(|e| {
-            KeyringError::BackendError(format!("Invalid hex private key: {}", e))
-        })?;
+        let privkey_bytes = hex::decode(private_key_hex)
+            .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {e}")))?;
 
         // Support both secp256k1 and ed25519 keys based on length
         let privkey = match privkey_bytes.len() {
@@ -553,11 +555,16 @@ impl Keyring for FileKeyring {
                     PrivateKey::Secp256k1(key)
                 } else {
                     // Try ed25519
-                    let key = ed25519_dalek::SigningKey::from_bytes(&privkey_bytes.try_into().unwrap());
+                    let key =
+                        ed25519_dalek::SigningKey::from_bytes(&privkey_bytes.try_into().unwrap());
                     PrivateKey::Ed25519(key)
                 }
             }
-            _ => return Err(KeyringError::BackendError("Invalid private key length".to_string())),
+            _ => {
+                return Err(KeyringError::BackendError(
+                    "Invalid private key length".to_string(),
+                ))
+            }
         };
 
         let pubkey = privkey.public_key();
@@ -570,7 +577,7 @@ impl Keyring for FileKeyring {
         let stored_key = StoredKey {
             privkey,
             pubkey: pubkey.clone(),
-            address: address.clone(),
+            address,
         };
         self.keys.insert(name.to_string(), stored_key);
 
@@ -581,11 +588,18 @@ impl Keyring for FileKeyring {
         })
     }
 
-    async fn export_key(&self, name: &str, include_private: bool) -> Result<ExportedKey, KeyringError> {
+    async fn export_key(
+        &self,
+        name: &str,
+        include_private: bool,
+    ) -> Result<ExportedKey, KeyringError> {
         self.export_key_impl(name, include_private).await
     }
 
-    async fn import_exported_key(&mut self, exported: &ExportedKey) -> Result<KeyInfo, KeyringError> {
+    async fn import_exported_key(
+        &mut self,
+        exported: &ExportedKey,
+    ) -> Result<KeyInfo, KeyringError> {
         self.import_exported_key_impl(exported).await
     }
 }

@@ -13,22 +13,22 @@ use axum::{
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use std::time::Duration;
 use tonic::Request;
 use tower_http::{
-    cors::{Any, CorsLayer}, 
-    trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse},
-    timeout::TimeoutLayer,
+    cors::{Any, CorsLayer},
     limit::RequestBodyLimitLayer,
+    timeout::TimeoutLayer,
+    trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
 };
-use std::time::Duration;
+use tracing::{debug, error, info};
 
+use crate::grpc::services::{AuthQueryService, BankQueryService, TxService as GrpcTxService};
 use crate::grpc::{
     auth::{self, Query as AuthQuery},
     bank::{self, Query as BankQuery},
     tx::{self, Service as TxService},
 };
-use crate::grpc::services::{AuthQueryService, BankQueryService, TxService as GrpcTxService};
 
 /// REST Gateway configuration
 #[derive(Clone)]
@@ -66,21 +66,27 @@ impl RestGatewayState {
         let tx_service = Arc::new(GrpcTxService::new());
 
         // Populate with some sample data for testing
-        bank_service.set_balance("cosmos1test", "stake", 1000000).await;
-        bank_service.set_balance("cosmos1test", "atom", 500000).await;
-        
+        bank_service
+            .set_balance("cosmos1test", "stake", 1000000)
+            .await;
+        bank_service
+            .set_balance("cosmos1test", "atom", 500000)
+            .await;
+
         // Add a sample account
-        auth_service.set_account(crate::grpc::BaseAccount {
-            address: "cosmos1test".to_string(),
-            pub_key: None,
-            account_number: 1,
-            sequence: 0,
-        }).await;
+        auth_service
+            .set_account(crate::grpc::BaseAccount {
+                address: "cosmos1test".to_string(),
+                pub_key: None,
+                account_number: 1,
+                sequence: 0,
+            })
+            .await;
 
         info!("REST Gateway initialized with real gRPC services");
 
-        Ok(Self { 
-            config, 
+        Ok(Self {
+            config,
             bank_service,
             auth_service,
             tx_service,
@@ -91,7 +97,7 @@ impl RestGatewayState {
     pub fn with_services(
         config: RestGatewayConfig,
         bank_service: Arc<BankQueryService>,
-        auth_service: Arc<AuthQueryService>, 
+        auth_service: Arc<AuthQueryService>,
         tx_service: Arc<GrpcTxService>,
     ) -> Self {
         Self {
@@ -175,13 +181,16 @@ async fn get_balance(
     match state.bank_service.as_ref().balance(request).await {
         Ok(response) => {
             let grpc_response = response.into_inner();
-            let balance = grpc_response.balance.map(|coin| Coin {
-                denom: coin.denom,
-                amount: coin.amount,
-            }).unwrap_or_else(|| Coin {
-                denom,
-                amount: "0".to_string(),
-            });
+            let balance = grpc_response
+                .balance
+                .map(|coin| Coin {
+                    denom: coin.denom,
+                    amount: coin.amount,
+                })
+                .unwrap_or_else(|| Coin {
+                    denom,
+                    amount: "0".to_string(),
+                });
 
             Ok(Json(BalanceResponse { balance }))
         }
@@ -190,7 +199,7 @@ async fn get_balance(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Balance query failed: {}", e),
+                    error: format!("Balance query failed: {e}"),
                     code: 500,
                 }),
             ))
@@ -226,7 +235,8 @@ async fn get_all_balances(
     match state.bank_service.as_ref().all_balances(request).await {
         Ok(response) => {
             let grpc_response = response.into_inner();
-            let balances: Vec<Coin> = grpc_response.balances
+            let balances: Vec<Coin> = grpc_response
+                .balances
                 .into_iter()
                 .map(|coin| Coin {
                     denom: coin.denom,
@@ -253,7 +263,7 @@ async fn get_all_balances(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("All balances query failed: {}", e),
+                    error: format!("All balances query failed: {e}"),
                     code: 500,
                 }),
             ))
@@ -298,7 +308,9 @@ async fn get_account(
             let account_info = if let Some(account) = grpc_response.account {
                 AccountInfo {
                     address: account.address,
-                    pub_key: account.pub_key.map(|pk| base64::engine::general_purpose::STANDARD.encode(&pk.value)),
+                    pub_key: account
+                        .pub_key
+                        .map(|pk| base64::engine::general_purpose::STANDARD.encode(&pk.value)),
                     account_number: account.account_number.to_string(),
                     sequence: account.sequence.to_string(),
                 }
@@ -312,14 +324,16 @@ async fn get_account(
                 }
             };
 
-            Ok(Json(AccountResponse { account: account_info }))
+            Ok(Json(AccountResponse {
+                account: account_info,
+            }))
         }
         Err(e) => {
             error!("gRPC account query failed: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Account query failed: {}", e),
+                    error: format!("Account query failed: {e}"),
                     code: 500,
                 }),
             ))
@@ -388,12 +402,13 @@ async fn broadcast_tx(
     }
 
     // Validate and decode base64 tx bytes
-    let tx_bytes = base64::engine::general_purpose::STANDARD.decode(&req.tx_bytes)
+    let tx_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&req.tx_bytes)
         .map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: format!("Invalid base64 tx_bytes: {}", e),
+                    error: format!("Invalid base64 tx_bytes: {e}"),
                     code: 400,
                 }),
             )
@@ -423,17 +438,29 @@ async fn broadcast_tx(
                     code: tx_resp.code,
                     data: tx_resp.data,
                     raw_log: tx_resp.raw_log,
-                    logs: tx_resp.logs.into_iter().map(|log| TxLog {
-                        msg_index: log.msg_index,
-                        log: log.log,
-                        events: log.events.into_iter().map(|event| TxEvent {
-                            event_type: event.type_,
-                            attributes: event.attributes.into_iter().map(|attr| EventAttribute {
-                                key: attr.key,
-                                value: attr.value,
-                            }).collect(),
-                        }).collect(),
-                    }).collect(),
+                    logs: tx_resp
+                        .logs
+                        .into_iter()
+                        .map(|log| TxLog {
+                            msg_index: log.msg_index,
+                            log: log.log,
+                            events: log
+                                .events
+                                .into_iter()
+                                .map(|event| TxEvent {
+                                    event_type: event.type_,
+                                    attributes: event
+                                        .attributes
+                                        .into_iter()
+                                        .map(|attr| EventAttribute {
+                                            key: attr.key,
+                                            value: attr.value,
+                                        })
+                                        .collect(),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
                     gas_wanted: tx_resp.gas_wanted.to_string(),
                     gas_used: tx_resp.gas_used.to_string(),
                 }
@@ -446,7 +473,7 @@ async fn broadcast_tx(
                     }),
                 ));
             };
-            
+
             Ok(Json(BroadcastResponse { tx_response }))
         }
         Err(e) => {
@@ -454,7 +481,7 @@ async fn broadcast_tx(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Transaction broadcast failed: {}", e),
+                    error: format!("Transaction broadcast failed: {e}"),
                     code: 500,
                 }),
             ))
@@ -500,12 +527,13 @@ async fn simulate_tx(
     }
 
     // Validate and decode base64 tx bytes
-    let tx_bytes = base64::engine::general_purpose::STANDARD.decode(&req.tx_bytes)
+    let tx_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&req.tx_bytes)
         .map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: format!("Invalid base64 tx_bytes: {}", e),
+                    error: format!("Invalid base64 tx_bytes: {e}"),
                     code: 400,
                 }),
             )
@@ -517,30 +545,44 @@ async fn simulate_tx(
     match state.tx_service.as_ref().simulate(grpc_request).await {
         Ok(response) => {
             let grpc_response = response.into_inner();
-            
-            let gas_info = grpc_response.gas_info.map(|gi| GasInfo {
-                gas_wanted: gi.gas_wanted.to_string(),
-                gas_used: gi.gas_used.to_string(),
-            }).unwrap_or_else(|| GasInfo {
-                gas_wanted: "0".to_string(),
-                gas_used: "0".to_string(),
-            });
 
-            let result = grpc_response.result.map(|res| SimulateResult {
-                data: base64::engine::general_purpose::STANDARD.encode(&res.data),
-                log: res.log,
-                events: res.events.into_iter().map(|event| TxEvent {
-                    event_type: event.type_,
-                    attributes: event.attributes.into_iter().map(|attr| EventAttribute {
-                        key: attr.key,
-                        value: attr.value,
-                    }).collect(),
-                }).collect(),
-            }).unwrap_or_else(|| SimulateResult {
-                data: "".to_string(),
-                log: "simulation completed".to_string(),
-                events: vec![],
-            });
+            let gas_info = grpc_response
+                .gas_info
+                .map(|gi| GasInfo {
+                    gas_wanted: gi.gas_wanted.to_string(),
+                    gas_used: gi.gas_used.to_string(),
+                })
+                .unwrap_or_else(|| GasInfo {
+                    gas_wanted: "0".to_string(),
+                    gas_used: "0".to_string(),
+                });
+
+            let result = grpc_response
+                .result
+                .map(|res| SimulateResult {
+                    data: base64::engine::general_purpose::STANDARD.encode(&res.data),
+                    log: res.log,
+                    events: res
+                        .events
+                        .into_iter()
+                        .map(|event| TxEvent {
+                            event_type: event.type_,
+                            attributes: event
+                                .attributes
+                                .into_iter()
+                                .map(|attr| EventAttribute {
+                                    key: attr.key,
+                                    value: attr.value,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                })
+                .unwrap_or_else(|| SimulateResult {
+                    data: "".to_string(),
+                    log: "simulation completed".to_string(),
+                    events: vec![],
+                });
 
             Ok(Json(SimulateResponse { gas_info, result }))
         }
@@ -549,7 +591,7 @@ async fn simulate_tx(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Transaction simulation failed: {}", e),
+                    error: format!("Transaction simulation failed: {e}"),
                     code: 500,
                 }),
             ))
@@ -575,26 +617,28 @@ pub fn create_rest_router(state: Arc<RestGatewayState>) -> Router {
 
     Router::new()
         // Bank endpoints - balance queries
-        .route("/cosmos/bank/v1beta1/balances/:address", get(get_all_balances))
-        .route("/cosmos/bank/v1beta1/balances/:address/:denom", get(get_balance))
-        
+        .route(
+            "/cosmos/bank/v1beta1/balances/:address",
+            get(get_all_balances),
+        )
+        .route(
+            "/cosmos/bank/v1beta1/balances/:address/:denom",
+            get(get_balance),
+        )
         // Auth endpoints - account queries
         .route("/cosmos/auth/v1beta1/accounts/:address", get(get_account))
-        
         // Transaction endpoints - broadcasting and simulation
         .route("/cosmos/tx/v1beta1/txs", post(broadcast_tx))
         .route("/cosmos/tx/v1beta1/simulate", post(simulate_tx))
-        
         // Health and status endpoints
         .route("/health", get(health_check))
         .route("/status", get(status_check))
-        
         // Apply middleware layers in correct order (outermost to innermost)
         .layer(TimeoutLayer::new(Duration::from_secs(30)))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(tracing::Level::INFO))
-                .on_response(DefaultOnResponse::new().level(tracing::Level::INFO))
+                .on_response(DefaultOnResponse::new().level(tracing::Level::INFO)),
         )
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
@@ -621,7 +665,7 @@ async fn status_check(State(state): State<Arc<RestGatewayState>>) -> Json<serde_
         "uptime": "operational",
         "services": {
             "bank": "connected",
-            "auth": "connected", 
+            "auth": "connected",
             "tx": "connected"
         }
     }))
@@ -629,6 +673,7 @@ async fn status_check(State(state): State<Arc<RestGatewayState>>) -> Json<serde_
 
 /// REST Gateway server
 pub struct RestGateway {
+    #[allow(dead_code)]
     config: RestGatewayConfig,
     router: Router,
 }
@@ -638,10 +683,10 @@ impl RestGateway {
     pub async fn new(config: RestGatewayConfig) -> Result<Self, Box<dyn std::error::Error>> {
         let state = Arc::new(RestGatewayState::new(config.clone()).await?);
         let router = create_rest_router(state);
-        
+
         Ok(Self { config, router })
     }
-    
+
     /// Get the router for integration with existing server
     pub fn router(self) -> Router {
         self.router
@@ -663,7 +708,7 @@ mod tests {
         assert_eq!(config.grpc_endpoint, "http://[::1]:9090");
         assert!(config.enable_logging);
     }
-    
+
     #[test]
     fn test_pagination_params_default() {
         let params = PaginationParams::default();
@@ -676,12 +721,17 @@ mod tests {
     async fn test_rest_gateway_initialization() {
         let config = RestGatewayConfig::default();
         let state = RestGatewayState::new(config).await.unwrap();
-        
+
         // Test that services are properly initialized
-        assert!(state.bank_service.as_ref().balance(tonic::Request::new(bank::QueryBalanceRequest {
-            address: "cosmos1test".to_string(),
-            denom: "stake".to_string(),
-        })).await.is_ok());
+        assert!(state
+            .bank_service
+            .as_ref()
+            .balance(tonic::Request::new(bank::QueryBalanceRequest {
+                address: "cosmos1test".to_string(),
+                denom: "stake".to_string(),
+            }))
+            .await
+            .is_ok());
     }
 
     #[tokio::test]
@@ -691,7 +741,12 @@ mod tests {
         let app = create_rest_router(state);
 
         let response = app
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -715,10 +770,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let balance_response: BalanceResponse = serde_json::from_slice(&body).unwrap();
-        
+
         // Should return the balance we set up in initialization
         assert_eq!(balance_response.balance.denom, "stake");
         assert_eq!(balance_response.balance.amount, "1000000");
@@ -741,17 +798,19 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let account_response: AccountResponse = serde_json::from_slice(&body).unwrap();
-        
+
         // Should return the account we set up in initialization
         assert_eq!(account_response.account.address, "cosmos1test");
         assert_eq!(account_response.account.account_number, "1");
         assert_eq!(account_response.account.sequence, "0");
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_cors_headers() {
         let config = RestGatewayConfig::default();
         let state = Arc::new(RestGatewayState::new(config).await.unwrap());
@@ -771,7 +830,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        
+
         let headers = response.headers();
         assert!(headers.contains_key("access-control-allow-origin"));
         assert!(headers.contains_key("access-control-allow-methods"));

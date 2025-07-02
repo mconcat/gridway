@@ -99,7 +99,7 @@ impl TransactionVerifier {
 
     /// Add expected signer data for verification
     pub fn add_signer(&mut self, signer: SignerData) {
-        self.signer_data.insert(signer.address.clone(), signer);
+        self.signer_data.insert(signer.address, signer);
     }
 
     /// Verify a transaction's signatures
@@ -245,9 +245,8 @@ impl TransactionVerifier {
             "sequence": "0"  // Would be actual sequence
         });
 
-        let json_string = serde_json::to_string(&json_doc).map_err(|e| {
-            VerificationError::InvalidSignDoc(format!("JSON encoding failed: {}", e))
-        })?;
+        let json_string = serde_json::to_string(&json_doc)
+            .map_err(|e| VerificationError::InvalidSignDoc(format!("JSON encoding failed: {e}")))?;
 
         Ok(json_string.into_bytes())
     }
@@ -260,7 +259,7 @@ impl Default for TransactionVerifier {
 }
 
 /// Create sign bytes for SIGN_MODE_DIRECT (simplified deterministic format)
-/// 
+///
 /// This function creates a deterministic byte representation of a SignDoc for signature verification.
 /// In a full implementation, this would use proper protobuf serialization.
 /// For POC, we use a simplified deterministic format.
@@ -460,13 +459,13 @@ mod tests {
         // Setup verifier with expected signers
         let mut verifier = TransactionVerifier::new();
         verifier.add_signer(SignerData {
-            address: address1.clone(),
+            address: address1,
             sequence: 1,
             account_number: 100,
             chain_id: "test-chain".to_string(),
         });
         verifier.add_signer(SignerData {
-            address: address2.clone(),
+            address: address2,
             sequence: 2,
             account_number: 200,
             chain_id: "test-chain".to_string(),
@@ -543,7 +542,7 @@ mod tests {
 
         // Setup verifier expecting sequence 5
         let signer_data = SignerData {
-            address: address.clone(),
+            address,
             sequence: 5,
             account_number: 100,
             chain_id: "test-chain".to_string(),

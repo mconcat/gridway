@@ -38,8 +38,8 @@ pub fn verify_signature(
     match key {
         PublicKey::Secp256k1(k) => {
             use k256::ecdsa::Signature;
-            let sig = Signature::from_der(signature)
-                .map_err(|_| SignatureError::VerificationFailed)?;
+            let sig =
+                Signature::from_der(signature).map_err(|_| SignatureError::VerificationFailed)?;
             k.verify(message, &sig)
                 .map_err(|_| SignatureError::VerificationFailed)?;
             Ok(())

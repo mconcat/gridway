@@ -1,8 +1,8 @@
 //! Key representations using static enum dispatch
 
 use base64::{engine::general_purpose, Engine as _};
-use helium_types::address::AccAddress;
 use ed25519_dalek::{SigningKey as Ed25519PrivKey, VerifyingKey as Ed25519PubKey};
+use helium_types::address::AccAddress;
 use k256::ecdsa::{SigningKey as Secp256k1PrivKey, VerifyingKey as Secp256k1PubKey};
 use serde::{Deserialize, Serialize};
 
@@ -65,7 +65,7 @@ impl PublicKey {
                     .map_err(|e| e.to_string())?;
                 Ok(PublicKey::Ed25519(key))
             }
-            _ => Err(format!("unknown public key type: {}", type_url)),
+            _ => Err(format!("unknown public key type: {type_url}")),
         }
     }
 

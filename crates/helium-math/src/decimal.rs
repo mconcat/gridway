@@ -13,7 +13,7 @@ pub struct Dec(Decimal);
 
 impl Dec {
     /// Create a new Dec from string
-    pub fn from_str(s: &str) -> Result<Self, rust_decimal::Error> {
+    pub fn parse(s: &str) -> Result<Self, rust_decimal::Error> {
         Ok(Self(Decimal::from_str(s)?))
     }
 
