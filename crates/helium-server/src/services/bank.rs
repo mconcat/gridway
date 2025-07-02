@@ -181,7 +181,7 @@ impl BankService {
                 .map_err(BankServiceError::StoreError)?;
         } else {
             store
-                .set(key.into_bytes(), amount.to_string().into_bytes())
+                .set(key.as_bytes(), amount.to_string().as_bytes())
                 .map_err(BankServiceError::StoreError)?;
         }
 

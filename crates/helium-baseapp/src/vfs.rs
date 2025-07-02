@@ -650,7 +650,7 @@ impl VirtualFilesystem {
             let mut store = store
                 .lock()
                 .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {e}")))?;
-            store.set(file_desc.key, file_desc.content)?;
+            store.set(&file_desc.key, &file_desc.content)?;
         }
 
         info!("Successfully closed fd: {}", fd);

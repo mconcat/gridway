@@ -85,7 +85,7 @@ impl GlobalAppStore {
     /// Set a value in a specific namespace
     pub fn set_namespaced(&self, namespace: &str, key: &[u8], value: &[u8]) -> Result<()> {
         let mut ns_store = self.get_namespace(namespace)?;
-        ns_store.set(key.to_vec(), value.to_vec())
+        ns_store.set(key, value)
     }
 
     /// Delete a value from a specific namespace
@@ -156,19 +156,19 @@ impl KVStore for NamespacedStore {
         store.get(&prefixed_key)
     }
 
-    fn set(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+    fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
         if self.config.read_only {
             return Err(StoreError::WriteFailed(
                 "Namespace is read-only".to_string(),
             ));
         }
 
-        let prefixed_key = self.prefix_key(&key);
+        let prefixed_key = self.prefix_key(key);
         let mut store = self
             .store
             .lock()
             .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {e}")))?;
-        store.set(prefixed_key, value)
+        store.set(&prefixed_key, value)
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<()> {
@@ -195,7 +195,7 @@ impl KVStore for NamespacedStore {
         store.has(&prefixed_key)
     }
 
-    fn prefix_iterator(&self, prefix: &[u8]) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)>> {
+    fn prefix_iterator(&self, prefix: &[u8]) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + '_> {
         let full_prefix = self.prefix_key(prefix);
         let store = match self.store.lock() {
             Ok(s) => s,
@@ -286,7 +286,7 @@ mod tests {
         assert!(ns_store.get(b"nonexistent").unwrap().is_none());
         assert!(!ns_store.has(b"nonexistent").unwrap());
 
-        ns_store.set(b"key".to_vec(), b"value".to_vec()).unwrap();
+        ns_store.set(b"key", b"value").unwrap();
         assert!(ns_store.has(b"key").unwrap());
         assert_eq!(ns_store.get(b"key").unwrap().unwrap(), b"value");
 
@@ -307,7 +307,7 @@ mod tests {
         assert!(!ns_store.has(b"key").unwrap());
 
         // Write operations should fail
-        assert!(ns_store.set(b"key".to_vec(), b"value".to_vec()).is_err());
+        assert!(ns_store.set(b"key", b"value").is_err());
         assert!(ns_store.delete(b"key").is_err());
     }
 

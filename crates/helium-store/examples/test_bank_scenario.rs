@@ -1,4 +1,6 @@
-use helium_store::{KVStore, MemStore, StateManager};
+use helium_store::{GlobalAppStore, JMTStore, KVStore, MemStore, StateManager};
+use std::sync::{Arc, Mutex};
+use tempfile::tempdir;
 
 fn main() {
     println!("Testing bank service scenario with StateManager...\n");
@@ -11,18 +13,10 @@ fn main() {
     println!("1. Setting initial balances...");
     {
         let store = state_manager.get_store_mut("bank").unwrap();
-        store
-            .set(b"balance_cosmos1test_stake".to_vec(), b"1000".to_vec())
-            .unwrap();
-        store
-            .set(b"balance_cosmos1test_atom".to_vec(), b"500".to_vec())
-            .unwrap();
-        store
-            .set(b"balance_cosmos1other_stake".to_vec(), b"2000".to_vec())
-            .unwrap();
-        store
-            .set(b"balance_cosmos1other_atom".to_vec(), b"750".to_vec())
-            .unwrap();
+        store.set(b"balance_cosmos1test_stake", b"1000").unwrap();
+        store.set(b"balance_cosmos1test_atom", b"500").unwrap();
+        store.set(b"balance_cosmos1other_stake", b"2000").unwrap();
+        store.set(b"balance_cosmos1other_atom", b"750").unwrap();
     }
 
     // Commit the changes
@@ -72,14 +66,14 @@ fn main() {
 
         store
             .set(
-                b"balance_cosmos1test_stake".to_vec(),
-                new_test_stake.to_string().into_bytes(),
+                b"balance_cosmos1test_stake",
+                &new_test_stake.to_string().into_bytes(),
             )
             .unwrap();
         store
             .set(
-                b"balance_cosmos1other_stake".to_vec(),
-                new_other_stake.to_string().into_bytes(),
+                b"balance_cosmos1other_stake",
+                &new_other_stake.to_string().into_bytes(),
             )
             .unwrap();
 

@@ -362,16 +362,12 @@ mod tests {
         // Write to different namespaces
         {
             let auth_store = state_manager.get_store_mut("auth").unwrap();
-            auth_store
-                .set(b"key1".to_vec(), b"auth_value".to_vec())
-                .unwrap();
+            auth_store.set(b"key1", b"auth_value").unwrap();
         }
 
         {
             let bank_store = state_manager.get_store_mut("bank").unwrap();
-            bank_store
-                .set(b"key1".to_vec(), b"bank_value".to_vec())
-                .unwrap();
+            bank_store.set(b"key1", b"bank_value").unwrap();
         }
 
         // Verify isolation

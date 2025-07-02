@@ -133,3 +133,61 @@ WASI modules may show profile warnings. These are expected but should ideally be
 [profile.release]
 opt-level = 3
 ```
+
+## Merge Conflict Resolution Guidelines
+
+### 1. Check Definitions and Usages First
+
+**Principle**: Before resolving any conflict, always check the relevant definitions (traits, interfaces, types) and their usages across the codebase.
+
+**Why**: Conflicts often arise from changes to fundamental definitions. Resolving implementation conflicts without checking the underlying definitions leads to compilation errors.
+
+**How**:
+- For method conflicts, check the trait/interface definition first
+- For type conflicts, check where the type is defined and used
+- For import conflicts, verify what's actually exported from the module
+
+### 2. Resolve by Dependency Order
+
+**Principle**: Understand the dependency graph of your crates/modules and resolve conflicts starting from the most foundational (least dependent) components.
+
+**Why**: Higher-level crates depend on lower-level ones. Fixing conflicts in dependency order prevents cascading errors and repeated work.
+
+**How**:
+1. Identify crate dependencies (check `Cargo.toml` files)
+2. Start with leaf crates (those that don't depend on other workspace crates)
+3. After resolving conflicts in each crate, run `cargo build -p <crate-name>` to verify
+4. Only move to dependent crates after dependencies compile successfully
+
+**Example Order**:
+```
+helium-store (no workspace dependencies)
+  ↓
+helium-types (depends on store)
+  ↓
+helium-crypto (depends on types)
+  ↓
+helium-baseapp (depends on all above)
+```
+
+### 3. Ask When Uncertain
+
+**Principle**: When multiple valid resolutions exist, ask for clarification rather than guessing.
+
+**Why**: Architecture decisions, performance considerations, or project conventions often dictate the "correct" choice, which may not be obvious from the code alone.
+
+**When to Ask**:
+- Two approaches both work but have different implications
+- The conflict involves architectural decisions
+- You're unsure about project conventions or future direction
+
+### 4. Maintain Consistency
+
+**Principle**: When both conflicting approaches are valid, choose the one that maintains consistency with the existing codebase patterns.
+
+**Why**: Consistency makes code more maintainable and reduces cognitive load for developers.
+
+**How**:
+- Check similar code in the project for patterns
+- Prefer the approach used elsewhere in the codebase
+- If introducing a new pattern, apply it consistently across all affected files
