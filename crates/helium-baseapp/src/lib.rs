@@ -426,9 +426,7 @@ impl BaseApp {
             }
         } else {
             // Module not found - use placeholder
-            log::warn!(
-                "BeginBlock WASI module not found at {module_path}, using placeholder"
-            );
+            log::warn!("BeginBlock WASI module not found at {module_path}, using placeholder");
             Ok(vec![])
         }
     }
@@ -594,9 +592,7 @@ impl BaseApp {
             }
         } else {
             // Module not found - use placeholder
-            log::warn!(
-                "EndBlock WASI module not found at {module_path}, using placeholder"
-            );
+            log::warn!("EndBlock WASI module not found at {module_path}, using placeholder");
             Ok(vec![])
         }
     }
@@ -764,9 +760,7 @@ impl BaseApp {
                 Ok(result) => {
                     let response: DecodeResponse =
                         serde_json::from_slice(&result.stdout).map_err(|e| {
-                            BaseAppError::TxFailed(format!(
-                                "Failed to parse decode response: {e}"
-                            ))
+                            BaseAppError::TxFailed(format!("Failed to parse decode response: {e}"))
                         })?;
 
                     if !response.success {
@@ -792,9 +786,7 @@ impl BaseApp {
             }
         } else {
             // Module not found - return placeholder decoded tx
-            log::warn!(
-                "TxDecoder WASI module not found at {module_path}, using placeholder"
-            );
+            log::warn!("TxDecoder WASI module not found at {module_path}, using placeholder");
             Ok(serde_json::json!({
                 "body": {
                     "messages": [],

@@ -316,9 +316,8 @@ impl BankService {
     /// Process a MsgSend transaction
     async fn process_send_msg(&self, msg: &MsgSend) -> Result<(), BankServiceError> {
         // Validate the message
-        msg.validate_basic().map_err(|e| {
-            BankServiceError::TransactionFailed(format!("validation failed: {e}"))
-        })?;
+        msg.validate_basic()
+            .map_err(|e| BankServiceError::TransactionFailed(format!("validation failed: {e}")))?;
 
         // Process each coin in the amount
         for coin in msg.amount.as_slice() {

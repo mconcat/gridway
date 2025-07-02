@@ -357,9 +357,8 @@ impl FileKeyring {
 
         // Import from private key hex
         if let Some(privkey_hex) = &exported.privkey_hex {
-            let privkey_bytes = hex::decode(privkey_hex).map_err(|e| {
-                KeyringError::BackendError(format!("Invalid hex private key: {e}"))
-            })?;
+            let privkey_bytes = hex::decode(privkey_hex)
+                .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {e}")))?;
 
             let privkey = match exported.key_type.as_str() {
                 "secp256k1" => {

@@ -13,10 +13,10 @@ cargo build --all
 # 2. Run all tests
 cargo test --all
 
-# 3. Check formatting (MUST match CI exactly)
-cargo fmt --all -- --check
+# 3. Check formatting 
+cargo fmt --all
 
-# 4. Run clippy with CI settings
+# 4. Run clippy
 cargo clippy --fix --all
 
 # 5. If you fixed formatting issues, run formatter

@@ -277,18 +277,17 @@ impl TxBuilder {
     fn calculate_fee_from_gas_price(&self, gas_price: &str, gas_limit: u64) -> Result<Coins> {
         // Parse gas price (e.g., "0.025uatom")
         let (amount_str, denom) = self.parse_gas_price(gas_price)?;
-        let gas_price_amount: f64 = amount_str.parse().map_err(|e| {
-            ClientError::InvalidResponse(format!("invalid gas price amount: {e}"))
-        })?;
+        let gas_price_amount: f64 = amount_str
+            .parse()
+            .map_err(|e| ClientError::InvalidResponse(format!("invalid gas price amount: {e}")))?;
 
         // Calculate total fee
         let fee_amount = (gas_price_amount * gas_limit as f64).ceil() as u64;
 
         // Create fee coins
         use helium_math::{Coin, Int};
-        let fee_coin = Coin::new(denom, Int::from_u64(fee_amount)).map_err(|e| {
-            ClientError::InvalidResponse(format!("failed to create fee coin: {e}"))
-        })?;
+        let fee_coin = Coin::new(denom, Int::from_u64(fee_amount))
+            .map_err(|e| ClientError::InvalidResponse(format!("failed to create fee coin: {e}")))?;
 
         Coins::new(vec![fee_coin])
             .map_err(|e| ClientError::InvalidResponse(format!("failed to create fee coins: {e}")))
@@ -461,9 +460,8 @@ impl TxBuilder {
             use helium_types::tx::TxBodyProto;
             let body_proto = TxBodyProto::from(&raw_tx.body);
             let mut buf = Vec::new();
-            prost::Message::encode(&body_proto, &mut buf).map_err(|e| {
-                ClientError::InvalidResponse(format!("Failed to encode body: {e}"))
-            })?;
+            prost::Message::encode(&body_proto, &mut buf)
+                .map_err(|e| ClientError::InvalidResponse(format!("Failed to encode body: {e}")))?;
             buf
         };
         let auth_info_bytes = {
@@ -515,16 +513,12 @@ impl TxBuilder {
                     use sha2::{Digest, Sha256};
                     let message_hash = Sha256::digest(&sign_bytes);
                     verify_signature(&public_key, &message_hash, &signature).map_err(|e| {
-                        ClientError::InvalidResponse(format!(
-                            "signature verification failed: {e}"
-                        ))
+                        ClientError::InvalidResponse(format!("signature verification failed: {e}"))
                     })?;
                 }
                 PrivateKey::Ed25519(_) => {
                     verify_signature(&public_key, &sign_bytes, &signature).map_err(|e| {
-                        ClientError::InvalidResponse(format!(
-                            "signature verification failed: {e}"
-                        ))
+                        ClientError::InvalidResponse(format!("signature verification failed: {e}"))
                     })?;
                 }
             }
@@ -547,9 +541,9 @@ impl TxBuilder {
     fn encode_tx(&self, tx: &RawTx) -> Result<Vec<u8>> {
         use helium_types::tx::TxDecoder;
         let decoder = TxDecoder::new();
-        decoder.encode_tx(tx).map_err(|e| {
-            ClientError::InvalidResponse(format!("Failed to encode transaction: {e}"))
-        })
+        decoder
+            .encode_tx(tx)
+            .map_err(|e| ClientError::InvalidResponse(format!("Failed to encode transaction: {e}")))
     }
 
     /// Calculate transaction hash (simplified SHA256)

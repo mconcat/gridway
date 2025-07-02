@@ -245,9 +245,8 @@ impl TransactionVerifier {
             "sequence": "0"  // Would be actual sequence
         });
 
-        let json_string = serde_json::to_string(&json_doc).map_err(|e| {
-            VerificationError::InvalidSignDoc(format!("JSON encoding failed: {e}"))
-        })?;
+        let json_string = serde_json::to_string(&json_doc)
+            .map_err(|e| VerificationError::InvalidSignDoc(format!("JSON encoding failed: {e}")))?;
 
         Ok(json_string.into_bytes())
     }

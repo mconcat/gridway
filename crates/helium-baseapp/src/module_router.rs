@@ -547,9 +547,7 @@ impl ModuleRouter {
         };
 
         let error = if !success {
-            Some(format!(
-                "Module execution failed with code: {success_code}"
-            ))
+            Some(format!("Module execution failed with code: {success_code}"))
         } else {
             None
         };
@@ -655,9 +653,7 @@ impl ModuleRouter {
             configs
                 .get(module_name)
                 .ok_or_else(|| {
-                    RouterError::ModuleLoadError(format!(
-                        "Module config not found: {module_name}"
-                    ))
+                    RouterError::ModuleLoadError(format!("Module config not found: {module_name}"))
                 })?
                 .clone()
         };

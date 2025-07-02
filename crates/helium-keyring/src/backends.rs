@@ -350,9 +350,7 @@ impl OsKeyring {
 
         let key_json = entry.get_password().map_err(|e| match e {
             keyring::Error::NoEntry => KeyringError::KeyNotFound(name.to_string()),
-            _ => {
-                KeyringError::BackendError(format!("Failed to retrieve key from OS keyring: {e}"))
-            }
+            _ => KeyringError::BackendError(format!("Failed to retrieve key from OS keyring: {e}")),
         })?;
 
         let key_data: SerializableKey = serde_json::from_str(&key_json).map_err(|e| {
@@ -391,9 +389,7 @@ impl OsKeyring {
 
         match registry_entry.get_password() {
             Ok(registry_json) => {
-                println!(
-                    "DEBUG: list_keys_from_os: got registry data: {registry_json}"
-                );
+                println!("DEBUG: list_keys_from_os: got registry data: {registry_json}");
                 let key_names: Vec<String> = serde_json::from_str(&registry_json).map_err(|e| {
                     KeyringError::BackendError(format!("Failed to parse key registry: {e}"))
                 })?;
@@ -444,9 +440,7 @@ impl OsKeyring {
                 KeyringError::BackendError(format!("Failed to serialize key registry: {e}"))
             })?;
 
-            println!(
-                "DEBUG: add_key_to_registry: updating registry with: {registry_json}"
-            );
+            println!("DEBUG: add_key_to_registry: updating registry with: {registry_json}");
 
             registry_entry.set_password(&registry_json).map_err(|e| {
                 KeyringError::BackendError(format!("Failed to update key registry: {e}"))
@@ -458,14 +452,10 @@ impl OsKeyring {
             // Verify the write was successful
             match registry_entry.get_password() {
                 Ok(stored_json) => {
-                    println!(
-                        "DEBUG: add_key_to_registry: verified write, stored: {stored_json}"
-                    );
+                    println!("DEBUG: add_key_to_registry: verified write, stored: {stored_json}");
                 }
                 Err(e) => {
-                    println!(
-                        "DEBUG: add_key_to_registry: WARNING - could not verify write: {e:?}"
-                    );
+                    println!("DEBUG: add_key_to_registry: WARNING - could not verify write: {e:?}");
                 }
             }
         }
