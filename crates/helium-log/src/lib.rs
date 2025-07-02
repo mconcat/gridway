@@ -8,14 +8,13 @@ pub use tracing::{debug, error, info, instrument, span, trace, warn, Level, Span
 pub use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 /// Initialize the global tracing subscriber with structured output
-/// 
+///
 /// This function sets up tracing-subscriber with proper formatting and filtering
 /// to match the architecture specified in PLAN.md.
 pub fn init_tracing() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with(
             fmt::layer()
@@ -32,7 +31,9 @@ pub fn init_tracing() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 /// Initialize tracing with a specific level filter
-pub fn init_tracing_with_level(level: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub fn init_tracing_with_level(
+    level: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::registry()
         .with(EnvFilter::new(level))
         .with(

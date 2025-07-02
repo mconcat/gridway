@@ -5,7 +5,7 @@
 
 use crate::grpc::{bank, Coin};
 use helium_baseapp::BaseApp;
-use helium_store::{StateManager, StoreError, KVStore};
+use helium_store::{KVStore, StateManager, StoreError};
 use helium_types::{msgs::bank::MsgSend, tx::SdkMsg};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -128,7 +128,7 @@ impl BankService {
 
         // First check if there's a cached version
         if let Ok(store) = state_manager.get_store_mut("bank") {
-            let key = format!("balance_{}_{}", address, denom);
+            let key = format!("balance_{address}_{denom}");
             match store.get(key.as_bytes()) {
                 Ok(Some(data)) => {
                     let amount_str = String::from_utf8_lossy(&data);
@@ -148,7 +148,7 @@ impl BankService {
             .get_store("bank")
             .map_err(BankServiceError::StoreError)?;
 
-        let key = format!("balance_{}_{}", address, denom);
+        let key = format!("balance_{address}_{denom}");
         match store.get(key.as_bytes()) {
             Ok(Some(data)) => {
                 let amount_str = String::from_utf8_lossy(&data);
@@ -173,7 +173,7 @@ impl BankService {
             .get_store_mut("bank")
             .map_err(BankServiceError::StoreError)?;
 
-        let key = format!("balance_{}_{}", address, denom);
+        let key = format!("balance_{address}_{denom}");
         if amount == 0 {
             // Remove zero balances to save space
             store
@@ -200,7 +200,7 @@ impl BankService {
             .get_store("bank")
             .map_err(BankServiceError::StoreError)?;
 
-        let prefix = format!("balance_{}_", address);
+        let prefix = format!("balance_{address}_");
         let mut balances = Vec::new();
 
         for (key, value) in store.prefix_iterator(prefix.as_bytes()) {
@@ -316,9 +316,8 @@ impl BankService {
     /// Process a MsgSend transaction
     async fn process_send_msg(&self, msg: &MsgSend) -> Result<(), BankServiceError> {
         // Validate the message
-        msg.validate_basic().map_err(|e| {
-            BankServiceError::TransactionFailed(format!("validation failed: {}", e))
-        })?;
+        msg.validate_basic()
+            .map_err(|e| BankServiceError::TransactionFailed(format!("validation failed: {e}")))?;
 
         // Process each coin in the amount
         for coin in msg.amount.as_slice() {
@@ -356,7 +355,7 @@ impl BankService {
             tx_bytes.hash(&mut hasher);
             let hash = hasher.finish();
 
-            Ok(format!("{:X}", hash))
+            Ok(format!("{hash:X}"))
         } else {
             Err(BankServiceError::TransactionFailed(
                 "unsupported transaction type".to_string(),
@@ -453,17 +452,20 @@ mod tests {
     use super::*;
     use crate::grpc::bank::Query;
     use helium_baseapp::BaseApp;
-    use helium_store::MemStore;
 
     async fn create_test_service() -> BankService {
         // Create StateManager with unique temp directory for each test
         let mut state_manager = StateManager::new_with_memstore();
-        
+
         // Register the bank namespace
-        state_manager.register_namespace("bank".to_string(), false).unwrap();
-        
+        state_manager
+            .register_namespace("bank".to_string(), false)
+            .unwrap();
+
         let state_manager = Arc::new(RwLock::new(state_manager));
-        let base_app = Arc::new(RwLock::new(BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp")));
+        let base_app = Arc::new(RwLock::new(
+            BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp"),
+        ));
 
         BankService::with_defaults(state_manager, base_app)
     }

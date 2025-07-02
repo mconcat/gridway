@@ -1,18 +1,18 @@
 //! Transaction builder for constructing and signing transactions
 
 use crate::{Client, ClientError, Result};
-use helium_crypto::{
-    create_sign_doc, sign_message, verify_signature, PrivateKey, PublicKey, SignDoc, SignMode,
-};
 use helium_crypto::verify::create_sign_bytes_direct;
+use helium_crypto::{
+    create_sign_doc, sign_message, verify_signature, PrivateKey, PublicKey, SignMode,
+};
 use helium_math::Coins;
 use helium_types::{
     address::AccAddress,
-    Config,
     tx::{
         AuthInfo, Fee, FeeAmount, ModeInfo, ModeInfoSingle, RawTx, SdkMsg, SignerInfo, TxBody,
         TxMessage,
     },
+    Config,
 };
 use std::sync::Arc;
 
@@ -84,8 +84,8 @@ impl Clone for TxBuilder {
             sequence: self.sequence,
             gas_limit: self.gas_limit,
             fee_amount: self.fee_amount.clone(),
-            fee_payer: self.fee_payer.clone(),
-            fee_granter: self.fee_granter.clone(),
+            fee_payer: self.fee_payer,
+            fee_granter: self.fee_granter,
             memo: self.memo.clone(),
             timeout_height: self.timeout_height,
             // Note: We cannot clone trait objects, so we'll create an empty vec
@@ -219,7 +219,8 @@ impl TxBuilder {
         };
 
         // Parse gas price and calculate fee
-        let fee_coins = self.calculate_fee_from_gas_price(&self.config.gas.default_price, estimated_gas)?;
+        let fee_coins =
+            self.calculate_fee_from_gas_price(&self.config.gas.default_price, estimated_gas)?;
 
         self.gas_limit = estimated_gas;
         self.fee_amount = fee_coins.clone();
@@ -228,22 +229,20 @@ impl TxBuilder {
     }
 
     /// Simulate transaction using the client to get accurate gas estimation
-    async fn simulate_with_client(
-        &self,
-        client: &Arc<Client>,
-    ) -> Result<u64> {
+    async fn simulate_with_client(&self, client: &Arc<Client>) -> Result<u64> {
         // Build a temporary transaction for simulation
         let temp_tx = self.build_for_simulation()?;
-        
+
         // Encode the transaction
         let tx_bytes = self.encode_tx(&temp_tx)?;
-        
+
         // Simulate using the client
         let simulation_result = client.simulate_transaction(&tx_bytes).await?;
-        
+
         // Apply gas adjustment factor
-        let adjusted_gas = (simulation_result.gas_used as f64 * self.config.gas.adjustment_factor) as u64;
-        
+        let adjusted_gas =
+            (simulation_result.gas_used as f64 * self.config.gas.adjustment_factor) as u64;
+
         Ok(adjusted_gas.clamp(self.config.gas.min_limit, self.config.gas.max_limit))
     }
 
@@ -251,7 +250,7 @@ impl TxBuilder {
     fn build_for_simulation(&self) -> Result<RawTx> {
         // Create a temporary builder with placeholder account info for simulation
         let mut temp_builder = self.clone();
-        
+
         // Use placeholder values if account info is not set
         if temp_builder.account_number.is_none() {
             temp_builder.account_number = Some(0);
@@ -259,7 +258,7 @@ impl TxBuilder {
         if temp_builder.sequence.is_none() {
             temp_builder.sequence = Some(0);
         }
-        
+
         temp_builder.build()
     }
 
@@ -278,21 +277,20 @@ impl TxBuilder {
     fn calculate_fee_from_gas_price(&self, gas_price: &str, gas_limit: u64) -> Result<Coins> {
         // Parse gas price (e.g., "0.025uatom")
         let (amount_str, denom) = self.parse_gas_price(gas_price)?;
-        let gas_price_amount: f64 = amount_str.parse().map_err(|e| {
-            ClientError::InvalidResponse(format!("invalid gas price amount: {}", e))
-        })?;
+        let gas_price_amount: f64 = amount_str
+            .parse()
+            .map_err(|e| ClientError::InvalidResponse(format!("invalid gas price amount: {e}")))?;
 
         // Calculate total fee
         let fee_amount = (gas_price_amount * gas_limit as f64).ceil() as u64;
 
         // Create fee coins
         use helium_math::{Coin, Int};
-        let fee_coin = Coin::new(denom, Int::from_u64(fee_amount)).map_err(|e| {
-            ClientError::InvalidResponse(format!("failed to create fee coin: {}", e))
-        })?;
+        let fee_coin = Coin::new(denom, Int::from_u64(fee_amount))
+            .map_err(|e| ClientError::InvalidResponse(format!("failed to create fee coin: {e}")))?;
 
         Coins::new(vec![fee_coin])
-            .map_err(|e| ClientError::InvalidResponse(format!("failed to create fee coins: {}", e)))
+            .map_err(|e| ClientError::InvalidResponse(format!("failed to create fee coins: {e}")))
     }
 
     /// Parse gas price string (e.g., "0.025uatom" -> ("0.025", "uatom"))
@@ -361,7 +359,7 @@ impl TxBuilder {
         // Validate all messages
         for msg in &self.messages {
             msg.validate_basic().map_err(|e| {
-                ClientError::InvalidResponse(format!("message validation failed: {}", e))
+                ClientError::InvalidResponse(format!("message validation failed: {e}"))
             })?;
         }
 
@@ -463,15 +461,16 @@ impl TxBuilder {
             let body_proto = TxBodyProto::from(&raw_tx.body);
             let mut buf = Vec::new();
             prost::Message::encode(&body_proto, &mut buf)
-                .map_err(|e| ClientError::InvalidResponse(format!("Failed to encode body: {}", e)))?;
+                .map_err(|e| ClientError::InvalidResponse(format!("Failed to encode body: {e}")))?;
             buf
         };
         let auth_info_bytes = {
-            use helium_types::tx::AuthInfoProto;  
+            use helium_types::tx::AuthInfoProto;
             let auth_info_proto = AuthInfoProto::from(&raw_tx.auth_info);
             let mut buf = Vec::new();
-            prost::Message::encode(&auth_info_proto, &mut buf)
-                .map_err(|e| ClientError::InvalidResponse(format!("Failed to encode auth_info: {}", e)))?;
+            prost::Message::encode(&auth_info_proto, &mut buf).map_err(|e| {
+                ClientError::InvalidResponse(format!("Failed to encode auth_info: {e}"))
+            })?;
             buf
         };
 
@@ -485,7 +484,7 @@ impl TxBuilder {
 
         // Create sign bytes for signing using a simple deterministic format
         let sign_bytes = create_sign_bytes_direct(&sign_doc).map_err(|e| {
-            ClientError::InvalidResponse(format!("failed to create sign bytes: {}", e))
+            ClientError::InvalidResponse(format!("failed to create sign bytes: {e}"))
         })?;
 
         // Sign the document based on key type
@@ -495,12 +494,12 @@ impl TxBuilder {
                 use sha2::{Digest, Sha256};
                 let message_hash = Sha256::digest(&sign_bytes);
                 sign_message(private_key, &message_hash)
-                    .map_err(|e| ClientError::InvalidResponse(format!("signing failed: {}", e)))?
+                    .map_err(|e| ClientError::InvalidResponse(format!("signing failed: {e}")))?
             }
             PrivateKey::Ed25519(_) => {
                 // For Ed25519, sign the message directly
                 sign_message(private_key, &sign_bytes)
-                    .map_err(|e| ClientError::InvalidResponse(format!("signing failed: {}", e)))?
+                    .map_err(|e| ClientError::InvalidResponse(format!("signing failed: {e}")))?
             }
         };
 
@@ -514,18 +513,12 @@ impl TxBuilder {
                     use sha2::{Digest, Sha256};
                     let message_hash = Sha256::digest(&sign_bytes);
                     verify_signature(&public_key, &message_hash, &signature).map_err(|e| {
-                        ClientError::InvalidResponse(format!(
-                            "signature verification failed: {}",
-                            e
-                        ))
+                        ClientError::InvalidResponse(format!("signature verification failed: {e}"))
                     })?;
                 }
                 PrivateKey::Ed25519(_) => {
                     verify_signature(&public_key, &sign_bytes, &signature).map_err(|e| {
-                        ClientError::InvalidResponse(format!(
-                            "signature verification failed: {}",
-                            e
-                        ))
+                        ClientError::InvalidResponse(format!("signature verification failed: {e}"))
                     })?;
                 }
             }
@@ -548,9 +541,9 @@ impl TxBuilder {
     fn encode_tx(&self, tx: &RawTx) -> Result<Vec<u8>> {
         use helium_types::tx::TxDecoder;
         let decoder = TxDecoder::new();
-        decoder.encode_tx(tx).map_err(|e| {
-            ClientError::InvalidResponse(format!("Failed to encode transaction: {}", e))
-        })
+        decoder
+            .encode_tx(tx)
+            .map_err(|e| ClientError::InvalidResponse(format!("Failed to encode transaction: {e}")))
     }
 
     /// Calculate transaction hash (simplified SHA256)
@@ -659,7 +652,8 @@ mod tests {
         let coins = create_test_coins();
 
         let config = Config::default();
-        let builder = TxBuilder::bank_send("test-chain".to_string(), from_addr, to_addr, coins, config);
+        let builder =
+            TxBuilder::bank_send("test-chain".to_string(), from_addr, to_addr, coins, config);
 
         assert_eq!(builder.chain_id, "test-chain");
         assert_eq!(builder.messages.len(), 1);
@@ -704,7 +698,8 @@ mod tests {
         let msg = MsgSend::new(from_addr, to_addr, coins);
 
         let config = Config::default();
-        let builder = TxBuilder::new("test-chain".to_string(), config.clone()).add_message(Box::new(msg));
+        let builder =
+            TxBuilder::new("test-chain".to_string(), config.clone()).add_message(Box::new(msg));
 
         let estimated_gas = builder.estimate_gas_for_messages();
 
@@ -719,7 +714,8 @@ mod tests {
         let msg = MsgSend::new(from_addr, to_addr, coins);
 
         let config = Config::default();
-        let mut builder = TxBuilder::new("test-chain".to_string(), config.clone()).add_message(Box::new(msg));
+        let mut builder =
+            TxBuilder::new("test-chain".to_string(), config.clone()).add_message(Box::new(msg));
 
         let (gas, fees) = builder.estimate_gas_and_fees().await.unwrap();
 
@@ -739,9 +735,10 @@ mod tests {
         let config = crate::Config::new("http://localhost:26657", "test-chain").unwrap();
         let client = std::sync::Arc::new(crate::Client::new(config));
 
-        let mut builder = TxBuilder::with_client("test-chain".to_string(), client, Config::default())
-            .add_message(Box::new(msg));
-        
+        let mut builder =
+            TxBuilder::with_client("test-chain".to_string(), client, Config::default())
+                .add_message(Box::new(msg));
+
         // This should fall back to simple estimation since no server is running
         let (gas, fees) = builder.estimate_gas_and_fees().await.unwrap();
 
@@ -755,12 +752,13 @@ mod tests {
     #[tokio::test]
     async fn test_auto_fetch_account_info() {
         let (from_addr, _to_addr) = create_test_addresses();
-        
+
         // Create a client
         let config = crate::Config::new("http://localhost:26657", "test-chain").unwrap();
         let client = std::sync::Arc::new(crate::Client::new(config));
 
-        let mut builder = TxBuilder::with_client("test-chain".to_string(), client, Config::default());
+        let mut builder =
+            TxBuilder::with_client("test-chain".to_string(), client, Config::default());
 
         // This should fall back to default values since no server is running
         builder.auto_fetch_account_info(&from_addr).await.unwrap();
@@ -836,12 +834,12 @@ mod tests {
 
         // Should be valid protobuf bytes
         assert!(!tx_bytes.is_empty());
-        
+
         // Verify we can decode the protobuf transaction
         use helium_types::tx::TxDecoder;
         let decoder = TxDecoder::new();
         let decoded_tx = decoder.decode_tx(&tx_bytes).unwrap();
-        
+
         // Verify the decoded transaction matches our input
         assert_eq!(decoded_tx.body.messages.len(), 1);
         assert_eq!(decoded_tx.body.memo, "");
