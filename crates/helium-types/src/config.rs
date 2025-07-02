@@ -251,15 +251,15 @@ impl Config {
         // Create parent directory if it doesn't exist
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                ConfigError::ReadError(format!("Failed to create config directory: {}", e))
+                ConfigError::ReadError(format!("Failed to create config directory: {e}"))
             })?;
         }
 
         let content = toml::to_string_pretty(self)
-            .map_err(|e| ConfigError::ParseError(format!("Failed to serialize config: {}", e)))?;
+            .map_err(|e| ConfigError::ParseError(format!("Failed to serialize config: {e}")))?;
 
         std::fs::write(&config_path, content)
-            .map_err(|e| ConfigError::ReadError(format!("Failed to write config file: {}", e)))?;
+            .map_err(|e| ConfigError::ReadError(format!("Failed to write config file: {e}")))?;
 
         Ok(())
     }
@@ -333,13 +333,12 @@ impl Config {
 
         if number_part.is_empty() || denom_part.is_empty() {
             return Err(ConfigError::InvalidValue(format!(
-                "Invalid gas price format: {}. Expected format: '0.025stake'",
-                price_str
+                "Invalid gas price format: {price_str}. Expected format: '0.025stake'"
             )));
         }
 
         let price = number_part.parse::<f64>().map_err(|_| {
-            ConfigError::InvalidValue(format!("Invalid gas price number: {}", number_part))
+            ConfigError::InvalidValue(format!("Invalid gas price number: {number_part}"))
         })?;
 
         Ok((price, denom_part))

@@ -362,7 +362,7 @@ impl TxDecoder {
             use prost::Message;
 
             let msg = MsgSend::decode(bytes).map_err(|e| {
-                TxDecodeError::InvalidMessageData(format!("failed to decode MsgSend: {}", e))
+                TxDecodeError::InvalidMessageData(format!("failed to decode MsgSend: {e}"))
             })?;
             Ok(Box::new(msg))
         });
@@ -384,17 +384,17 @@ impl TxDecoder {
     /// Decode transaction from JSON (for development)
     fn decode_json_tx(&self, tx_bytes: &[u8]) -> Result<RawTx, TxDecodeError> {
         let tx_str = std::str::from_utf8(tx_bytes)
-            .map_err(|e| TxDecodeError::InvalidFormat(format!("invalid UTF-8: {}", e)))?;
+            .map_err(|e| TxDecodeError::InvalidFormat(format!("invalid UTF-8: {e}")))?;
 
         serde_json::from_str(tx_str)
-            .map_err(|e| TxDecodeError::InvalidFormat(format!("JSON decode error: {}", e)))
+            .map_err(|e| TxDecodeError::InvalidFormat(format!("JSON decode error: {e}")))
     }
 
     /// Decode transaction from protobuf bytes
     fn decode_protobuf_tx(&self, tx_bytes: &[u8]) -> Result<RawTx, TxDecodeError> {
         // Decode the protobuf transaction
         let tx_proto = TxProto::decode(tx_bytes).map_err(|e| {
-            TxDecodeError::ProtobufError(format!("failed to decode transaction: {}", e))
+            TxDecodeError::ProtobufError(format!("failed to decode transaction: {e}"))
         })?;
 
         // Extract and convert the body
@@ -629,7 +629,7 @@ impl TxDecoder {
         // Encode to bytes
         let mut buf = Vec::new();
         tx_proto.encode(&mut buf).map_err(|e| {
-            TxDecodeError::ProtobufError(format!("failed to encode transaction: {}", e))
+            TxDecodeError::ProtobufError(format!("failed to encode transaction: {e}"))
         })?;
 
         Ok(buf)
