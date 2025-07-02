@@ -128,6 +128,9 @@ hex = "0.4"
 anyhow = "1.0"
 toml = "0.8"
 directories = "5.0"
+rand = "0.8"
+base64 = "0.22"
+k256 = { workspace = true }
 
 [[bin]]
 name = "helium"

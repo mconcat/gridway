@@ -1789,6 +1789,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "base64 0.22.1",
  "bytes",
  "clap",
  "cometbft",
@@ -1808,7 +1809,9 @@ dependencies = [
  "helium-store",
  "helium-types",
  "hex",
+ "k256",
  "predicates",
+ "rand",
  "rocksdb",
  "serde",
  "serde_json",
