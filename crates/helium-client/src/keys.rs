@@ -261,7 +261,7 @@ impl KeysHandler {
 
 /// Prompt user for password input (hidden)
 fn prompt_password(prompt: &str) -> KeysResult<String> {
-    print!("{}", prompt);
+    print!("{prompt}");
     io::stdout().flush()?;
     let password = rpassword::read_password()?;
     Ok(password)
@@ -269,7 +269,7 @@ fn prompt_password(prompt: &str) -> KeysResult<String> {
 
 /// Prompt user for text input
 fn prompt_input(prompt: &str) -> KeysResult<String> {
-    print!("{}", prompt);
+    print!("{prompt}");
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
@@ -278,7 +278,7 @@ fn prompt_input(prompt: &str) -> KeysResult<String> {
 
 /// Prompt user for confirmation
 fn confirm(prompt: &str) -> KeysResult<bool> {
-    print!("{} [y/N]: ", prompt);
+    print!("{prompt} [y/N]: ");
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;

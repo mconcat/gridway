@@ -278,7 +278,7 @@ impl TxBuilder {
         // Parse gas price (e.g., "0.025uatom")
         let (amount_str, denom) = self.parse_gas_price(gas_price)?;
         let gas_price_amount: f64 = amount_str.parse().map_err(|e| {
-            ClientError::InvalidResponse(format!("invalid gas price amount: {}", e))
+            ClientError::InvalidResponse(format!("invalid gas price amount: {e}"))
         })?;
 
         // Calculate total fee
@@ -287,11 +287,11 @@ impl TxBuilder {
         // Create fee coins
         use helium_math::{Coin, Int};
         let fee_coin = Coin::new(denom, Int::from_u64(fee_amount)).map_err(|e| {
-            ClientError::InvalidResponse(format!("failed to create fee coin: {}", e))
+            ClientError::InvalidResponse(format!("failed to create fee coin: {e}"))
         })?;
 
         Coins::new(vec![fee_coin])
-            .map_err(|e| ClientError::InvalidResponse(format!("failed to create fee coins: {}", e)))
+            .map_err(|e| ClientError::InvalidResponse(format!("failed to create fee coins: {e}")))
     }
 
     /// Parse gas price string (e.g., "0.025uatom" -> ("0.025", "uatom"))
@@ -360,7 +360,7 @@ impl TxBuilder {
         // Validate all messages
         for msg in &self.messages {
             msg.validate_basic().map_err(|e| {
-                ClientError::InvalidResponse(format!("message validation failed: {}", e))
+                ClientError::InvalidResponse(format!("message validation failed: {e}"))
             })?;
         }
 
@@ -462,7 +462,7 @@ impl TxBuilder {
             let body_proto = TxBodyProto::from(&raw_tx.body);
             let mut buf = Vec::new();
             prost::Message::encode(&body_proto, &mut buf).map_err(|e| {
-                ClientError::InvalidResponse(format!("Failed to encode body: {}", e))
+                ClientError::InvalidResponse(format!("Failed to encode body: {e}"))
             })?;
             buf
         };
@@ -471,7 +471,7 @@ impl TxBuilder {
             let auth_info_proto = AuthInfoProto::from(&raw_tx.auth_info);
             let mut buf = Vec::new();
             prost::Message::encode(&auth_info_proto, &mut buf).map_err(|e| {
-                ClientError::InvalidResponse(format!("Failed to encode auth_info: {}", e))
+                ClientError::InvalidResponse(format!("Failed to encode auth_info: {e}"))
             })?;
             buf
         };
@@ -486,7 +486,7 @@ impl TxBuilder {
 
         // Create sign bytes for signing using a simple deterministic format
         let sign_bytes = create_sign_bytes_direct(&sign_doc).map_err(|e| {
-            ClientError::InvalidResponse(format!("failed to create sign bytes: {}", e))
+            ClientError::InvalidResponse(format!("failed to create sign bytes: {e}"))
         })?;
 
         // Sign the document based on key type
@@ -496,12 +496,12 @@ impl TxBuilder {
                 use sha2::{Digest, Sha256};
                 let message_hash = Sha256::digest(&sign_bytes);
                 sign_message(private_key, &message_hash)
-                    .map_err(|e| ClientError::InvalidResponse(format!("signing failed: {}", e)))?
+                    .map_err(|e| ClientError::InvalidResponse(format!("signing failed: {e}")))?
             }
             PrivateKey::Ed25519(_) => {
                 // For Ed25519, sign the message directly
                 sign_message(private_key, &sign_bytes)
-                    .map_err(|e| ClientError::InvalidResponse(format!("signing failed: {}", e)))?
+                    .map_err(|e| ClientError::InvalidResponse(format!("signing failed: {e}")))?
             }
         };
 
@@ -516,16 +516,14 @@ impl TxBuilder {
                     let message_hash = Sha256::digest(&sign_bytes);
                     verify_signature(&public_key, &message_hash, &signature).map_err(|e| {
                         ClientError::InvalidResponse(format!(
-                            "signature verification failed: {}",
-                            e
+                            "signature verification failed: {e}"
                         ))
                     })?;
                 }
                 PrivateKey::Ed25519(_) => {
                     verify_signature(&public_key, &sign_bytes, &signature).map_err(|e| {
                         ClientError::InvalidResponse(format!(
-                            "signature verification failed: {}",
-                            e
+                            "signature verification failed: {e}"
                         ))
                     })?;
                 }
@@ -550,7 +548,7 @@ impl TxBuilder {
         use helium_types::tx::TxDecoder;
         let decoder = TxDecoder::new();
         decoder.encode_tx(tx).map_err(|e| {
-            ClientError::InvalidResponse(format!("Failed to encode transaction: {}", e))
+            ClientError::InvalidResponse(format!("Failed to encode transaction: {e}"))
         })
     }
 

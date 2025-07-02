@@ -302,15 +302,15 @@ impl CapabilityType {
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         match self {
-            CapabilityType::ReadState(ns) => format!("read_state:{}", ns),
-            CapabilityType::WriteState(ns) => format!("write_state:{}", ns),
-            CapabilityType::DeleteState(ns) => format!("delete_state:{}", ns),
-            CapabilityType::ListState(ns) => format!("list_state:{}", ns),
-            CapabilityType::SendMessage(msg) => format!("send_msg:{}", msg),
-            CapabilityType::ReceiveMessage(msg) => format!("receive_msg:{}", msg),
-            CapabilityType::EmitEvent(evt) => format!("emit_event:{}", evt),
-            CapabilityType::ExecuteModule(module) => format!("execute_module:{}", module),
-            CapabilityType::AllocateMemory(size) => format!("allocate_memory:{}", size),
+            CapabilityType::ReadState(ns) => format!("read_state:{ns}"),
+            CapabilityType::WriteState(ns) => format!("write_state:{ns}"),
+            CapabilityType::DeleteState(ns) => format!("delete_state:{ns}"),
+            CapabilityType::ListState(ns) => format!("list_state:{ns}"),
+            CapabilityType::SendMessage(msg) => format!("send_msg:{msg}"),
+            CapabilityType::ReceiveMessage(msg) => format!("receive_msg:{msg}"),
+            CapabilityType::EmitEvent(evt) => format!("emit_event:{evt}"),
+            CapabilityType::ExecuteModule(module) => format!("execute_module:{module}"),
+            CapabilityType::AllocateMemory(size) => format!("allocate_memory:{size}"),
             CapabilityType::SystemInfo => "system_info".to_string(),
             CapabilityType::CreateCapability => "create_capability".to_string(),
             CapabilityType::DelegateCapability => "delegate_capability".to_string(),
@@ -322,13 +322,13 @@ impl CapabilityType {
                 CryptoCapability::Encrypt => "crypto:encrypt".to_string(),
             },
             CapabilityType::Network(op) => match op {
-                NetworkCapability::HttpRequest(domain) => format!("network:http:{}", domain),
+                NetworkCapability::HttpRequest(domain) => format!("network:http:{domain}"),
                 NetworkCapability::TcpConnect(host, port) => {
-                    format!("network:tcp_connect:{}:{}", host, port)
+                    format!("network:tcp_connect:{host}:{port}")
                 }
-                NetworkCapability::TcpListen(port) => format!("network:tcp_listen:{}", port),
+                NetworkCapability::TcpListen(port) => format!("network:tcp_listen:{port}"),
             },
-            CapabilityType::Custom(ns, op) => format!("custom:{}:{}", ns, op),
+            CapabilityType::Custom(ns, op) => format!("custom:{ns}:{op}"),
         }
     }
 
@@ -438,16 +438,14 @@ impl CapabilityManager {
             // Check if granter has the capability they're trying to grant
             if !self.has_capability(granter, &capability)? {
                 return Err(CapabilityError::NotGranted(format!(
-                    "{} cannot grant capability it doesn't have",
-                    granter
+                    "{granter} cannot grant capability it doesn't have"
                 )));
             }
 
             // Check if the capability is delegatable
             if !self.is_capability_delegatable(granter, &capability)? {
                 return Err(CapabilityError::InvalidDelegation(format!(
-                    "Capability is not delegatable by {}",
-                    granter
+                    "Capability is not delegatable by {granter}"
                 )));
             }
         }
@@ -621,8 +619,7 @@ impl CapabilityManager {
         // Check if from_module has the capability
         if !self.has_capability(from_module, capability)? {
             return Err(CapabilityError::NotGranted(format!(
-                "{} cannot delegate capability it doesn't have",
-                from_module
+                "{from_module} cannot delegate capability it doesn't have"
             )));
         }
 
@@ -689,8 +686,7 @@ impl CapabilityManager {
             "list" => CapabilityType::ListState(resource.to_string()),
             _ => {
                 return Err(CapabilityError::InvalidFormat(format!(
-                    "Unknown operation: {}",
-                    operation
+                    "Unknown operation: {operation}"
                 )))
             }
         };

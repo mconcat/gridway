@@ -240,8 +240,7 @@ impl VirtualFilesystem {
             "write" => Capability::Write(path.to_path_buf()),
             _ => {
                 return Err(VfsError::InvalidOperation(format!(
-                    "Unknown operation: {}",
-                    operation
+                    "Unknown operation: {operation}"
                 )))
             }
         };
@@ -724,7 +723,7 @@ impl VirtualFilesystem {
 
         let mut store = store
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {e}")))?;
         store.delete(&key)?;
 
         info!("Successfully deleted file: {}", path.display());

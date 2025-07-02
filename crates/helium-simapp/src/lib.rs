@@ -157,7 +157,7 @@ impl Simulator {
         let accounts = (0..config.num_accounts)
             .map(|i| {
                 Account::new(
-                    format!("account_{}", i),
+                    format!("account_{i}"),
                     app_config.simulation.default_balance,
                 )
             })
@@ -272,7 +272,7 @@ impl Simulator {
             let block = self.generate_block(height as u64, &mut rng);
             self.process_block(block);
 
-            if height % 100 == 0 {
+            if height.is_multiple_of(100) {
                 debug!(height = %height, "Processed blocks");
             }
 

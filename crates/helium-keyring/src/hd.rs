@@ -83,7 +83,7 @@ impl DerivationPath {
             };
 
             let index = index_str.parse::<u32>().map_err(|_| {
-                KeyringError::BackendError(format!("Invalid path component: {}", component))
+                KeyringError::BackendError(format!("Invalid path component: {component}"))
             })?;
 
             if hardened && index >= (1u32 << 31) {
@@ -112,7 +112,7 @@ impl DerivationPath {
 
     /// Create a custom Cosmos path with different account/address indices
     pub fn cosmos_custom(account: u32, address_index: u32) -> Self {
-        Self::parse(&format!("m/44'/118'/{}'/0/{}", account, address_index)).unwrap()
+        Self::parse(&format!("m/44'/118'/{account}'/0/{address_index}")).unwrap()
     }
 
     /// Get the components of this path
@@ -229,7 +229,7 @@ impl ExtendedPrivateKey {
     /// Get the private key as a PrivateKey enum
     pub fn private_key(&self) -> Result<PrivateKey, KeyringError> {
         let key = Secp256k1PrivKey::from_slice(&self.private_key)
-            .map_err(|e| KeyringError::BackendError(format!("Invalid private key: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Invalid private key: {e}")))?;
         Ok(PrivateKey::Secp256k1(key))
     }
 
@@ -307,7 +307,7 @@ pub fn generate_mnemonic() -> Result<Mnemonic, KeyringError> {
 pub fn generate_mnemonic_with_entropy(entropy_bits: usize) -> Result<Mnemonic, KeyringError> {
     use rand::RngCore;
 
-    if entropy_bits % 32 != 0 || !(128..=256).contains(&entropy_bits) {
+    if !entropy_bits.is_multiple_of(32) || !(128..=256).contains(&entropy_bits) {
         return Err(KeyringError::BackendError(
             "Entropy must be 128, 160, 192, 224, or 256 bits".to_string(),
         ));

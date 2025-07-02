@@ -117,7 +117,7 @@ impl AbciServer {
     pub async fn start(self, addr: &str) -> Result<()> {
         let addr = addr
             .parse()
-            .map_err(|e| AbciError::ServerError(format!("Invalid address: {}", e)))?;
+            .map_err(|e| AbciError::ServerError(format!("Invalid address: {e}")))?;
 
         info!("Starting ABCI++ server on {}", addr);
 
@@ -149,11 +149,11 @@ impl AbciServer {
             .strip_prefix("tcp://")
             .unwrap_or(&config.listen_address)
             .parse()
-            .map_err(|e| AbciError::ServerError(format!("Invalid address: {}", e)))?;
+            .map_err(|e| AbciError::ServerError(format!("Invalid address: {e}")))?;
 
         let listener = TcpListener::bind(addr)
             .await
-            .map_err(|e| AbciError::ServerError(format!("Failed to bind: {}", e)))?;
+            .map_err(|e| AbciError::ServerError(format!("Failed to bind: {e}")))?;
 
         info!("ABCI server listening on {}", addr);
 
@@ -258,7 +258,7 @@ impl AbciService for AbciServer {
 
         // Initialize the chain with genesis data
         app.init_chain(req.chain_id.clone(), &req.app_state_bytes)
-            .map_err(|e| Status::internal(format!("Failed to initialize chain: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Failed to initialize chain: {e}")))?;
 
         // Store initial height
         let _initial_height = if req.initial_height > 0 {
@@ -317,7 +317,7 @@ impl AbciService for AbciServer {
                 "app" => {
                     // Application-specific queries
                     app.query(req.path, &req.data, req.height as u64, req.prove)
-                        .map_err(|e| Status::internal(format!("Query failed: {}", e)))?
+                        .map_err(|e| Status::internal(format!("Query failed: {e}")))?
                 }
                 "store" => {
                     // Direct store queries
@@ -333,7 +333,7 @@ impl AbciService for AbciServer {
                 "custom" => {
                     // Custom application queries
                     app.query(req.path, &req.data, req.height as u64, req.prove)
-                        .map_err(|e| Status::internal(format!("Query failed: {}", e)))?
+                        .map_err(|e| Status::internal(format!("Query failed: {e}")))?
                 }
                 _ => {
                     return Err(Status::unimplemented(format!(
@@ -371,7 +371,7 @@ impl AbciService for AbciServer {
         let app = self.app.read().await;
         let result = app
             .check_tx(&req.tx)
-            .map_err(|e| Status::internal(format!("CheckTx failed: {}", e)))?;
+            .map_err(|e| Status::internal(format!("CheckTx failed: {e}")))?;
 
         Ok(Response::new(CheckTxResponse {
             code: result.code,
@@ -395,12 +395,12 @@ impl AbciService for AbciServer {
         let mut app = self.app.write().await;
         let _app_hash = app
             .commit()
-            .map_err(|e| Status::internal(format!("Commit failed: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Commit failed: {e}")))?;
 
         let height = app.get_height();
 
         // Optionally persist to disk based on configuration
-        if self.config.persist_interval > 0 && height % self.config.persist_interval == 0 {
+        if self.config.persist_interval > 0 && height.is_multiple_of(self.config.persist_interval) {
             // TODO: Implement snapshot persistence
             info!("Persisting snapshot at height {}", height);
         }
@@ -572,7 +572,7 @@ impl AbciService for AbciServer {
         // Process the block
         let tx_results = app
             .finalize_block(req.height as u64, block_time, req.txs)
-            .map_err(|e| Status::internal(format!("FinalizeBlock failed: {}", e)))?;
+            .map_err(|e| Status::internal(format!("FinalizeBlock failed: {e}")))?;
 
         // Convert transaction results
         let tx_results = tx_results

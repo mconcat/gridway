@@ -238,7 +238,7 @@ impl WasiHost {
     /// Load a WASM module from file
     pub fn load_module_from_file(&self, name: String, path: PathBuf) -> Result<()> {
         let wasm_bytes = std::fs::read(&path).map_err(|e| {
-            WasiHostError::InvalidModule(format!("Failed to read file {:?}: {}", path, e))
+            WasiHostError::InvalidModule(format!("Failed to read file {path:?}: {e}"))
         })?;
         self.load_module(name, &wasm_bytes)
     }
@@ -267,7 +267,7 @@ impl WasiHost {
             let modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
             modules
                 .get(name)
                 .ok_or_else(|| WasiHostError::ModuleNotFound(name.to_string()))?
@@ -307,7 +307,7 @@ impl WasiHost {
         let mut instances = self
             .instances
             .lock()
-            .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
         instances.insert(name.to_string(), host_instance);
 
         // Update module state
@@ -315,7 +315,7 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
             if let Some(module) = modules.get_mut(name) {
                 module.state = ModuleState::Initialized;
             }
@@ -342,12 +342,11 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             if let Some(module) = modules.get_mut(module_name) {
                 if !module.is_ready() {
                     return Err(WasiHostError::ModuleExecution(format!(
-                        "Module {} is not ready for execution",
-                        module_name
+                        "Module {module_name} is not ready for execution"
                     )));
                 }
                 module.state = ModuleState::Executing;
@@ -361,7 +360,7 @@ impl WasiHost {
             let mut instances = self
                 .instances
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
             let host_instance = instances
                 .get_mut(module_name)
@@ -373,8 +372,7 @@ impl WasiHost {
                 .get_func(&mut host_instance.store, function_name)
                 .ok_or_else(|| {
                     WasiHostError::ModuleExecution(format!(
-                        "Function {} not found in module {}",
-                        function_name, module_name
+                        "Function {function_name} not found in module {module_name}"
                     ))
                 })?;
 
@@ -428,7 +426,7 @@ impl WasiHost {
                 let mut modules = self
                     .modules
                     .lock()
-                    .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                    .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
                 if let Some(module) = modules.get_mut(module_name) {
                     module.state = ModuleState::Initialized;
                 }
@@ -442,7 +440,7 @@ impl WasiHost {
                 match e {
                     WasiHostError::OutOfGas(_) | WasiHostError::MemoryLimitExceeded(_) => {
                         let mut modules = self.modules.lock().map_err(|e| {
-                            WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e))
+                            WasiHostError::ModuleExecution(format!("Lock poisoned: {e}"))
                         })?;
                         if let Some(module) = modules.get_mut(module_name) {
                             module.state = ModuleState::Initialized;
@@ -469,7 +467,7 @@ impl WasiHost {
             let mut instances = self
                 .instances
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             instances.remove(name);
         }
 
@@ -478,7 +476,7 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             modules.remove(name);
         }
 
@@ -491,7 +489,7 @@ impl WasiHost {
         let modules = self
             .modules
             .lock()
-            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
         modules
             .get(name)
@@ -504,7 +502,7 @@ impl WasiHost {
         let modules = self
             .modules
             .lock()
-            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
         Ok(modules.keys().cloned().collect())
     }
@@ -518,7 +516,7 @@ impl WasiHost {
             let modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
             let module = modules
                 .get(name)
@@ -526,8 +524,7 @@ impl WasiHost {
 
             if !matches!(module.state, ModuleState::Error(_)) {
                 return Err(WasiHostError::ModuleExecution(format!(
-                    "Module {} is not in error state, cannot recover",
-                    name
+                    "Module {name} is not in error state, cannot recover"
                 )));
             }
         }
@@ -537,7 +534,7 @@ impl WasiHost {
             let mut instances = self
                 .instances
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             instances.remove(name);
         }
 
@@ -546,7 +543,7 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             if let Some(module) = modules.get_mut(name) {
                 module.state = ModuleState::Loaded;
             }
@@ -564,7 +561,7 @@ impl WasiHost {
         let mut modules = self
             .modules
             .lock()
-            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
         if let Some(module) = modules.get_mut(name) {
             module.state = ModuleState::Error(error.clone());

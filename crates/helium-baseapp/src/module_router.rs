@@ -269,7 +269,7 @@ impl ModuleRouter {
             let initialized = self
                 .initialized
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             if *initialized {
                 return Ok(());
             }
@@ -287,7 +287,7 @@ impl ModuleRouter {
             let mut initialized = self
                 .initialized
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             *initialized = true;
         }
 
@@ -307,7 +307,7 @@ impl ModuleRouter {
             let mut routing = self
                 .message_routing
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
             for message_type in &config.message_types {
                 if routing.contains_key(message_type) {
@@ -325,7 +325,7 @@ impl ModuleRouter {
             let mut deps = self
                 .dependency_graph
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             deps.insert(config.name.clone(), config.dependencies.clone());
         }
 
@@ -353,7 +353,7 @@ impl ModuleRouter {
             let mut configs = self
                 .module_configs
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             configs.insert(config.name.clone(), config);
         }
 
@@ -374,7 +374,7 @@ impl ModuleRouter {
             let routing = self
                 .message_routing
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
             routing
                 .get(&context.message_type)
@@ -451,11 +451,11 @@ impl ModuleRouter {
             let configs = self
                 .module_configs
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             configs
                 .get(module_name)
                 .ok_or_else(|| {
-                    RouterError::ConfigError(format!("Module not found: {}", module_name))
+                    RouterError::ConfigError(format!("Module not found: {module_name}"))
                 })?
                 .clone()
         };
@@ -548,8 +548,7 @@ impl ModuleRouter {
 
         let error = if !success {
             Some(format!(
-                "Module execution failed with code: {}",
-                success_code
+                "Module execution failed with code: {success_code}"
             ))
         } else {
             None
@@ -574,7 +573,7 @@ impl ModuleRouter {
         let mut runtimes = self
             .module_runtimes
             .lock()
-            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
         if let Some(runtime) = runtimes.get_mut(module_name) {
             runtime.call_count += 1;
@@ -592,7 +591,7 @@ impl ModuleRouter {
         let deps = self
             .dependency_graph
             .lock()
-            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
         let mut load_order = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -621,8 +620,7 @@ impl ModuleRouter {
     ) -> Result<()> {
         if visiting.contains(module) {
             return Err(RouterError::DependencyError(format!(
-                "Circular dependency detected involving module: {}",
-                module
+                "Circular dependency detected involving module: {module}"
             )));
         }
 
@@ -653,13 +651,12 @@ impl ModuleRouter {
             let configs = self
                 .module_configs
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             configs
                 .get(module_name)
                 .ok_or_else(|| {
                     RouterError::ModuleLoadError(format!(
-                        "Module config not found: {}",
-                        module_name
+                        "Module config not found: {module_name}"
                     ))
                 })?
                 .clone()
@@ -685,7 +682,7 @@ impl ModuleRouter {
             let mut runtimes = self
                 .module_runtimes
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             runtimes.insert(module_name.to_string(), runtime);
         }
 
@@ -721,8 +718,7 @@ impl ModuleRouter {
         let parts: Vec<&str> = capability_str.split(':').collect();
         if parts.len() != 2 {
             return Err(RouterError::InvalidConfig(format!(
-                "Invalid capability format: {}",
-                capability_str
+                "Invalid capability format: {capability_str}"
             )));
         }
 
@@ -735,12 +731,10 @@ impl ModuleRouter {
             "execute" => Ok(Capability::Execute(namespace.to_string().into())),
             // TODO: Add support for list, create, delete when added to VFS
             "list" | "create" | "delete" => Err(RouterError::InvalidConfig(format!(
-                "Unsupported capability operation: {}",
-                operation
+                "Unsupported capability operation: {operation}"
             ))),
             _ => Err(RouterError::InvalidConfig(format!(
-                "Unknown capability operation: {}",
-                operation
+                "Unknown capability operation: {operation}"
             ))),
         }
     }
@@ -766,7 +760,7 @@ impl ModuleRouter {
         let mut queue = self
             .ipc_queue
             .lock()
-            .map_err(|e| RouterError::IpcError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::IpcError(format!("Lock poisoned: {e}")))?;
         queue.push_back(message);
 
         Ok(())
@@ -777,7 +771,7 @@ impl ModuleRouter {
         let configs = self
             .module_configs
             .lock()
-            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
         Ok(configs.keys().cloned().collect())
     }
 
@@ -786,7 +780,7 @@ impl ModuleRouter {
         let runtimes = self
             .module_runtimes
             .lock()
-            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
         if let Some(runtime) = runtimes.get(module_name) {
             Ok(Some((runtime.call_count, runtime.total_gas_used)))

@@ -282,7 +282,7 @@ impl tx::Service for TxService {
             }
             Err(e) => {
                 tracing::error!("Transaction simulation failed: {}", e);
-                Err(Status::internal(format!("Simulation failed: {}", e)))
+                Err(Status::internal(format!("Simulation failed: {e}")))
             }
         }
     }

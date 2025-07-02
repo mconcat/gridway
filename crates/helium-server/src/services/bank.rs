@@ -128,7 +128,7 @@ impl BankService {
 
         // First check if there's a cached version
         if let Ok(store) = state_manager.get_store_mut("bank") {
-            let key = format!("balance_{}_{}", address, denom);
+            let key = format!("balance_{address}_{denom}");
             match store.get(key.as_bytes()) {
                 Ok(Some(data)) => {
                     let amount_str = String::from_utf8_lossy(&data);
@@ -148,7 +148,7 @@ impl BankService {
             .get_store("bank")
             .map_err(BankServiceError::StoreError)?;
 
-        let key = format!("balance_{}_{}", address, denom);
+        let key = format!("balance_{address}_{denom}");
         match store.get(key.as_bytes()) {
             Ok(Some(data)) => {
                 let amount_str = String::from_utf8_lossy(&data);
@@ -173,7 +173,7 @@ impl BankService {
             .get_store_mut("bank")
             .map_err(BankServiceError::StoreError)?;
 
-        let key = format!("balance_{}_{}", address, denom);
+        let key = format!("balance_{address}_{denom}");
         if amount == 0 {
             // Remove zero balances to save space
             store
@@ -200,7 +200,7 @@ impl BankService {
             .get_store("bank")
             .map_err(BankServiceError::StoreError)?;
 
-        let prefix = format!("balance_{}_", address);
+        let prefix = format!("balance_{address}_");
         let mut balances = Vec::new();
 
         for (key, value) in store.prefix_iterator(prefix.as_bytes()) {
@@ -317,7 +317,7 @@ impl BankService {
     async fn process_send_msg(&self, msg: &MsgSend) -> Result<(), BankServiceError> {
         // Validate the message
         msg.validate_basic().map_err(|e| {
-            BankServiceError::TransactionFailed(format!("validation failed: {}", e))
+            BankServiceError::TransactionFailed(format!("validation failed: {e}"))
         })?;
 
         // Process each coin in the amount
@@ -356,7 +356,7 @@ impl BankService {
             tx_bytes.hash(&mut hasher);
             let hash = hasher.finish();
 
-            Ok(format!("{:X}", hash))
+            Ok(format!("{hash:X}"))
         } else {
             Err(BankServiceError::TransactionFailed(
                 "unsupported transaction type".to_string(),

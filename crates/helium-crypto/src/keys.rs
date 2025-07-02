@@ -65,7 +65,7 @@ impl PublicKey {
                     .map_err(|e| e.to_string())?;
                 Ok(PublicKey::Ed25519(key))
             }
-            _ => Err(format!("unknown public key type: {}", type_url)),
+            _ => Err(format!("unknown public key type: {type_url}")),
         }
     }
 

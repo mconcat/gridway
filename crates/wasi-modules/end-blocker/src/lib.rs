@@ -317,7 +317,7 @@ impl WasiEndBlockHandler {
                 });
 
                 // If proposal passed and it's a parameter change proposal
-                if passed && proposal.id % 10 == 0 {
+                if passed && proposal.id.is_multiple_of(10) {
                     // Simplified: every 10th proposal is param change
                     param_updates = Some(ConsensusParams {
                         block_max_bytes: 21_000_000, // 21MB
@@ -381,7 +381,7 @@ impl WasiEndBlockHandler {
         let mut events = vec![];
 
         // Adjust inflation every 1M blocks (roughly 11.5 days)
-        if req.height % 1_000_000 == 0 {
+        if req.height.is_multiple_of(1_000_000) {
             // Simplified inflation adjustment logic
             let target_bonded_ratio = 0.67; // Target 67% bonded
             let current_bonded_ratio = 0.65; // Would be calculated from actual state

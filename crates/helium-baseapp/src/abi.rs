@@ -211,7 +211,7 @@ impl AbiContext {
         let mut buffer = self
             .stderr_buffer
             .lock()
-            .map_err(|e| AbiError::ExecutionError(format!("Stderr lock poisoned: {}", e)))?;
+            .map_err(|e| AbiError::ExecutionError(format!("Stderr lock poisoned: {e}")))?;
         buffer.extend_from_slice(data);
         Ok(())
     }
@@ -221,7 +221,7 @@ impl AbiContext {
         let mut buffer = self
             .stderr_buffer
             .lock()
-            .map_err(|e| AbiError::ExecutionError(format!("Stderr lock poisoned: {}", e)))?;
+            .map_err(|e| AbiError::ExecutionError(format!("Stderr lock poisoned: {e}")))?;
         Ok(std::mem::take(&mut *buffer))
     }
 }
@@ -326,7 +326,7 @@ impl MemoryManager {
             .unwrap_or(data.len());
 
         String::from_utf8(data[start..end].to_vec())
-            .map_err(|e| AbiError::InvalidMemoryAccess(format!("Invalid UTF-8 string: {}", e)))
+            .map_err(|e| AbiError::InvalidMemoryAccess(format!("Invalid UTF-8 string: {e}")))
     }
 
     /// Write a string to WASM memory (null-terminated)
@@ -359,13 +359,13 @@ impl ProtobufHelper {
     pub fn serialize<T: prost::Message>(msg: &T) -> Result<Vec<u8>> {
         let mut buf = Vec::new();
         msg.encode(&mut buf)
-            .map_err(|e| AbiError::ProtobufError(format!("Encoding failed: {}", e)))?;
+            .map_err(|e| AbiError::ProtobufError(format!("Encoding failed: {e}")))?;
         Ok(buf)
     }
 
     /// Deserialize bytes to a protobuf message
     pub fn deserialize<T: prost::Message + Default>(data: &[u8]) -> Result<T> {
-        T::decode(data).map_err(|e| AbiError::ProtobufError(format!("Decoding failed: {}", e)))
+        T::decode(data).map_err(|e| AbiError::ProtobufError(format!("Decoding failed: {e}")))
     }
 
     /// Serialize and write protobuf message to WASM memory
@@ -579,7 +579,7 @@ impl HostFunctions {
 
                     // Convert key to path format: /state/{module_id}/{key}
                     let key_str = String::from_utf8_lossy(&key_bytes);
-                    let path = format!("/state/{}/{}", module_id, key_str);
+                    let path = format!("/state/{module_id}/{key_str}");
 
                     // Get VFS reference and perform read
                     let vfs = caller.data().vfs.as_ref().unwrap().clone();
@@ -708,7 +708,7 @@ impl HostFunctions {
 
                     // Convert key to path format: /state/{module_id}/{key}
                     let key_str = String::from_utf8_lossy(&key_bytes);
-                    let path = format!("/state/{}/{}", module_id, key_str);
+                    let path = format!("/state/{module_id}/{key_str}");
 
                     // Get VFS reference
                     let vfs = caller.data().vfs.as_ref().unwrap().clone();

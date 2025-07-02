@@ -293,7 +293,7 @@ impl WasiBeginBlockHandler {
         let mut events = vec![];
 
         // Check for daily epoch (every 86400 blocks assuming 1s blocks)
-        if header.height % 86400 == 0 {
+        if header.height.is_multiple_of(86400) {
             events.push(Event {
                 event_type: "epoch_transition".to_string(),
                 attributes: vec![
@@ -310,7 +310,7 @@ impl WasiBeginBlockHandler {
         }
 
         // Check for weekly epoch
-        if header.height % (86400 * 7) == 0 {
+        if header.height.is_multiple_of(86400 * 7) {
             events.push(Event {
                 event_type: "epoch_transition".to_string(),
                 attributes: vec![
@@ -333,7 +333,7 @@ impl WasiBeginBlockHandler {
     fn cleanup_old_records(&mut self, current_height: u64) {
         // In a real implementation, we would track block heights
         // and clean up records older than slash_window
-        if current_height % 1000 == 0 {
+        if current_height.is_multiple_of(1000) {
             log::info!("Cleaning up old missed block records at height {current_height}");
             // Simplified: just clear if too many entries
             if self.missed_blocks.len() > 1000 {

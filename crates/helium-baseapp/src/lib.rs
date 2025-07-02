@@ -206,7 +206,7 @@ impl BaseApp {
     pub fn new(name: String) -> Result<Self> {
         // Initialize WASI runtime host
         let wasi_host = Arc::new(WasiHost::new().map_err(|e| {
-            BaseAppError::InitChainFailed(format!("Failed to initialize WASI host: {}", e))
+            BaseAppError::InitChainFailed(format!("Failed to initialize WASI host: {e}"))
         })?);
 
         // Initialize virtual filesystem
@@ -283,13 +283,13 @@ impl BaseApp {
 
         // Mount stores in VFS namespaces
         vfs.mount_store("auth".to_string(), auth_store)
-            .map_err(|e| BaseAppError::Store(format!("Failed to mount auth store: {}", e)))?;
+            .map_err(|e| BaseAppError::Store(format!("Failed to mount auth store: {e}")))?;
         vfs.mount_store("bank".to_string(), bank_store)
-            .map_err(|e| BaseAppError::Store(format!("Failed to mount bank store: {}", e)))?;
+            .map_err(|e| BaseAppError::Store(format!("Failed to mount bank store: {e}")))?;
         vfs.mount_store("staking".to_string(), staking_store)
-            .map_err(|e| BaseAppError::Store(format!("Failed to mount staking store: {}", e)))?;
+            .map_err(|e| BaseAppError::Store(format!("Failed to mount staking store: {e}")))?;
         vfs.mount_store("gov".to_string(), gov_store)
-            .map_err(|e| BaseAppError::Store(format!("Failed to mount gov store: {}", e)))?;
+            .map_err(|e| BaseAppError::Store(format!("Failed to mount gov store: {e}")))?;
 
         Ok(())
     }
@@ -315,7 +315,7 @@ impl BaseApp {
                 Ok(())
             }
             Err(e) => {
-                log::error!("BeginBlock WASI module failed: {}", e);
+                log::error!("BeginBlock WASI module failed: {e}");
                 // For now, continue with block processing even if BeginBlock fails
                 // In production, this might be a fatal error
                 Ok(())
@@ -375,7 +375,7 @@ impl BaseApp {
         };
 
         let input = serde_json::to_string(&request).map_err(|e| {
-            BaseAppError::AbciError(format!("Failed to serialize BeginBlock request: {}", e))
+            BaseAppError::AbciError(format!("Failed to serialize BeginBlock request: {e}"))
         })?;
 
         // Try to load and execute BeginBlock module
@@ -389,8 +389,7 @@ impl BaseApp {
                     let response: BeginBlockResponse = serde_json::from_slice(&result.stdout)
                         .map_err(|e| {
                             BaseAppError::AbciError(format!(
-                                "Failed to parse BeginBlock response: {}",
-                                e
+                                "Failed to parse BeginBlock response: {e}"
                             ))
                         })?;
 
@@ -422,15 +421,13 @@ impl BaseApp {
                     Ok(events)
                 }
                 Err(e) => Err(BaseAppError::AbciError(format!(
-                    "BeginBlock WASI execution failed: {}",
-                    e
+                    "BeginBlock WASI execution failed: {e}"
                 ))),
             }
         } else {
             // Module not found - use placeholder
             log::warn!(
-                "BeginBlock WASI module not found at {}, using placeholder",
-                module_path
+                "BeginBlock WASI module not found at {module_path}, using placeholder"
             );
             Ok(vec![])
         }
@@ -546,7 +543,7 @@ impl BaseApp {
         };
 
         let input = serde_json::to_string(&(request, state)).map_err(|e| {
-            BaseAppError::AbciError(format!("Failed to serialize EndBlock request: {}", e))
+            BaseAppError::AbciError(format!("Failed to serialize EndBlock request: {e}"))
         })?;
 
         // Try to load and execute EndBlock module
@@ -560,8 +557,7 @@ impl BaseApp {
                     let response: EndBlockResponse = serde_json::from_slice(&result.stdout)
                         .map_err(|e| {
                             BaseAppError::AbciError(format!(
-                                "Failed to parse EndBlock response: {}",
-                                e
+                                "Failed to parse EndBlock response: {e}"
                             ))
                         })?;
 
@@ -593,15 +589,13 @@ impl BaseApp {
                     Ok(events)
                 }
                 Err(e) => Err(BaseAppError::AbciError(format!(
-                    "EndBlock WASI execution failed: {}",
-                    e
+                    "EndBlock WASI execution failed: {e}"
                 ))),
             }
         } else {
             // Module not found - use placeholder
             log::warn!(
-                "EndBlock WASI module not found at {}, using placeholder",
-                module_path
+                "EndBlock WASI module not found at {module_path}, using placeholder"
             );
             Ok(vec![])
         }
@@ -667,12 +661,12 @@ impl BaseApp {
                 .get("type_url")
                 .and_then(|t| t.as_str())
                 .ok_or_else(|| {
-                    BaseAppError::InvalidTx(format!("message {} missing type_url", idx))
+                    BaseAppError::InvalidTx(format!("message {idx} missing type_url"))
                 })?;
 
             // Route message to appropriate module based on type_url
             // For now, just log and simulate execution
-            log::info!("Executing message {}: {}", idx, type_url);
+            log::info!("Executing message {idx}: {type_url}");
 
             // Simulate gas consumption
             let msg_gas = match type_url {
@@ -754,7 +748,7 @@ impl BaseApp {
         };
 
         let input = serde_json::to_string(&request).map_err(|e| {
-            BaseAppError::TxFailed(format!("Failed to serialize decode request: {}", e))
+            BaseAppError::TxFailed(format!("Failed to serialize decode request: {e}"))
         })?;
 
         // Try to load and execute TxDecoder module
@@ -771,8 +765,7 @@ impl BaseApp {
                     let response: DecodeResponse =
                         serde_json::from_slice(&result.stdout).map_err(|e| {
                             BaseAppError::TxFailed(format!(
-                                "Failed to parse decode response: {}",
-                                e
+                                "Failed to parse decode response: {e}"
                             ))
                         })?;
 
@@ -786,7 +779,7 @@ impl BaseApp {
 
                     // Log warnings if any
                     for warning in &response.warnings {
-                        log::warn!("Transaction decode warning: {}", warning);
+                        log::warn!("Transaction decode warning: {warning}");
                     }
 
                     response.decoded_tx.ok_or_else(|| {
@@ -794,15 +787,13 @@ impl BaseApp {
                     })
                 }
                 Err(e) => Err(BaseAppError::TxFailed(format!(
-                    "TxDecoder WASI execution failed: {}",
-                    e
+                    "TxDecoder WASI execution failed: {e}"
                 ))),
             }
         } else {
             // Module not found - return placeholder decoded tx
             log::warn!(
-                "TxDecoder WASI module not found at {}, using placeholder",
-                module_path
+                "TxDecoder WASI module not found at {module_path}, using placeholder"
             );
             Ok(serde_json::json!({
                 "body": {
@@ -867,7 +858,7 @@ impl BaseApp {
                     // Transaction failed - create error response
                     responses.push(TxResponse {
                         code: 1,
-                        log: format!("Transaction {} failed: {}", i, e),
+                        log: format!("Transaction {i} failed: {e}"),
                         gas_used: 0,
                         gas_wanted: 0,
                         events: vec![],
@@ -909,7 +900,7 @@ impl BaseApp {
                 "/helium.baseapp.v1.MsgStoreCode" => {
                     let msg: MsgStoreCode =
                         serde_json::from_value(msg_value.clone()).map_err(|e| {
-                            BaseAppError::InvalidTx(format!("failed to decode MsgStoreCode: {}", e))
+                            BaseAppError::InvalidTx(format!("failed to decode MsgStoreCode: {e}"))
                         })?;
 
                     match self.module_governance.handle_store_code(msg) {
@@ -926,7 +917,7 @@ impl BaseApp {
                         Err(e) => {
                             return Ok(TxResponse {
                                 code: 1,
-                                log: format!("store_code failed: {}", e),
+                                log: format!("store_code failed: {e}"),
                                 gas_used: total_gas_used,
                                 gas_wanted: 100000,
                                 events,
@@ -938,8 +929,7 @@ impl BaseApp {
                     let msg: MsgInstallModule =
                         serde_json::from_value(msg_value.clone()).map_err(|e| {
                             BaseAppError::InvalidTx(format!(
-                                "failed to decode MsgInstallModule: {}",
-                                e
+                                "failed to decode MsgInstallModule: {e}"
                             ))
                         })?;
 
@@ -963,7 +953,7 @@ impl BaseApp {
                         Err(e) => {
                             return Ok(TxResponse {
                                 code: 1,
-                                log: format!("install_module failed: {}", e),
+                                log: format!("install_module failed: {e}"),
                                 gas_used: total_gas_used,
                                 gas_wanted: 200000,
                                 events,
@@ -975,8 +965,7 @@ impl BaseApp {
                     let msg: MsgUpgradeModule =
                         serde_json::from_value(msg_value.clone()).map_err(|e| {
                             BaseAppError::InvalidTx(format!(
-                                "failed to decode MsgUpgradeModule: {}",
-                                e
+                                "failed to decode MsgUpgradeModule: {e}"
                             ))
                         })?;
 
@@ -1000,7 +989,7 @@ impl BaseApp {
                         Err(e) => {
                             return Ok(TxResponse {
                                 code: 1,
-                                log: format!("upgrade_module failed: {}", e),
+                                log: format!("upgrade_module failed: {e}"),
                                 gas_used: total_gas_used,
                                 gas_wanted: 300000,
                                 events,
@@ -1013,7 +1002,7 @@ impl BaseApp {
                     let _execution_context = ExecutionContext {
                         message_type: type_url.to_string(),
                         message_data: serde_json::to_vec(msg_value).map_err(|e| {
-                            BaseAppError::InvalidTx(format!("failed to serialize message: {}", e))
+                            BaseAppError::InvalidTx(format!("failed to serialize message: {e}"))
                         })?,
                         gas_limit: 100000,
                         tx_context: {
@@ -1027,7 +1016,7 @@ impl BaseApp {
                     // For now, return an error for unhandled message types
                     return Ok(TxResponse {
                         code: 1,
-                        log: format!("unhandled message type: {}", type_url),
+                        log: format!("unhandled message type: {type_url}"),
                         gas_used: total_gas_used,
                         gas_wanted: 100000,
                         events,

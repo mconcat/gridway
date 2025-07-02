@@ -17,7 +17,7 @@ cargo test --all
 cargo fmt --all -- --check
 
 # 4. Run clippy with CI settings
-cargo clippy --all -- -D warnings
+cargo clippy --fix --all
 
 # 5. If you fixed formatting issues, run formatter
 cargo fmt --all

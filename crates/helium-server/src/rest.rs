@@ -199,7 +199,7 @@ async fn get_balance(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Balance query failed: {}", e),
+                    error: format!("Balance query failed: {e}"),
                     code: 500,
                 }),
             ))
@@ -263,7 +263,7 @@ async fn get_all_balances(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("All balances query failed: {}", e),
+                    error: format!("All balances query failed: {e}"),
                     code: 500,
                 }),
             ))
@@ -333,7 +333,7 @@ async fn get_account(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Account query failed: {}", e),
+                    error: format!("Account query failed: {e}"),
                     code: 500,
                 }),
             ))
@@ -408,7 +408,7 @@ async fn broadcast_tx(
             (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: format!("Invalid base64 tx_bytes: {}", e),
+                    error: format!("Invalid base64 tx_bytes: {e}"),
                     code: 400,
                 }),
             )
@@ -481,7 +481,7 @@ async fn broadcast_tx(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Transaction broadcast failed: {}", e),
+                    error: format!("Transaction broadcast failed: {e}"),
                     code: 500,
                 }),
             ))
@@ -533,7 +533,7 @@ async fn simulate_tx(
             (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: format!("Invalid base64 tx_bytes: {}", e),
+                    error: format!("Invalid base64 tx_bytes: {e}"),
                     code: 400,
                 }),
             )
@@ -591,7 +591,7 @@ async fn simulate_tx(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Transaction simulation failed: {}", e),
+                    error: format!("Transaction simulation failed: {e}"),
                     code: 500,
                 }),
             ))

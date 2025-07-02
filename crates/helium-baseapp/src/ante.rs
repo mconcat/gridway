@@ -155,13 +155,13 @@ impl WasiAnteHandler {
         );
 
         let module_bytes = std::fs::read(module_path).map_err(|e| {
-            AnteError::ModuleNotFound(format!("Failed to read module {}: {}", module_path, e))
+            AnteError::ModuleNotFound(format!("Failed to read module {module_path}: {e}"))
         })?;
 
         // Validate WASM module
         self.wasi_host
             .validate_module(&module_bytes)
-            .map_err(|e| AnteError::WasiError(format!("Invalid WASM module: {}", e)))?;
+            .map_err(|e| AnteError::WasiError(format!("Invalid WASM module: {e}")))?;
 
         self.module_cache
             .insert(module_name.to_string(), module_bytes);
@@ -210,18 +210,18 @@ impl WasiAnteHandler {
     ) -> AnteResult<WasiAnteResponse> {
         // Get module bytes from cache
         let module_bytes = self.module_cache.get(module_name).ok_or_else(|| {
-            AnteError::ModuleNotFound(format!("Module not loaded: {}", module_name))
+            AnteError::ModuleNotFound(format!("Module not loaded: {module_name}"))
         })?;
 
         // Execute WASI module
         let result = self
             .wasi_host
             .execute_module_with_input(module_bytes, input.as_bytes())
-            .map_err(|e| AnteError::WasiError(format!("WASI execution failed: {}", e)))?;
+            .map_err(|e| AnteError::WasiError(format!("WASI execution failed: {e}")))?;
 
         // Parse response
         let response: WasiAnteResponse = serde_json::from_slice(&result.stdout).map_err(|e| {
-            AnteError::InvalidResponse(format!("Failed to parse WASI response: {}", e))
+            AnteError::InvalidResponse(format!("Failed to parse WASI response: {e}"))
         })?;
 
         if !result.stderr.is_empty() {

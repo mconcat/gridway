@@ -354,7 +354,7 @@ impl ModuleGovernance {
             let mut next_id = self
                 .next_code_id
                 .lock()
-                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
             let id = *next_id;
             *next_id += 1;
             id
@@ -373,7 +373,7 @@ impl ModuleGovernance {
             let mut registry = self
                 .code_registry
                 .lock()
-                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
             registry.insert(code_id, stored_code);
         }
 
@@ -401,7 +401,7 @@ impl ModuleGovernance {
             let registry = self
                 .module_registry
                 .lock()
-                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
             if registry.contains_key(&msg.config.name) {
                 return Err(GovernanceError::ModuleAlreadyExists(msg.config.name));
             }
@@ -412,7 +412,7 @@ impl ModuleGovernance {
             let registry = self
                 .code_registry
                 .lock()
-                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
             registry
                 .get(&msg.code_id)
                 .ok_or_else(|| {
@@ -451,7 +451,7 @@ impl ModuleGovernance {
             let mut registry = self
                 .module_registry
                 .lock()
-                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
             registry.insert(installed_module.name.clone(), installed_module);
         }
 
@@ -479,7 +479,7 @@ impl ModuleGovernance {
             let registry = self
                 .module_registry
                 .lock()
-                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
             registry
                 .get(&msg.module_name)
                 .ok_or_else(|| GovernanceError::ModuleNotFound(msg.module_name.clone()))?
@@ -491,7 +491,7 @@ impl ModuleGovernance {
             let registry = self
                 .code_registry
                 .lock()
-                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
             registry
                 .get(&msg.new_code_id)
                 .ok_or_else(|| {
@@ -530,7 +530,7 @@ impl ModuleGovernance {
             let mut registry = self
                 .module_registry
                 .lock()
-                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
 
             if let Some(module) = registry.get_mut(&msg.module_name) {
                 module.code_id = msg.new_code_id;
@@ -563,8 +563,7 @@ impl ModuleGovernance {
         let version = u32::from_le_bytes([code[4], code[5], code[6], code[7]]);
         if version != 1 {
             return Err(GovernanceError::InvalidWasm(format!(
-                "unsupported WASM version: {}",
-                version
+                "unsupported WASM version: {version}"
             )));
         }
 
@@ -631,10 +630,10 @@ impl ModuleGovernance {
     /// Write WASM code to temporary file
     fn write_temp_wasm(&self, code: &[u8], module_name: &str) -> Result<PathBuf> {
         let temp_dir = std::env::temp_dir();
-        let temp_path = temp_dir.join(format!("{}.wasm", module_name));
+        let temp_path = temp_dir.join(format!("{module_name}.wasm"));
 
         std::fs::write(&temp_path, code).map_err(|e| {
-            GovernanceError::StorageError(format!("Failed to write temp WASM: {}", e))
+            GovernanceError::StorageError(format!("Failed to write temp WASM: {e}"))
         })?;
 
         Ok(temp_path)
@@ -659,8 +658,7 @@ impl ModuleGovernance {
 
         if new_version <= current_version {
             return Err(GovernanceError::IncompatibleVersion(format!(
-                "new version {} is not newer than current version {}",
-                new_version, current_version
+                "new version {new_version} is not newer than current version {current_version}"
             )));
         }
 
@@ -691,10 +689,10 @@ impl ModuleGovernance {
         let registry = self
             .code_registry
             .lock()
-            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
 
         let _serialized = serde_json::to_vec(&*registry)
-            .map_err(|e| GovernanceError::StorageError(format!("Serialization failed: {}", e)))?;
+            .map_err(|e| GovernanceError::StorageError(format!("Serialization failed: {e}")))?;
 
         // TODO: Write to VFS at /system/code_registry
         debug!("Persisting code registry with {} entries", registry.len());
@@ -706,10 +704,10 @@ impl ModuleGovernance {
         let registry = self
             .module_registry
             .lock()
-            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
 
         let _serialized = serde_json::to_vec(&*registry)
-            .map_err(|e| GovernanceError::StorageError(format!("Serialization failed: {}", e)))?;
+            .map_err(|e| GovernanceError::StorageError(format!("Serialization failed: {e}")))?;
 
         // TODO: Write to VFS at /system/module_registry
         debug!("Persisting module registry with {} entries", registry.len());
@@ -721,7 +719,7 @@ impl ModuleGovernance {
         let registry = self
             .module_registry
             .lock()
-            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
         Ok(registry.get(name).cloned())
     }
 
@@ -730,7 +728,7 @@ impl ModuleGovernance {
         let registry = self
             .code_registry
             .lock()
-            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
         Ok(registry.get(&code_id).cloned())
     }
 
@@ -739,7 +737,7 @@ impl ModuleGovernance {
         let registry = self
             .module_registry
             .lock()
-            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
         Ok(registry.values().cloned().collect())
     }
 
@@ -748,7 +746,7 @@ impl ModuleGovernance {
         let registry = self
             .code_registry
             .lock()
-            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
         Ok(registry.values().cloned().collect())
     }
 

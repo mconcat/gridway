@@ -127,7 +127,7 @@ impl ClientConfig {
             _ => {
                 return Err(ConfigError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!("Unknown configuration key: {}", key),
+                    format!("Unknown configuration key: {key}"),
                 )));
             }
         }

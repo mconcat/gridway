@@ -817,7 +817,7 @@ pub async fn run() -> crate::Result<()> {
         "info"
     };
     helium_log::init_tracing_with_level(level).map_err(|e| {
-        crate::ClientError::InvalidResponse(format!("Failed to initialize logging: {}", e))
+        crate::ClientError::InvalidResponse(format!("Failed to initialize logging: {e}"))
     })?;
 
     let handler = CliHandler::new(cli.global_opts);

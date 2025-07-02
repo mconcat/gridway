@@ -425,8 +425,7 @@ impl Client {
 
         // If parsing fails, return error instead of mock data
         Err(ClientError::InvalidResponse(format!(
-            "Account not found or invalid response for address: {}",
-            address
+            "Account not found or invalid response for address: {address}"
         )))
     }
 
@@ -557,8 +556,7 @@ impl Client {
 
         // If parsing fails, return error
         Err(ClientError::InvalidResponse(format!(
-            "Invalid transaction response format for hash: {}",
-            hash
+            "Invalid transaction response format for hash: {hash}"
         )))
     }
 }

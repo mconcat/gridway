@@ -70,7 +70,7 @@ impl MemoryKeyring {
         rng.fill_bytes(&mut bytes);
 
         let signing_key = Secp256k1PrivKey::from_slice(&bytes)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to generate key: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to generate key: {e}")))?;
 
         Ok(PrivateKey::Secp256k1(signing_key))
     }
@@ -171,7 +171,7 @@ impl Keyring for MemoryKeyring {
 
         use helium_crypto::signature::sign_message;
         let signature = sign_message(&key.privkey, data)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to sign: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to sign: {e}")))?;
 
         Ok(signature)
     }
@@ -194,7 +194,7 @@ impl Keyring for MemoryKeyring {
         }
 
         let privkey_bytes = hex::decode(private_key_hex)
-            .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {e}")))?;
 
         // Support both secp256k1 and ed25519 keys based on length
         let privkey = match privkey_bytes.len() {
@@ -315,26 +315,25 @@ impl OsKeyring {
         key_data: &SerializableKey,
     ) -> Result<(), KeyringError> {
         let key_json = serde_json::to_string(key_data)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to serialize key: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to serialize key: {e}")))?;
 
         // Use the keyring crate for cross-platform OS secure storage
         let entry = keyring::Entry::new(&self.service_name, name).map_err(|e| {
-            KeyringError::BackendError(format!("Failed to create keyring entry: {}", e))
+            KeyringError::BackendError(format!("Failed to create keyring entry: {e}"))
         })?;
 
         entry.set_password(&key_json).map_err(|e| {
-            KeyringError::BackendError(format!("Failed to store key in OS keyring: {}", e))
+            KeyringError::BackendError(format!("Failed to store key in OS keyring: {e}"))
         })?;
 
         // Verify the key was stored
         match entry.get_password() {
             Ok(_) => {
-                println!("DEBUG: store_key_in_os: successfully stored key '{}'", name);
+                println!("DEBUG: store_key_in_os: successfully stored key '{name}'");
             }
             Err(e) => {
                 println!(
-                    "DEBUG: store_key_in_os: WARNING - could not verify key '{}' was stored: {:?}",
-                    name, e
+                    "DEBUG: store_key_in_os: WARNING - could not verify key '{name}' was stored: {e:?}"
                 );
             }
         }
@@ -346,18 +345,18 @@ impl OsKeyring {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     async fn retrieve_key_from_os(&self, name: &str) -> Result<SerializableKey, KeyringError> {
         let entry = keyring::Entry::new(&self.service_name, name).map_err(|e| {
-            KeyringError::BackendError(format!("Failed to create keyring entry: {}", e))
+            KeyringError::BackendError(format!("Failed to create keyring entry: {e}"))
         })?;
 
         let key_json = entry.get_password().map_err(|e| match e {
             keyring::Error::NoEntry => KeyringError::KeyNotFound(name.to_string()),
             _ => {
-                KeyringError::BackendError(format!("Failed to retrieve key from OS keyring: {}", e))
+                KeyringError::BackendError(format!("Failed to retrieve key from OS keyring: {e}"))
             }
         })?;
 
         let key_data: SerializableKey = serde_json::from_str(&key_json).map_err(|e| {
-            KeyringError::BackendError(format!("Failed to deserialize key data: {}", e))
+            KeyringError::BackendError(format!("Failed to deserialize key data: {e}"))
         })?;
 
         Ok(key_data)
@@ -367,12 +366,12 @@ impl OsKeyring {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     async fn delete_key_from_os(&self, name: &str) -> Result<(), KeyringError> {
         let entry = keyring::Entry::new(&self.service_name, name).map_err(|e| {
-            KeyringError::BackendError(format!("Failed to create keyring entry: {}", e))
+            KeyringError::BackendError(format!("Failed to create keyring entry: {e}"))
         })?;
 
         entry.delete_credential().map_err(|e| match e {
             keyring::Error::NoEntry => KeyringError::KeyNotFound(name.to_string()),
-            _ => KeyringError::BackendError(format!("Failed to delete key from OS keyring: {}", e)),
+            _ => KeyringError::BackendError(format!("Failed to delete key from OS keyring: {e}")),
         })?;
 
         Ok(())
@@ -385,7 +384,7 @@ impl OsKeyring {
         // We'll maintain a registry key that stores the list of key names
         let registry_entry = keyring::Entry::new(&self.service_name, "_helium_key_registry")
             .map_err(|e| {
-                KeyringError::BackendError(format!("Failed to create registry entry: {}", e))
+                KeyringError::BackendError(format!("Failed to create registry entry: {e}"))
             })?;
 
         println!("DEBUG: list_keys_from_os: attempting to read registry with service: {} user: _helium_key_registry", self.service_name);
@@ -393,11 +392,10 @@ impl OsKeyring {
         match registry_entry.get_password() {
             Ok(registry_json) => {
                 println!(
-                    "DEBUG: list_keys_from_os: got registry data: {}",
-                    registry_json
+                    "DEBUG: list_keys_from_os: got registry data: {registry_json}"
                 );
                 let key_names: Vec<String> = serde_json::from_str(&registry_json).map_err(|e| {
-                    KeyringError::BackendError(format!("Failed to parse key registry: {}", e))
+                    KeyringError::BackendError(format!("Failed to parse key registry: {e}"))
                 })?;
                 println!(
                     "DEBUG: list_keys_from_os: parsed {} keys: {:?}",
@@ -412,7 +410,7 @@ impl OsKeyring {
                 Ok(Vec::new())
             }
             Err(e) => {
-                println!("DEBUG: list_keys_from_os: other error: {:?}", e);
+                println!("DEBUG: list_keys_from_os: other error: {e:?}");
                 // On macOS in test environments, keyring operations might fail
                 // Fall back to scanning for keys directly
                 if cfg!(test) {
@@ -421,8 +419,7 @@ impl OsKeyring {
                     return Ok(self.keys_cache.keys().cloned().collect());
                 }
                 Err(KeyringError::BackendError(format!(
-                    "Failed to access key registry: {}",
-                    e
+                    "Failed to access key registry: {e}"
                 )))
             }
         }
@@ -432,7 +429,7 @@ impl OsKeyring {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     async fn add_key_to_registry(&self, name: &str) -> Result<(), KeyringError> {
         let mut key_names = self.list_keys_from_os().await?;
-        println!("DEBUG: add_key_to_registry: current keys: {:?}", key_names);
+        println!("DEBUG: add_key_to_registry: current keys: {key_names:?}");
 
         if !key_names.contains(&name.to_string()) {
             key_names.push(name.to_string());
@@ -440,20 +437,19 @@ impl OsKeyring {
 
             let registry_entry = keyring::Entry::new(&self.service_name, "_helium_key_registry")
                 .map_err(|e| {
-                    KeyringError::BackendError(format!("Failed to create registry entry: {}", e))
+                    KeyringError::BackendError(format!("Failed to create registry entry: {e}"))
                 })?;
 
             let registry_json = serde_json::to_string(&key_names).map_err(|e| {
-                KeyringError::BackendError(format!("Failed to serialize key registry: {}", e))
+                KeyringError::BackendError(format!("Failed to serialize key registry: {e}"))
             })?;
 
             println!(
-                "DEBUG: add_key_to_registry: updating registry with: {}",
-                registry_json
+                "DEBUG: add_key_to_registry: updating registry with: {registry_json}"
             );
 
             registry_entry.set_password(&registry_json).map_err(|e| {
-                KeyringError::BackendError(format!("Failed to update key registry: {}", e))
+                KeyringError::BackendError(format!("Failed to update key registry: {e}"))
             })?;
 
             // Add a small delay to ensure the keyring write is flushed
@@ -463,14 +459,12 @@ impl OsKeyring {
             match registry_entry.get_password() {
                 Ok(stored_json) => {
                     println!(
-                        "DEBUG: add_key_to_registry: verified write, stored: {}",
-                        stored_json
+                        "DEBUG: add_key_to_registry: verified write, stored: {stored_json}"
                     );
                 }
                 Err(e) => {
                     println!(
-                        "DEBUG: add_key_to_registry: WARNING - could not verify write: {:?}",
-                        e
+                        "DEBUG: add_key_to_registry: WARNING - could not verify write: {e:?}"
                     );
                 }
             }
@@ -487,7 +481,7 @@ impl OsKeyring {
 
             let registry_entry = keyring::Entry::new(&self.service_name, "_helium_key_registry")
                 .map_err(|e| {
-                    KeyringError::BackendError(format!("Failed to create registry entry: {}", e))
+                    KeyringError::BackendError(format!("Failed to create registry entry: {e}"))
                 })?;
 
             if key_names.is_empty() {
@@ -495,11 +489,11 @@ impl OsKeyring {
                 let _ = registry_entry.delete_credential(); // Ignore error if already deleted
             } else {
                 let registry_json = serde_json::to_string(&key_names).map_err(|e| {
-                    KeyringError::BackendError(format!("Failed to serialize key registry: {}", e))
+                    KeyringError::BackendError(format!("Failed to serialize key registry: {e}"))
                 })?;
 
                 registry_entry.set_password(&registry_json).map_err(|e| {
-                    KeyringError::BackendError(format!("Failed to update key registry: {}", e))
+                    KeyringError::BackendError(format!("Failed to update key registry: {e}"))
                 })?;
             }
         }
@@ -580,7 +574,7 @@ impl OsKeyring {
             "secp256k1" => {
                 let key =
                     Secp256k1PrivKey::from_slice(&serializable.privkey_bytes).map_err(|e| {
-                        KeyringError::BackendError(format!("Invalid secp256k1 key: {}", e))
+                        KeyringError::BackendError(format!("Invalid secp256k1 key: {e}"))
                     })?;
                 PrivateKey::Secp256k1(key)
             }
@@ -604,7 +598,7 @@ impl OsKeyring {
         };
 
         let address = helium_types::address::AccAddress::from_bech32(&serializable.address)
-            .map_err(|e| KeyringError::BackendError(format!("Invalid address: {}", e)))?
+            .map_err(|e| KeyringError::BackendError(format!("Invalid address: {e}")))?
             .1;
 
         Ok(StoredKey {
@@ -713,7 +707,7 @@ impl Keyring for OsKeyring {
                     name: name.clone(),
                     pubkey: serializable.pubkey.clone(),
                     address: helium_types::address::AccAddress::from_bech32(&serializable.address)
-                        .map_err(|e| KeyringError::BackendError(format!("Invalid address: {}", e)))?
+                        .map_err(|e| KeyringError::BackendError(format!("Invalid address: {e}")))?
                         .1,
                 });
             }
@@ -739,7 +733,7 @@ impl Keyring for OsKeyring {
             name: name.to_string(),
             pubkey: serializable.pubkey.clone(),
             address: helium_types::address::AccAddress::from_bech32(&serializable.address)
-                .map_err(|e| KeyringError::BackendError(format!("Invalid address: {}", e)))?
+                .map_err(|e| KeyringError::BackendError(format!("Invalid address: {e}")))?
                 .1,
         })
     }
@@ -756,7 +750,7 @@ impl Keyring for OsKeyring {
 
         use helium_crypto::signature::sign_message;
         let signature = sign_message(&stored_key.privkey, data)
-            .map_err(|e| KeyringError::BackendError(format!("Failed to sign: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Failed to sign: {e}")))?;
 
         Ok(signature)
     }
@@ -789,7 +783,7 @@ impl Keyring for OsKeyring {
         }
 
         let privkey_bytes = hex::decode(private_key_hex)
-            .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {}", e)))?;
+            .map_err(|e| KeyringError::BackendError(format!("Invalid hex private key: {e}")))?;
 
         // Support both secp256k1 and ed25519 keys based on length
         let privkey = match privkey_bytes.len() {
