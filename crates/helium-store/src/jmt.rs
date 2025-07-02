@@ -132,9 +132,9 @@ impl JMTStore {
                     .map_err(|e| StoreError::BackendError(format!("RocksDB put error: {e}")))?;
             } else {
                 self.committed.remove(&key);
-                self.db.delete(&key).map_err(|e| {
-                    StoreError::BackendError(format!("RocksDB delete error: {e}"))
-                })?;
+                self.db
+                    .delete(&key)
+                    .map_err(|e| StoreError::BackendError(format!("RocksDB delete error: {e}")))?;
             }
         }
 
@@ -206,9 +206,7 @@ impl JMTStore {
     fn get_from_storage(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         match self.db.get(key) {
             Ok(value) => Ok(value),
-            Err(e) => Err(StoreError::BackendError(format!(
-                "RocksDB get error: {e}"
-            ))),
+            Err(e) => Err(StoreError::BackendError(format!("RocksDB get error: {e}"))),
         }
     }
 

@@ -959,12 +959,17 @@ mod tests {
         // Test valid capabilities
         assert!(router.parse_capability("read:auth").is_ok());
         assert!(router.parse_capability("write:bank").is_ok());
-        assert!(router.parse_capability("list:governance").is_ok());
+        assert!(router.parse_capability("execute:governance").is_ok());
 
         // Test invalid capabilities
         assert!(router.parse_capability("invalid").is_err());
         assert!(router.parse_capability("read:auth:extra").is_err());
         assert!(router.parse_capability("unknown:namespace").is_err());
+
+        // Test unsupported operations (list, create, delete)
+        assert!(router.parse_capability("list:governance").is_err());
+        assert!(router.parse_capability("create:test").is_err());
+        assert!(router.parse_capability("delete:test").is_err());
     }
 
     #[test]
