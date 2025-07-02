@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
-use std::collections::HashMap;
 use thiserror::Error;
 
 /// Error types for end block operations
@@ -14,16 +13,16 @@ use thiserror::Error;
 pub enum EndBlockError {
     #[error("Validator update error: {0}")]
     ValidatorUpdateError(String),
-    
+
     #[error("Reward distribution error: {0}")]
     RewardError(String),
-    
+
     #[error("Governance tally error: {0}")]
     GovernanceError(String),
-    
+
     #[error("IO error: {0}")]
     IoError(String),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(String),
 }
@@ -137,7 +136,8 @@ impl WasiEndBlockHandler {
 
         // Process validator set updates
         if !state.pending_validator_updates.is_empty() {
-            let (updates, update_events) = self.process_validator_updates(&state.pending_validator_updates);
+            let (updates, update_events) =
+                self.process_validator_updates(&state.pending_validator_updates);
             validator_updates = updates;
             events.extend(update_events);
         }
@@ -148,7 +148,8 @@ impl WasiEndBlockHandler {
         }
 
         // Process governance proposals
-        let (governance_events, param_updates) = self.process_governance_proposals(req, &state.active_proposals);
+        let (governance_events, param_updates) =
+            self.process_governance_proposals(req, &state.active_proposals);
         events.extend(governance_events);
 
         // Process inflation adjustments
@@ -176,7 +177,10 @@ impl WasiEndBlockHandler {
         }
     }
 
-    fn process_validator_updates(&self, pending_updates: &[ValidatorUpdate]) -> (Vec<ValidatorUpdate>, Vec<Event>) {
+    fn process_validator_updates(
+        &self,
+        pending_updates: &[ValidatorUpdate],
+    ) -> (Vec<ValidatorUpdate>, Vec<Event>) {
         let mut events = vec![];
         let mut final_updates = vec![];
 
@@ -189,7 +193,10 @@ impl WasiEndBlockHandler {
 
             // Validate update
             if update.power < 0 {
-                log::warn!("Invalid negative power {} for validator", update.power);
+                log::warn!(
+                    "Invalid negative power {power} for validator",
+                    power = update.power
+                );
                 continue;
             }
 
@@ -209,7 +216,12 @@ impl WasiEndBlockHandler {
                     },
                     Attribute {
                         key: "action".to_string(),
-                        value: if update.power == 0 { "remove" } else { "update" }.to_string(),
+                        value: if update.power == 0 {
+                            "remove"
+                        } else {
+                            "update"
+                        }
+                        .to_string(),
                     },
                 ],
             });
@@ -222,7 +234,11 @@ impl WasiEndBlockHandler {
         current_height >= last_reward_height + self.reward_frequency
     }
 
-    fn trigger_reward_distribution(&self, req: &EndBlockRequest, state: &ModuleState) -> Vec<Event> {
+    fn trigger_reward_distribution(
+        &self,
+        req: &EndBlockRequest,
+        state: &ModuleState,
+    ) -> Vec<Event> {
         let mut events = vec![];
 
         // Calculate rewards based on inflation
@@ -264,7 +280,7 @@ impl WasiEndBlockHandler {
     fn process_governance_proposals(
         &self,
         req: &EndBlockRequest,
-        proposals: &[Proposal]
+        proposals: &[Proposal],
     ) -> (Vec<Event>, Option<ConsensusParams>) {
         let mut events = vec![];
         let mut param_updates = None;
@@ -301,7 +317,8 @@ impl WasiEndBlockHandler {
                 });
 
                 // If proposal passed and it's a parameter change proposal
-                if passed && proposal.id % 10 == 0 { // Simplified: every 10th proposal is param change
+                if passed && proposal.id.is_multiple_of(10) {
+                    // Simplified: every 10th proposal is param change
                     param_updates = Some(ConsensusParams {
                         block_max_bytes: 21_000_000, // 21MB
                         block_max_gas: 10_000_000,   // 10M gas
@@ -314,23 +331,30 @@ impl WasiEndBlockHandler {
     }
 
     fn evaluate_proposal(&self, tally: &TallyResult) -> (bool, String) {
-        let total_votes = tally.yes_votes + tally.no_votes + tally.abstain_votes + tally.no_with_veto_votes;
-        
+        let total_votes =
+            tally.yes_votes + tally.no_votes + tally.abstain_votes + tally.no_with_veto_votes;
+
         if total_votes == 0 {
             return (false, "no votes cast".to_string());
         }
 
         let participation_rate = total_votes as f64 / 1_000_000.0; // Assuming 1M total voting power
-        
+
         // Check quorum
         if participation_rate < self.quorum_threshold {
-            return (false, format!("quorum not met: {:.2}%", participation_rate * 100.0));
+            return (
+                false,
+                format!("quorum not met: {:.2}%", participation_rate * 100.0),
+            );
         }
 
         // Check veto threshold (more than 33.4% veto fails the proposal)
         let veto_rate = tally.no_with_veto_votes as f64 / total_votes as f64;
         if veto_rate > 0.334 {
-            return (false, format!("vetoed: {:.2}% veto votes", veto_rate * 100.0));
+            return (
+                false,
+                format!("vetoed: {:.2}% veto votes", veto_rate * 100.0),
+            );
         }
 
         // Check pass threshold (excluding abstain votes)
@@ -341,9 +365,15 @@ impl WasiEndBlockHandler {
 
         let yes_rate = tally.yes_votes as f64 / active_votes as f64;
         if yes_rate > self.pass_threshold {
-            (true, format!("passed with {:.2}% yes votes", yes_rate * 100.0))
+            (
+                true,
+                format!("passed with {:.2}% yes votes", yes_rate * 100.0),
+            )
         } else {
-            (false, format!("failed with only {:.2}% yes votes", yes_rate * 100.0))
+            (
+                false,
+                format!("failed with only {:.2}% yes votes", yes_rate * 100.0),
+            )
         }
     }
 
@@ -351,11 +381,11 @@ impl WasiEndBlockHandler {
         let mut events = vec![];
 
         // Adjust inflation every 1M blocks (roughly 11.5 days)
-        if req.height % 1_000_000 == 0 {
+        if req.height.is_multiple_of(1_000_000) {
             // Simplified inflation adjustment logic
             let target_bonded_ratio = 0.67; // Target 67% bonded
             let current_bonded_ratio = 0.65; // Would be calculated from actual state
-            
+
             let new_rate = if current_bonded_ratio < target_bonded_ratio {
                 // Increase inflation to incentivize bonding
                 (current_rate * 1.01).min(0.20) // Max 20% inflation
@@ -403,7 +433,7 @@ pub extern "C" fn end_block() -> i32 {
     // Read input from stdin
     let mut input = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut input) {
-        log::error!("Failed to read input: {}", e);
+        log::error!("Failed to read input: {e}");
         return 1;
     }
 
@@ -411,7 +441,7 @@ pub extern "C" fn end_block() -> i32 {
     let (request, state): (EndBlockRequest, ModuleState) = match serde_json::from_str(&input) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("Failed to parse input JSON: {}", e);
+            log::error!("Failed to parse input JSON: {e}");
             return 1;
         }
     };
@@ -423,12 +453,12 @@ pub extern "C" fn end_block() -> i32 {
     match serde_json::to_string(&response) {
         Ok(output) => {
             if let Err(e) = io::stdout().write_all(output.as_bytes()) {
-                log::error!("Failed to write output: {}", e);
+                log::error!("Failed to write output: {e}");
                 return 1;
             }
         }
         Err(e) => {
-            log::error!("Failed to serialize response: {}", e);
+            log::error!("Failed to serialize response: {e}");
             return 1;
         }
     }
@@ -437,6 +467,7 @@ pub extern "C" fn end_block() -> i32 {
 }
 
 /// Alternative entry point for testing
+#[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn _start() {
     std::process::exit(end_block());
@@ -453,6 +484,7 @@ impl Default for WasiEndBlockHandler {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn create_test_request() -> EndBlockRequest {
         EndBlockRequest {
             height: 10000,
@@ -463,6 +495,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn create_test_state() -> ModuleState {
         ModuleState {
             pending_validator_updates: vec![],
@@ -483,7 +516,7 @@ mod tests {
     #[test]
     fn test_validator_updates() {
         let handler = WasiEndBlockHandler::new();
-        
+
         let updates = vec![
             ValidatorUpdate {
                 pub_key: PubKey {
@@ -500,9 +533,9 @@ mod tests {
                 power: 0, // Remove validator
             },
         ];
-        
+
         let (final_updates, events) = handler.process_validator_updates(&updates);
-        
+
         assert_eq!(final_updates.len(), 2);
         assert_eq!(events.len(), 2);
         assert_eq!(events[1].attributes[2].value, "remove");
@@ -511,10 +544,10 @@ mod tests {
     #[test]
     fn test_reward_distribution_trigger() {
         let handler = WasiEndBlockHandler::new();
-        
+
         // Should trigger (1000 blocks passed)
         assert!(handler.should_distribute_rewards(10000, 9000));
-        
+
         // Should not trigger (only 500 blocks passed)
         assert!(!handler.should_distribute_rewards(9500, 9000));
     }
@@ -522,7 +555,7 @@ mod tests {
     #[test]
     fn test_proposal_evaluation() {
         let handler = WasiEndBlockHandler::new();
-        
+
         // Test passing proposal
         let tally = TallyResult {
             yes_votes: 600_000,
@@ -530,11 +563,11 @@ mod tests {
             abstain_votes: 100_000,
             no_with_veto_votes: 50_000,
         };
-        
+
         let (passed, reason) = handler.evaluate_proposal(&tally);
         assert!(passed);
         assert!(reason.contains("passed"));
-        
+
         // Test failed quorum
         let tally_low = TallyResult {
             yes_votes: 100_000,
@@ -542,11 +575,11 @@ mod tests {
             abstain_votes: 50_000,
             no_with_veto_votes: 0,
         };
-        
+
         let (passed, reason) = handler.evaluate_proposal(&tally_low);
         assert!(!passed);
         assert!(reason.contains("quorum"));
-        
+
         // Test veto
         let tally_veto = TallyResult {
             yes_votes: 400_000,
@@ -554,7 +587,7 @@ mod tests {
             abstain_votes: 100_000,
             no_with_veto_votes: 400_000,
         };
-        
+
         let (passed, reason) = handler.evaluate_proposal(&tally_veto);
         assert!(!passed);
         assert!(reason.contains("vetoed"));

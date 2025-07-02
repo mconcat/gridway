@@ -8,15 +8,9 @@ use std::fmt;
 use std::str::FromStr;
 
 /// Account address - 20 bytes
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct AccAddress([u8; 20]);
-
-impl Default for AccAddress {
-    fn default() -> Self {
-        Self([0u8; 20])
-    }
-}
 
 /// Validator operator address - 20 bytes
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -33,7 +27,7 @@ impl AccAddress {
     /// ripemd160(sha256(pubkey_bytes))
     pub fn from_pubkey(pubkey_bytes: &[u8]) -> Self {
         let sha256_hash = Sha256::digest(pubkey_bytes);
-        let ripemd160_hash = Ripemd160::digest(&sha256_hash);
+        let ripemd160_hash = Ripemd160::digest(sha256_hash);
         let mut bytes = [0u8; 20];
         bytes.copy_from_slice(&ripemd160_hash);
         Self(bytes)

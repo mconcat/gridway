@@ -5,9 +5,9 @@
 //! CLI framework for blockchain operations.
 
 pub mod cli;
+pub mod config;
 pub mod keys;
 pub mod tx_builder;
-pub mod config;
 
 pub use tx_builder::{SignedTx, SigningConfig, TxBuilder};
 
@@ -326,10 +326,10 @@ impl Client {
                 "address": address
             })
         };
-        
+
         let data = serde_json::to_vec(&query_data)?;
         let response = self.abci_query(path, &data, None).await?;
-        
+
         // Parse the actual ABCI query response
         if let Some(balances) = response.get("balances") {
             if let Some(balances_array) = balances.as_array() {
@@ -337,7 +337,7 @@ impl Client {
                 for balance in balances_array {
                     if let (Some(denom), Some(amount)) = (
                         balance.get("denom").and_then(|d| d.as_str()),
-                        balance.get("amount").and_then(|a| a.as_str())
+                        balance.get("amount").and_then(|a| a.as_str()),
                     ) {
                         result.push(Balance {
                             denom: denom.to_string(),
@@ -348,7 +348,7 @@ impl Client {
                 return Ok(result);
             }
         }
-        
+
         // If parsing fails or no data found, return empty
         Ok(vec![])
     }
@@ -363,10 +363,10 @@ impl Client {
         } else {
             serde_json::json!({})
         };
-        
+
         let data = serde_json::to_vec(&query_data)?;
         let response = self.abci_query(path, &data, None).await?;
-        
+
         // Parse the actual ABCI query response
         if let Some(supply) = response.get("supply") {
             if let Some(supply_array) = supply.as_array() {
@@ -374,7 +374,7 @@ impl Client {
                 for supply_item in supply_array {
                     if let (Some(denom), Some(amount)) = (
                         supply_item.get("denom").and_then(|d| d.as_str()),
-                        supply_item.get("amount").and_then(|a| a.as_str())
+                        supply_item.get("amount").and_then(|a| a.as_str()),
                     ) {
                         result.push(Supply {
                             denom: denom.to_string(),
@@ -385,7 +385,7 @@ impl Client {
                 return Ok(result);
             }
         }
-        
+
         // If parsing fails or no data found, return empty
         Ok(vec![])
     }
@@ -396,22 +396,25 @@ impl Client {
         let query_data = serde_json::json!({
             "address": address
         });
-        
+
         let data = serde_json::to_vec(&query_data)?;
         let response = self.abci_query(path, &data, None).await?;
-        
+
         // Parse the actual ABCI query response
         if let Some(account) = response.get("account") {
-            let account_number = account.get("account_number")
+            let account_number = account
+                .get("account_number")
                 .and_then(|n| n.as_u64())
                 .unwrap_or(0);
-            let sequence = account.get("sequence")
+            let sequence = account
+                .get("sequence")
                 .and_then(|s| s.as_u64())
                 .unwrap_or(0);
-            let pub_key = account.get("pub_key")
+            let pub_key = account
+                .get("pub_key")
                 .and_then(|pk| pk.as_str())
                 .map(|s| s.to_string());
-            
+
             return Ok(AccountInfo {
                 address: address.to_string(),
                 account_number,
@@ -419,11 +422,11 @@ impl Client {
                 pub_key,
             });
         }
-        
+
         // If parsing fails, return error instead of mock data
-        Err(ClientError::InvalidResponse(
-            format!("Account not found or invalid response for address: {}", address)
-        ))
+        Err(ClientError::InvalidResponse(format!(
+            "Account not found or invalid response for address: {address}"
+        )))
     }
 
     /// Simulate a transaction to estimate gas usage
@@ -432,30 +435,33 @@ impl Client {
         let query_data = serde_json::json!({
             "tx_bytes": base64::encode(tx_bytes)
         });
-        
+
         let data = serde_json::to_vec(&query_data)?;
         let response = self.abci_query(path, &data, None).await?;
-        
+
         // Parse the actual simulation response
         if let Some(gas_info) = response.get("gas_info") {
-            let gas_used = gas_info.get("gas_used")
+            let gas_used = gas_info
+                .get("gas_used")
                 .and_then(|g| g.as_u64())
                 .unwrap_or(0);
-            let gas_wanted = gas_info.get("gas_wanted")
+            let gas_wanted = gas_info
+                .get("gas_wanted")
                 .and_then(|g| g.as_u64())
                 .unwrap_or(gas_used);
-            
+
             let mut events = vec![];
             if let Some(result) = response.get("result") {
                 if let Some(events_array) = result.get("events").and_then(|e| e.as_array()) {
                     for event in events_array {
                         if let Some(event_type) = event.get("type").and_then(|t| t.as_str()) {
                             let mut attributes = vec![];
-                            if let Some(attrs) = event.get("attributes").and_then(|a| a.as_array()) {
+                            if let Some(attrs) = event.get("attributes").and_then(|a| a.as_array())
+                            {
                                 for attr in attrs {
                                     if let (Some(key), Some(value)) = (
                                         attr.get("key").and_then(|k| k.as_str()),
-                                        attr.get("value").and_then(|v| v.as_str())
+                                        attr.get("value").and_then(|v| v.as_str()),
                                     ) {
                                         attributes.push(SimulationAttribute {
                                             key: key.to_string(),
@@ -472,13 +478,14 @@ impl Client {
                     }
                 }
             }
-            
-            let log = response.get("result")
+
+            let log = response
+                .get("result")
                 .and_then(|r| r.get("log"))
                 .and_then(|l| l.as_str())
                 .unwrap_or("simulation successful")
                 .to_string();
-            
+
             return Ok(SimulationResult {
                 gas_used,
                 gas_wanted,
@@ -486,10 +493,10 @@ impl Client {
                 log,
             });
         }
-        
+
         // If parsing fails, return error instead of mock estimation
         Err(ClientError::InvalidResponse(
-            "Invalid simulation response format".to_string()
+            "Invalid simulation response format".to_string(),
         ))
     }
 
@@ -504,35 +511,39 @@ impl Client {
         let params = serde_json::json!({
             "hash": hash
         });
-        
-        let response: serde_json::Value = self.rpc_request("tx", params).await
-            .map_err(|e| match e {
-                ClientError::Rpc { code: -32603, .. } => ClientError::InvalidResponse("Transaction not found".to_string()),
+
+        let response: serde_json::Value =
+            self.rpc_request("tx", params).await.map_err(|e| match e {
+                ClientError::Rpc { code: -32603, .. } => {
+                    ClientError::InvalidResponse("Transaction not found".to_string())
+                }
                 other => other,
             })?;
-        
+
         // Parse the actual transaction response
         if let Some(tx_result) = response.get("tx_result") {
-            let height = response.get("height")
+            let height = response
+                .get("height")
                 .and_then(|h| h.as_str())
                 .and_then(|h| h.parse::<u64>().ok())
                 .unwrap_or(0);
-            let code = tx_result.get("code")
-                .and_then(|c| c.as_u64())
-                .unwrap_or(0) as u32;
-            let log = tx_result.get("log")
+            let code = tx_result.get("code").and_then(|c| c.as_u64()).unwrap_or(0) as u32;
+            let log = tx_result
+                .get("log")
                 .and_then(|l| l.as_str())
                 .unwrap_or("No log")
                 .to_string();
-            let gas_used = tx_result.get("gas_used")
+            let gas_used = tx_result
+                .get("gas_used")
                 .and_then(|g| g.as_str())
                 .and_then(|g| g.parse::<u64>().ok())
                 .unwrap_or(0);
-            let gas_wanted = tx_result.get("gas_wanted")
+            let gas_wanted = tx_result
+                .get("gas_wanted")
                 .and_then(|g| g.as_str())
                 .and_then(|g| g.parse::<u64>().ok())
                 .unwrap_or(0);
-            
+
             return Ok(TxInfo {
                 hash: hash.to_string(),
                 height,
@@ -542,11 +553,11 @@ impl Client {
                 gas_wanted,
             });
         }
-        
+
         // If parsing fails, return error
-        Err(ClientError::InvalidResponse(
-            format!("Invalid transaction response format for hash: {}", hash)
-        ))
+        Err(ClientError::InvalidResponse(format!(
+            "Invalid transaction response format for hash: {hash}"
+        )))
     }
 }
 
@@ -558,6 +569,7 @@ mod base64 {
         base64::engine::general_purpose::STANDARD.encode(input)
     }
 
+    #[allow(dead_code)]
     pub fn decode<T: AsRef<[u8]>>(input: T) -> Result<Vec<u8>, base64::DecodeError> {
         base64::engine::general_purpose::STANDARD.decode(input)
     }

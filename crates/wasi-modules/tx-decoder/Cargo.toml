@@ -16,6 +16,7 @@ prost = "0.13"
 prost-types = "0.13"
 base64 = "0.22"
 hex = "0.4"
+sha2 = "0.10"
 
 [lib]
 name = "tx_decoder"

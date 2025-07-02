@@ -353,9 +353,8 @@ impl AppGenesis {
         pub_key: Option<PublicKey>,
     ) -> Result<(), SdkError> {
         // Validate address
-        AccAddress::from_bech32(&address).map_err(|_| {
-            SdkError::InvalidGenesis(format!("Invalid account address: {}", address))
-        })?;
+        AccAddress::from_bech32(&address)
+            .map_err(|_| SdkError::InvalidGenesis(format!("Invalid account address: {address}")))?;
 
         // Initialize auth state if not present
         if self.app_state.auth.is_none() {
@@ -393,14 +392,13 @@ impl AppGenesis {
         amount: String,
     ) -> Result<(), SdkError> {
         // Validate address
-        AccAddress::from_bech32(&address).map_err(|_| {
-            SdkError::InvalidGenesis(format!("Invalid balance address: {}", address))
-        })?;
+        AccAddress::from_bech32(&address)
+            .map_err(|_| SdkError::InvalidGenesis(format!("Invalid balance address: {address}")))?;
 
         // Validate amount
         let amount_u128 = amount
             .parse::<u128>()
-            .map_err(|_| SdkError::InvalidGenesis(format!("Invalid amount: {}", amount)))?;
+            .map_err(|_| SdkError::InvalidGenesis(format!("Invalid amount: {amount}")))?;
 
         if amount_u128 == 0 {
             return Err(SdkError::InvalidGenesis(
@@ -485,7 +483,7 @@ impl AppGenesis {
         let config = Config::default();
         Self::with_setup(chain_id, &config)
     }
-    
+
     /// Initialize genesis with validator and faucet account from config
     pub fn with_setup(chain_id: String, config: &Config) -> Result<Self, SdkError> {
         let mut genesis = Self::new(chain_id);
@@ -519,7 +517,7 @@ impl AppGenesis {
     /// Load genesis from a file
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, SdkError> {
         let contents = fs::read_to_string(path)
-            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to read genesis file: {}", e)))?;
+            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to read genesis file: {e}")))?;
 
         Self::from_json(&contents)
     }
@@ -529,7 +527,7 @@ impl AppGenesis {
         let mut contents = String::new();
         reader
             .read_to_string(&mut contents)
-            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to read genesis: {}", e)))?;
+            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to read genesis: {e}")))?;
 
         Self::from_json(&contents)
     }
@@ -537,16 +535,16 @@ impl AppGenesis {
     /// Parse genesis from JSON string
     pub fn from_json(json_str: &str) -> Result<Self, SdkError> {
         serde_json::from_str(json_str)
-            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to parse genesis JSON: {}", e)))
+            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to parse genesis JSON: {e}")))
     }
 
     /// Save genesis to a file
     pub fn save_as<P: AsRef<Path>>(&self, path: P) -> Result<(), SdkError> {
         let json = serde_json::to_string_pretty(self)
-            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to serialize genesis: {}", e)))?;
+            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to serialize genesis: {e}")))?;
 
         fs::write(path, json)
-            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to write genesis file: {}", e)))
+            .map_err(|e| SdkError::InvalidGenesis(format!("Failed to write genesis file: {e}")))
     }
 
     /// Validate the genesis file
@@ -560,8 +558,7 @@ impl AppGenesis {
 
         if self.chain_id.len() > MAX_CHAIN_ID_LEN {
             return Err(SdkError::InvalidGenesis(format!(
-                "chain_id length cannot exceed {} characters",
-                MAX_CHAIN_ID_LEN
+                "chain_id length cannot exceed {MAX_CHAIN_ID_LEN} characters"
             )));
         }
 

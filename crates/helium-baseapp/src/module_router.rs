@@ -12,7 +12,7 @@ use helium_types::SdkMsg;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
-use crate::capabilities::{CapabilityManager, CapabilityType, CapabilityError};
+use crate::capabilities::{CapabilityError, CapabilityManager, CapabilityType};
 use crate::vfs::{Capability, VfsError, VirtualFilesystem};
 use crate::wasi_host::{ModuleState, WasiHost, WasiHostError};
 
@@ -62,7 +62,7 @@ pub enum RouterError {
     /// Invalid module configuration
     #[error("invalid module configuration: {0}")]
     InvalidConfig(String),
-    
+
     /// Capability error
     #[error("capability error: {0}")]
     CapabilityError(#[from] CapabilityError),
@@ -180,8 +180,10 @@ impl ModuleConfig {
 #[derive(Debug)]
 struct ModuleRuntime {
     /// Module configuration
+    #[allow(dead_code)]
     config: ModuleConfig,
     /// Current execution state
+    #[allow(dead_code)]
     state: ModuleState,
     /// Number of times module has been called
     call_count: u64,
@@ -267,7 +269,7 @@ impl ModuleRouter {
             let initialized = self
                 .initialized
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             if *initialized {
                 return Ok(());
             }
@@ -285,7 +287,7 @@ impl ModuleRouter {
             let mut initialized = self
                 .initialized
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             *initialized = true;
         }
 
@@ -305,7 +307,7 @@ impl ModuleRouter {
             let mut routing = self
                 .message_routing
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
             for message_type in &config.message_types {
                 if routing.contains_key(message_type) {
@@ -323,32 +325,35 @@ impl ModuleRouter {
             let mut deps = self
                 .dependency_graph
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             deps.insert(config.name.clone(), config.dependencies.clone());
         }
-        
+
         // Grant default capabilities to the module
-        self.capability_manager.grant_default_capabilities(&config.name)?;
-        
+        self.capability_manager
+            .grant_default_capabilities(&config.name)?;
+
         // Grant requested capabilities
         for cap_str in &config.capabilities {
             let capability = CapabilityType::from_string(cap_str)?;
-            self.capability_manager.grant_capability(&config.name, capability, "system", false)?;
+            self.capability_manager
+                .grant_capability(&config.name, capability, "system", false)?;
         }
-        
+
         // Grant message handling capabilities
         for message_type in &config.message_types {
             let capability = CapabilityType::ReceiveMessage(message_type.clone());
-            self.capability_manager.grant_capability(&config.name, capability, "system", false)?;
+            self.capability_manager
+                .grant_capability(&config.name, capability, "system", false)?;
         }
-        
+
         // Store configuration
         let module_name = config.name.clone();
         {
             let mut configs = self
                 .module_configs
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             configs.insert(config.name.clone(), config);
         }
 
@@ -369,7 +374,7 @@ impl ModuleRouter {
             let routing = self
                 .message_routing
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
             routing
                 .get(&context.message_type)
@@ -389,11 +394,12 @@ impl ModuleRouter {
         context: ExecutionContext,
     ) -> Result<ExecutionResult> {
         debug!("Executing message in module: {}", module_name);
-        
+
         // Check module has capability to receive this message type
         let receive_cap = CapabilityType::ReceiveMessage(context.message_type.clone());
-        self.capability_manager.require_capability(module_name, &receive_cap)?;
-        
+        self.capability_manager
+            .require_capability(module_name, &receive_cap)?;
+
         // Check module state
         let module_state = self.wasi_host.get_module_state(module_name)?;
         if !matches!(module_state, ModuleState::Initialized) {
@@ -436,7 +442,7 @@ impl ModuleRouter {
     fn setup_module_environment(
         &self,
         module_name: &str,
-        context: &ExecutionContext,
+        _context: &ExecutionContext,
     ) -> Result<()> {
         debug!("Setting up environment for module: {}", module_name);
 
@@ -445,41 +451,44 @@ impl ModuleRouter {
             let configs = self
                 .module_configs
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             configs
                 .get(module_name)
                 .ok_or_else(|| {
-                    RouterError::ConfigError(format!("Module not found: {}", module_name))
+                    RouterError::ConfigError(format!("Module not found: {module_name}"))
                 })?
                 .clone()
         };
-        
+
         // Verify module has all required capabilities
         for capability_name in &config.capabilities {
             let capability = CapabilityType::from_string(capability_name)?;
-            self.capability_manager.require_capability(module_name, &capability)?;
+            self.capability_manager
+                .require_capability(module_name, &capability)?;
         }
-        
+
         // Set up VFS capabilities for this module based on granted capabilities
         let granted_caps = self.capability_manager.list_capabilities(module_name)?;
         for cap in granted_caps {
             match cap {
                 CapabilityType::ReadState(ns) => {
-                    self.vfs.add_capability(Capability::Read(ns))?;
+                    self.vfs.add_capability(Capability::Read(ns.into()))?;
                 }
                 CapabilityType::WriteState(ns) => {
-                    self.vfs.add_capability(Capability::Write(ns))?;
+                    self.vfs.add_capability(Capability::Write(ns.into()))?;
                 }
-                CapabilityType::DeleteState(ns) => {
-                    self.vfs.add_capability(Capability::Delete(ns))?;
+                CapabilityType::DeleteState(_ns) => {
+                    // Delete capability not supported in current VFS implementation
+                    // TODO: Add Delete capability to VFS when needed
                 }
-                CapabilityType::ListState(ns) => {
-                    self.vfs.add_capability(Capability::List(ns))?;
+                CapabilityType::ListState(_ns) => {
+                    // List capability not supported in current VFS implementation
+                    // TODO: Add List capability to VFS when needed
                 }
                 _ => {} // Other capabilities don't map to VFS
             }
         }
-        
+
         // TODO: Configure gas and memory limits based on capabilities
         // TODO: Set up IPC endpoints based on capabilities
         // TODO: Set up module-specific state isolation
@@ -538,10 +547,7 @@ impl ModuleRouter {
         };
 
         let error = if !success {
-            Some(format!(
-                "Module execution failed with code: {}",
-                success_code
-            ))
+            Some(format!("Module execution failed with code: {success_code}"))
         } else {
             None
         };
@@ -565,7 +571,7 @@ impl ModuleRouter {
         let mut runtimes = self
             .module_runtimes
             .lock()
-            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
         if let Some(runtime) = runtimes.get_mut(module_name) {
             runtime.call_count += 1;
@@ -583,7 +589,7 @@ impl ModuleRouter {
         let deps = self
             .dependency_graph
             .lock()
-            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
         let mut load_order = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -601,6 +607,7 @@ impl ModuleRouter {
     }
 
     /// Depth-first search for dependency resolution
+    #[allow(clippy::only_used_in_recursion)]
     fn dependency_dfs(
         &self,
         module: &str,
@@ -611,8 +618,7 @@ impl ModuleRouter {
     ) -> Result<()> {
         if visiting.contains(module) {
             return Err(RouterError::DependencyError(format!(
-                "Circular dependency detected involving module: {}",
-                module
+                "Circular dependency detected involving module: {module}"
             )));
         }
 
@@ -643,14 +649,11 @@ impl ModuleRouter {
             let configs = self
                 .module_configs
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             configs
                 .get(module_name)
                 .ok_or_else(|| {
-                    RouterError::ModuleLoadError(format!(
-                        "Module config not found: {}",
-                        module_name
-                    ))
+                    RouterError::ModuleLoadError(format!("Module config not found: {module_name}"))
                 })?
                 .clone()
         };
@@ -675,7 +678,7 @@ impl ModuleRouter {
             let mut runtimes = self
                 .module_runtimes
                 .lock()
-                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
             runtimes.insert(module_name.to_string(), runtime);
         }
 
@@ -706,12 +709,12 @@ impl ModuleRouter {
     }
 
     /// Parse capability string into VFS capability
+    #[allow(dead_code)]
     fn parse_capability(&self, capability_str: &str) -> Result<Capability> {
         let parts: Vec<&str> = capability_str.split(':').collect();
         if parts.len() != 2 {
             return Err(RouterError::InvalidConfig(format!(
-                "Invalid capability format: {}",
-                capability_str
+                "Invalid capability format: {capability_str}"
             )));
         }
 
@@ -719,14 +722,15 @@ impl ModuleRouter {
         let namespace = parts[1];
 
         match operation {
-            "read" => Ok(Capability::Read(namespace.to_string())),
-            "write" => Ok(Capability::Write(namespace.to_string())),
-            "list" => Ok(Capability::List(namespace.to_string())),
-            "create" => Ok(Capability::Create(namespace.to_string())),
-            "delete" => Ok(Capability::Delete(namespace.to_string())),
+            "read" => Ok(Capability::Read(namespace.to_string().into())),
+            "write" => Ok(Capability::Write(namespace.to_string().into())),
+            "execute" => Ok(Capability::Execute(namespace.to_string().into())),
+            // TODO: Add support for list, create, delete when added to VFS
+            "list" | "create" | "delete" => Err(RouterError::InvalidConfig(format!(
+                "Unsupported capability operation: {operation}"
+            ))),
             _ => Err(RouterError::InvalidConfig(format!(
-                "Unknown capability operation: {}",
-                operation
+                "Unknown capability operation: {operation}"
             ))),
         }
     }
@@ -743,15 +747,16 @@ impl ModuleRouter {
             "Sending IPC message from {} to {}",
             message.from_module, message.to_module
         );
-        
+
         // Check if sender has capability to execute the target module
         let execute_cap = CapabilityType::ExecuteModule(message.to_module.clone());
-        self.capability_manager.require_capability(&message.from_module, &execute_cap)?;
-        
+        self.capability_manager
+            .require_capability(&message.from_module, &execute_cap)?;
+
         let mut queue = self
             .ipc_queue
             .lock()
-            .map_err(|e| RouterError::IpcError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::IpcError(format!("Lock poisoned: {e}")))?;
         queue.push_back(message);
 
         Ok(())
@@ -762,7 +767,7 @@ impl ModuleRouter {
         let configs = self
             .module_configs
             .lock()
-            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
         Ok(configs.keys().cloned().collect())
     }
 
@@ -771,7 +776,7 @@ impl ModuleRouter {
         let runtimes = self
             .module_runtimes
             .lock()
-            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| RouterError::ConfigError(format!("Lock poisoned: {e}")))?;
 
         if let Some(runtime) = runtimes.get(module_name) {
             Ok(Some((runtime.call_count, runtime.total_gas_used)))
@@ -784,7 +789,7 @@ impl ModuleRouter {
     pub fn is_initialized(&self) -> bool {
         self.initialized.lock().map(|i| *i).unwrap_or(false)
     }
-    
+
     /// Get a reference to the capability manager
     pub fn capability_manager(&self) -> &Arc<CapabilityManager> {
         &self.capability_manager
@@ -901,27 +906,44 @@ mod tests {
     #[test]
     fn test_capability_granting() {
         let (router, temp_dir) = setup_test_router();
-        
+
         // Create a dummy WASM file
         let wasm_path = temp_dir.path().join("test_module.wasm");
         std::fs::write(&wasm_path, b"dummy wasm content").unwrap();
-        
+
         let config = ModuleConfig::new("test_module".to_string(), wasm_path)
             .handles_message_type("/test.Message".to_string())
             .requires_capability("read_state:auth".to_string())
             .requires_capability("write_state:bank".to_string());
-        
+
         // Register module - this should grant the capabilities
         assert!(router.register_module(config).is_ok());
-        
+
         // Check that capabilities were granted
         let cap_manager = router.capability_manager();
-        assert!(cap_manager.has_capability("test_module", &CapabilityType::ReadState("auth".to_string())).unwrap());
-        assert!(cap_manager.has_capability("test_module", &CapabilityType::WriteState("bank".to_string())).unwrap());
-        assert!(cap_manager.has_capability("test_module", &CapabilityType::ReceiveMessage("/test.Message".to_string())).unwrap());
-        
+        assert!(cap_manager
+            .has_capability(
+                "test_module",
+                &CapabilityType::ReadState("auth".to_string())
+            )
+            .unwrap());
+        assert!(cap_manager
+            .has_capability(
+                "test_module",
+                &CapabilityType::WriteState("bank".to_string())
+            )
+            .unwrap());
+        assert!(cap_manager
+            .has_capability(
+                "test_module",
+                &CapabilityType::ReceiveMessage("/test.Message".to_string())
+            )
+            .unwrap());
+
         // Check default capabilities were granted
-        assert!(cap_manager.has_capability("test_module", &CapabilityType::SystemInfo).unwrap());
+        assert!(cap_manager
+            .has_capability("test_module", &CapabilityType::SystemInfo)
+            .unwrap());
     }
 
     #[test]
@@ -931,51 +953,59 @@ mod tests {
         // Test valid capabilities
         assert!(router.parse_capability("read:auth").is_ok());
         assert!(router.parse_capability("write:bank").is_ok());
-        assert!(router.parse_capability("list:governance").is_ok());
+        assert!(router.parse_capability("execute:governance").is_ok());
 
         // Test invalid capabilities
         assert!(router.parse_capability("invalid").is_err());
         assert!(router.parse_capability("read:auth:extra").is_err());
         assert!(router.parse_capability("unknown:namespace").is_err());
+
+        // Test unsupported operations (list, create, delete)
+        assert!(router.parse_capability("list:governance").is_err());
+        assert!(router.parse_capability("create:test").is_err());
+        assert!(router.parse_capability("delete:test").is_err());
     }
 
     #[test]
     fn test_ipc_message_queuing() {
         let (router, temp_dir) = setup_test_router();
-        
+
         // Create dummy WASM files
         let module_a_path = temp_dir.path().join("module_a.wasm");
         let module_b_path = temp_dir.path().join("module_b.wasm");
         std::fs::write(&module_a_path, b"dummy wasm a").unwrap();
         std::fs::write(&module_b_path, b"dummy wasm b").unwrap();
-        
+
         // Register modules
         let config_a = ModuleConfig::new("module_a".to_string(), module_a_path)
             .handles_message_type("/test.ModuleA".to_string());
         let config_b = ModuleConfig::new("module_b".to_string(), module_b_path)
             .handles_message_type("/test.ModuleB".to_string());
-            
+
         router.register_module(config_a).unwrap();
         router.register_module(config_b).unwrap();
-        
+
         // Grant module_a capability to execute module_b
-        router.capability_manager().grant_capability(
-            "module_a",
-            CapabilityType::ExecuteModule("module_b".to_string()),
-            "system",
-            false
-        ).unwrap();
-        
+        router
+            .capability_manager()
+            .grant_capability(
+                "module_a",
+                CapabilityType::ExecuteModule("module_b".to_string()),
+                "system",
+                false,
+            )
+            .unwrap();
+
         let ipc_msg = IpcMessage {
             from_module: "module_a".to_string(),
             to_module: "module_b".to_string(),
             endpoint: "transfer".to_string(),
             payload: vec![1, 2, 3, 4],
         };
-        
+
         // Now IPC should work with proper capability
         assert!(router.send_ipc_message(ipc_msg).is_ok());
-        
+
         // Try without capability - should fail
         let ipc_msg2 = IpcMessage {
             from_module: "module_b".to_string(),
@@ -983,7 +1013,7 @@ mod tests {
             endpoint: "transfer".to_string(),
             payload: vec![1, 2, 3, 4],
         };
-        
+
         assert!(router.send_ipc_message(ipc_msg2).is_err());
     }
 }

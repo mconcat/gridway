@@ -5,7 +5,7 @@
 //! the ante handler as a WASM module following the microkernel architecture.
 
 use crate::wasi_host::WasiHost;
-use helium_types::{AccAddress, RawTx, SdkError};
+use helium_types::{RawTx, SdkError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -140,7 +140,7 @@ impl WasiAnteHandler {
     /// Create a new WASI ante handler
     pub fn new() -> AnteResult<Self> {
         let wasi_host = WasiHost::new().map_err(|e| AnteError::WasiError(e.to_string()))?;
-        
+
         Ok(Self {
             wasi_host,
             module_cache: HashMap::new(),
@@ -149,24 +149,33 @@ impl WasiAnteHandler {
 
     /// Load ante handler module from filesystem
     pub fn load_module(&mut self, module_name: &str, module_path: &str) -> AnteResult<()> {
-        info!("Loading WASI ante handler module: {} from {}", module_name, module_path);
-        
-        let module_bytes = std::fs::read(module_path)
-            .map_err(|e| AnteError::ModuleNotFound(format!("Failed to read module {}: {}", module_path, e)))?;
-        
+        info!(
+            "Loading WASI ante handler module: {} from {}",
+            module_name, module_path
+        );
+
+        let module_bytes = std::fs::read(module_path).map_err(|e| {
+            AnteError::ModuleNotFound(format!("Failed to read module {module_path}: {e}"))
+        })?;
+
         // Validate WASM module
-        self.wasi_host.validate_module(&module_bytes)
-            .map_err(|e| AnteError::WasiError(format!("Invalid WASM module: {}", e)))?;
-        
-        self.module_cache.insert(module_name.to_string(), module_bytes);
+        self.wasi_host
+            .validate_module(&module_bytes)
+            .map_err(|e| AnteError::WasiError(format!("Invalid WASM module: {e}")))?;
+
+        self.module_cache
+            .insert(module_name.to_string(), module_bytes);
         info!("Successfully loaded ante handler module: {}", module_name);
-        
+
         Ok(())
     }
 
     /// Execute ante handler for transaction validation
     pub fn handle(&mut self, ctx: &mut AnteContext, tx: &RawTx) -> AnteResult<TxResponse> {
-        debug!("WASI Ante Handler: Processing transaction for chain {}", ctx.chain_id);
+        debug!(
+            "WASI Ante Handler: Processing transaction for chain {}",
+            ctx.chain_id
+        );
 
         // Convert RawTx to WASI format
         let wasi_tx = self.convert_tx_to_wasi(tx)?;
@@ -185,28 +194,41 @@ impl WasiAnteHandler {
         // Convert response
         Ok(TxResponse {
             code: if response.success { 0 } else { 1 },
-            log: response.error.unwrap_or_else(|| "ante handler validation completed".to_string()),
+            log: response
+                .error
+                .unwrap_or_else(|| "ante handler validation completed".to_string()),
             gas_used: response.gas_used,
             gas_wanted: ctx.gas_limit,
             events: response.events,
         })
     }
 
-    fn execute_ante_module(&mut self, module_name: &str, input: &str) -> AnteResult<WasiAnteResponse> {
+    fn execute_ante_module(
+        &mut self,
+        module_name: &str,
+        input: &str,
+    ) -> AnteResult<WasiAnteResponse> {
         // Get module bytes from cache
-        let module_bytes = self.module_cache.get(module_name)
-            .ok_or_else(|| AnteError::ModuleNotFound(format!("Module not loaded: {}", module_name)))?;
+        let module_bytes = self.module_cache.get(module_name).ok_or_else(|| {
+            AnteError::ModuleNotFound(format!("Module not loaded: {module_name}"))
+        })?;
 
         // Execute WASI module
-        let result = self.wasi_host.execute_module_with_input(module_bytes, input.as_bytes())
-            .map_err(|e| AnteError::WasiError(format!("WASI execution failed: {}", e)))?;
+        let result = self
+            .wasi_host
+            .execute_module_with_input(module_bytes, input.as_bytes())
+            .map_err(|e| AnteError::WasiError(format!("WASI execution failed: {e}")))?;
 
         // Parse response
-        let response: WasiAnteResponse = serde_json::from_slice(&result.stdout)
-            .map_err(|e| AnteError::InvalidResponse(format!("Failed to parse WASI response: {}", e)))?;
+        let response: WasiAnteResponse = serde_json::from_slice(&result.stdout).map_err(|e| {
+            AnteError::InvalidResponse(format!("Failed to parse WASI response: {e}"))
+        })?;
 
         if !result.stderr.is_empty() {
-            warn!("WASI ante handler stderr: {}", String::from_utf8_lossy(&result.stderr));
+            warn!(
+                "WASI ante handler stderr: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
         }
 
         Ok(response)
@@ -216,7 +238,7 @@ impl WasiAnteHandler {
         // Convert RawTx to the WASI Transaction format
         // This is a simplified conversion - in a real implementation,
         // you would need proper protobuf deserialization
-        
+
         let wasi_tx = serde_json::json!({
             "body": {
                 "messages": tx.body.messages.iter().map(|msg| {
@@ -306,10 +328,13 @@ impl WasiAnteHandlerChain {
     /// Create a default ante handler chain with standard WASI modules
     pub fn default_chain() -> AnteResult<Self> {
         let mut handler = WasiAnteHandler::new()?;
-        
+
         // Try to load the default ante handler module
         if let Err(e) = handler.load_module("default", "modules/ante_handler.wasm") {
-            warn!("Failed to load default ante handler module: {}. Using placeholder.", e);
+            warn!(
+                "Failed to load default ante handler module: {}. Using placeholder.",
+                e
+            );
         }
 
         Ok(Self::new().add_handler(handler))
@@ -327,14 +352,14 @@ impl WasiAnteHandlerChain {
 
         for handler in &mut self.handlers {
             let response = handler.handle(ctx, tx)?;
-            
+
             if response.code != 0 {
                 return Ok(response); // Return first error
             }
-            
+
             combined_response.gas_used += response.gas_used;
             combined_response.events.extend(response.events);
-            
+
             if !response.log.is_empty() {
                 if !combined_response.log.is_empty() {
                     combined_response.log.push_str("; ");
@@ -364,8 +389,8 @@ impl Default for WasiAnteHandlerChain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use helium_types::{AuthInfo, Fee, FeeAmount, SignerInfo, TxBody, TxMessage};
     use helium_types::tx::{ModeInfo, ModeInfoSingle};
+    use helium_types::{AuthInfo, Fee, FeeAmount, SignerInfo, TxBody, TxMessage};
 
     fn create_test_context() -> AnteContext {
         AnteContext::new(100, 1234567890, "test-chain".to_string(), 200000, 1)
@@ -436,10 +461,10 @@ mod tests {
     fn test_tx_conversion() {
         let handler = WasiAnteHandler::new().unwrap();
         let tx = create_test_tx();
-        
+
         let wasi_tx = handler.convert_tx_to_wasi(&tx);
         assert!(wasi_tx.is_ok());
-        
+
         let converted = wasi_tx.unwrap();
         assert!(converted["body"]["messages"].is_array());
         assert!(converted["auth_info"]["signer_infos"].is_array());
@@ -449,10 +474,10 @@ mod tests {
     fn test_context_conversion() {
         let handler = WasiAnteHandler::new().unwrap();
         let ctx = create_test_context();
-        
+
         let wasi_ctx = handler.convert_context_to_wasi(&ctx);
         assert!(wasi_ctx.is_ok());
-        
+
         let converted = wasi_ctx.unwrap();
         assert_eq!(converted["block_height"], 100);
         assert_eq!(converted["chain_id"], "test-chain");

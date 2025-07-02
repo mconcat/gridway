@@ -6,31 +6,35 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use signature::Verifier;
 use std::io::{self, Read, Write};
 use thiserror::Error;
-use signature::Verifier;
 
 /// Error types for ante handler operations
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum AnteError {
     #[error("Invalid signature: {0}")]
     InvalidSignature(String),
-    
+
     #[error("Insufficient fees: got {got}, required {required}")]
     InsufficientFees { got: u64, required: u64 },
-    
+
     #[error("Invalid sequence: got {got}, expected {expected} for account {account}")]
-    InvalidSequence { account: String, got: u64, expected: u64 },
-    
+    InvalidSequence {
+        account: String,
+        got: u64,
+        expected: u64,
+    },
+
     #[error("Account not found: {0}")]
     AccountNotFound(String),
-    
+
     #[error("Gas limit exceeded: wanted {wanted}, limit {limit}")]
     GasLimitExceeded { wanted: u64, limit: u64 },
-    
+
     #[error("IO error: {0}")]
     IoError(String),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(String),
 }
@@ -149,7 +153,10 @@ impl WasiAnteHandler {
 
     /// Main entry point for ante handler validation
     pub fn handle(&mut self, ctx: &TxContext, tx: &Transaction) -> AnteResponse {
-        log::info!("WASI Ante Handler: Processing transaction for chain {}", ctx.chain_id);
+        log::info!(
+            "WASI Ante Handler: Processing transaction for chain {}",
+            ctx.chain_id
+        );
 
         match self.validate_transaction(ctx, tx) {
             Ok(events) => AnteResponse {
@@ -167,7 +174,11 @@ impl WasiAnteHandler {
         }
     }
 
-    fn validate_transaction(&mut self, ctx: &TxContext, tx: &Transaction) -> AnteResult<Vec<Event>> {
+    fn validate_transaction(
+        &mut self,
+        ctx: &TxContext,
+        tx: &Transaction,
+    ) -> AnteResult<Vec<Event>> {
         let mut events = Vec::new();
 
         // Step 1: Basic transaction validation
@@ -179,12 +190,10 @@ impl WasiAnteHandler {
         self.validate_fees(ctx, tx)?;
         events.push(Event {
             event_type: "fee_validation".to_string(),
-            attributes: vec![
-                Attribute {
-                    key: "gas_limit".to_string(),
-                    value: tx.auth_info.fee.gas_limit.to_string(),
-                },
-            ],
+            attributes: vec![Attribute {
+                key: "gas_limit".to_string(),
+                value: tx.auth_info.fee.gas_limit.to_string(),
+            }],
         });
 
         // Step 3: Signature verification
@@ -193,12 +202,10 @@ impl WasiAnteHandler {
         self.verify_signatures(ctx, tx, &accounts)?;
         events.push(Event {
             event_type: "signature_verification".to_string(),
-            attributes: vec![
-                Attribute {
-                    key: "signers".to_string(),
-                    value: tx.signatures.len().to_string(),
-                },
-            ],
+            attributes: vec![Attribute {
+                key: "signers".to_string(),
+                value: tx.signatures.len().to_string(),
+            }],
         });
 
         // Step 4: Sequence validation and increment
@@ -206,12 +213,10 @@ impl WasiAnteHandler {
         self.validate_and_increment_sequences(tx, &accounts)?;
         events.push(Event {
             event_type: "sequence_validation".to_string(),
-            attributes: vec![
-                Attribute {
-                    key: "accounts".to_string(),
-                    value: accounts.len().to_string(),
-                },
-            ],
+            attributes: vec![Attribute {
+                key: "accounts".to_string(),
+                value: accounts.len().to_string(),
+            }],
         });
 
         Ok(events)
@@ -287,7 +292,9 @@ impl WasiAnteHandler {
                 let hash = Sha256::digest(&pk.value);
                 Ok(format!("cosmos1{}", hex::encode(&hash[..20])))
             }
-            None => Err(AnteError::InvalidSignature("no public key provided".to_string())),
+            None => Err(AnteError::InvalidSignature(
+                "no public key provided".to_string(),
+            )),
         }
     }
 
@@ -383,16 +390,20 @@ impl WasiAnteHandler {
         use k256::ecdsa::{Signature, VerifyingKey};
 
         let message_hash = Sha256::digest(message);
-        
-        let verifying_key = VerifyingKey::from_sec1_bytes(public_key)
-            .map_err(|e| AnteError::InvalidSignature(format!("invalid secp256k1 public key: {}", e)))?;
-        
-        let signature = Signature::from_bytes(signature.into())
-            .map_err(|e| AnteError::InvalidSignature(format!("invalid secp256k1 signature: {}", e)))?;
+
+        let verifying_key = VerifyingKey::from_sec1_bytes(public_key).map_err(|e| {
+            AnteError::InvalidSignature(format!("invalid secp256k1 public key: {e}"))
+        })?;
+
+        let signature = Signature::from_bytes(signature.into()).map_err(|e| {
+            AnteError::InvalidSignature(format!("invalid secp256k1 signature: {e}"))
+        })?;
 
         verifying_key
             .verify(&message_hash, &signature)
-            .map_err(|_| AnteError::InvalidSignature("secp256k1 signature verification failed".to_string()))?;
+            .map_err(|_| {
+                AnteError::InvalidSignature("secp256k1 signature verification failed".to_string())
+            })?;
 
         Ok(())
     }
@@ -408,7 +419,7 @@ impl WasiAnteHandler {
         let verifying_key = VerifyingKey::from_bytes(public_key.try_into().map_err(|_| {
             AnteError::InvalidSignature("invalid ed25519 public key length".to_string())
         })?)
-        .map_err(|e| AnteError::InvalidSignature(format!("invalid ed25519 public key: {}", e)))?;
+        .map_err(|e| AnteError::InvalidSignature(format!("invalid ed25519 public key: {e}")))?;
 
         let signature = Signature::from_bytes(signature.try_into().map_err(|_| {
             AnteError::InvalidSignature("invalid ed25519 signature length".to_string())
@@ -416,7 +427,9 @@ impl WasiAnteHandler {
 
         verifying_key
             .verify_strict(message, &signature)
-            .map_err(|_| AnteError::InvalidSignature("ed25519 signature verification failed".to_string()))?;
+            .map_err(|_| {
+                AnteError::InvalidSignature("ed25519 signature verification failed".to_string())
+            })?;
 
         Ok(())
     }
@@ -468,7 +481,7 @@ pub extern "C" fn ante_handle() -> i32 {
     // Read input from stdin (transaction context and data)
     let mut input = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut input) {
-        log::error!("Failed to read input: {}", e);
+        log::error!("Failed to read input: {e}");
         return 1;
     }
 
@@ -476,7 +489,7 @@ pub extern "C" fn ante_handle() -> i32 {
     let (ctx, tx): (TxContext, Transaction) = match serde_json::from_str(&input) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("Failed to parse input JSON: {}", e);
+            log::error!("Failed to parse input JSON: {e}");
             return 1;
         }
     };
@@ -488,17 +501,21 @@ pub extern "C" fn ante_handle() -> i32 {
     match serde_json::to_string(&response) {
         Ok(output) => {
             if let Err(e) = io::stdout().write_all(output.as_bytes()) {
-                log::error!("Failed to write output: {}", e);
+                log::error!("Failed to write output: {e}");
                 return 1;
             }
         }
         Err(e) => {
-            log::error!("Failed to serialize response: {}", e);
+            log::error!("Failed to serialize response: {e}");
             return 1;
         }
     }
 
-    if response.success { 0 } else { 1 }
+    if response.success {
+        0
+    } else {
+        1
+    }
 }
 
 // For non-WASI environments, provide a library interface
@@ -563,8 +580,8 @@ mod tests {
 
     #[test]
     fn test_basic_validation() {
-        let mut handler = WasiAnteHandler::new();
-        let ctx = create_test_context();
+        let handler = WasiAnteHandler::new();
+        let _ctx = create_test_context();
         let tx = create_test_transaction();
 
         let result = handler.validate_basic_tx(&tx);
@@ -591,7 +608,10 @@ mod tests {
         let result = handler.validate_fees(&ctx, &tx);
         assert!(result.is_err());
         match result {
-            Err(AnteError::InsufficientFees { got: 250000, required: 20000000 }) => {}
+            Err(AnteError::InsufficientFees {
+                got: 250000,
+                required: 20000000,
+            }) => {}
             _ => panic!("Expected InsufficientFees error"),
         }
     }

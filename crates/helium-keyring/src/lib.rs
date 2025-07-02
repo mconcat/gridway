@@ -62,7 +62,11 @@ pub trait Keyring: Send + Sync {
     async fn import_key(&mut self, name: &str, mnemonic: &str) -> Result<KeyInfo, KeyringError>;
 
     /// Import a key from a private key hex string
-    async fn import_private_key(&mut self, name: &str, private_key_hex: &str) -> Result<KeyInfo, KeyringError>;
+    async fn import_private_key(
+        &mut self,
+        name: &str,
+        private_key_hex: &str,
+    ) -> Result<KeyInfo, KeyringError>;
 
     /// List all stored keys
     async fn list_keys(&self) -> Result<Vec<KeyInfo>, KeyringError>;
@@ -77,8 +81,15 @@ pub trait Keyring: Send + Sync {
     async fn delete_key(&mut self, name: &str) -> Result<(), KeyringError>;
 
     /// Export a key (optionally including private key data)
-    async fn export_key(&self, name: &str, include_private: bool) -> Result<ExportedKey, KeyringError>;
+    async fn export_key(
+        &self,
+        name: &str,
+        include_private: bool,
+    ) -> Result<ExportedKey, KeyringError>;
 
     /// Import a key from exported format
-    async fn import_exported_key(&mut self, exported: &ExportedKey) -> Result<KeyInfo, KeyringError>;
+    async fn import_exported_key(
+        &mut self,
+        exported: &ExportedKey,
+    ) -> Result<KeyInfo, KeyringError>;
 }

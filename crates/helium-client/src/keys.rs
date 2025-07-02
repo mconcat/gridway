@@ -8,7 +8,7 @@ use crate::cli::{
     ShowKeyCmd,
 };
 use helium_keyring::{file::FileKeyring, Keyring, KeyringError};
-use helium_log::{info, warn, debug};
+use helium_log::{debug, info, warn};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -261,7 +261,7 @@ impl KeysHandler {
 
 /// Prompt user for password input (hidden)
 fn prompt_password(prompt: &str) -> KeysResult<String> {
-    print!("{}", prompt);
+    print!("{prompt}");
     io::stdout().flush()?;
     let password = rpassword::read_password()?;
     Ok(password)
@@ -269,7 +269,7 @@ fn prompt_password(prompt: &str) -> KeysResult<String> {
 
 /// Prompt user for text input
 fn prompt_input(prompt: &str) -> KeysResult<String> {
-    print!("{}", prompt);
+    print!("{prompt}");
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
@@ -278,7 +278,7 @@ fn prompt_input(prompt: &str) -> KeysResult<String> {
 
 /// Prompt user for confirmation
 fn confirm(prompt: &str) -> KeysResult<bool> {
-    print!("{} [y/N]: ", prompt);
+    print!("{prompt} [y/N]: ");
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;

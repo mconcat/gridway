@@ -25,6 +25,7 @@ pub struct Ctx<'a> {
 }
 
 /// Manages ABCI events
+#[derive(Default)]
 pub struct EventManager {
     events: Vec<Event>,
 }
