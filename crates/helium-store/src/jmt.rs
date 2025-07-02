@@ -41,7 +41,7 @@ impl JMTStore {
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
 
         let db = DB::open(&opts, db_path)
-            .map_err(|e| StoreError::BackendError(format!("RocksDB error: {}", e)))?;
+            .map_err(|e| StoreError::BackendError(format!("RocksDB error: {e}")))?;
 
         Ok(Self {
             db: Arc::new(db),
@@ -82,7 +82,7 @@ impl JMTStore {
     pub fn get_root_hash(&self, version: Version) -> Result<Hash> {
         // For now, compute a deterministic hash based on all committed data
         // In a full JMT implementation, this would be the actual tree root hash
-        let version_key = format!("__root_hash_{}", version);
+        let version_key = format!("__root_hash_{version}");
 
         match self.db.get(version_key.as_bytes()) {
             Ok(Some(hash_bytes)) => {
@@ -95,7 +95,7 @@ impl JMTStore {
                 }
             }
             Ok(None) => Ok([0u8; 32]), // Empty tree
-            Err(e) => Err(StoreError::BackendError(format!("RocksDB error: {}", e))),
+            Err(e) => Err(StoreError::BackendError(format!("RocksDB error: {e}"))),
         }
     }
 
@@ -129,11 +129,11 @@ impl JMTStore {
                 self.committed.insert(key.clone(), value.clone());
                 self.db
                     .put(&key, &value)
-                    .map_err(|e| StoreError::BackendError(format!("RocksDB put error: {}", e)))?;
+                    .map_err(|e| StoreError::BackendError(format!("RocksDB put error: {e}")))?;
             } else {
                 self.committed.remove(&key);
                 self.db.delete(&key).map_err(|e| {
-                    StoreError::BackendError(format!("RocksDB delete error: {}", e))
+                    StoreError::BackendError(format!("RocksDB delete error: {e}"))
                 })?;
             }
         }
@@ -146,7 +146,7 @@ impl JMTStore {
         let version_key = format!("__root_hash_{}", self.version);
         self.db
             .put(version_key.as_bytes(), new_root_hash)
-            .map_err(|e| StoreError::BackendError(format!("RocksDB put error: {}", e)))?;
+            .map_err(|e| StoreError::BackendError(format!("RocksDB put error: {e}")))?;
 
         Ok(new_root_hash)
     }
@@ -207,8 +207,7 @@ impl JMTStore {
         match self.db.get(key) {
             Ok(value) => Ok(value),
             Err(e) => Err(StoreError::BackendError(format!(
-                "RocksDB get error: {}",
-                e
+                "RocksDB get error: {e}"
             ))),
         }
     }
@@ -225,7 +224,7 @@ impl JMTStore {
                         self.committed.insert(key.to_vec(), value.to_vec());
                     }
                 }
-                Err(e) => return Err(StoreError::BackendError(format!("Iterator error: {}", e))),
+                Err(e) => return Err(StoreError::BackendError(format!("Iterator error: {e}"))),
             }
         }
 
@@ -329,7 +328,7 @@ impl VersionedJMTStore {
 
             // Remove old root hashes from storage
             for version in 0..cutoff {
-                let version_key = format!("__root_hash_{}", version);
+                let version_key = format!("__root_hash_{version}");
                 let _ = self.store.db.delete(version_key.as_bytes());
             }
         }

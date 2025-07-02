@@ -183,8 +183,7 @@ impl StateManager {
         // Check if snapshot exists first
         if !self.snapshots.contains_key(&height) {
             return Err(StoreError::InvalidValue(format!(
-                "No snapshot found for height {}",
-                height
+                "No snapshot found for height {height}"
             )));
         }
 

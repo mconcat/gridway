@@ -39,12 +39,11 @@ impl GlobalAppStore {
         let mut namespaces = self
             .namespaces
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock namespaces: {}", e)))?;
+            .map_err(|e| StoreError::BackendError(format!("Failed to lock namespaces: {e}")))?;
 
         if namespaces.contains_key(namespace) {
             return Err(StoreError::BackendError(format!(
-                "Namespace {} already registered",
-                namespace
+                "Namespace {namespace} already registered"
             )));
         }
 
@@ -64,7 +63,7 @@ impl GlobalAppStore {
         let namespaces = self
             .namespaces
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock namespaces: {}", e)))?;
+            .map_err(|e| StoreError::BackendError(format!("Failed to lock namespaces: {e}")))?;
 
         let config = namespaces
             .get(namespace)
@@ -106,7 +105,7 @@ impl GlobalAppStore {
         let namespaces = self
             .namespaces
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock namespaces: {}", e)))?;
+            .map_err(|e| StoreError::BackendError(format!("Failed to lock namespaces: {e}")))?;
         Ok(namespaces.keys().cloned().collect())
     }
 
@@ -153,7 +152,7 @@ impl KVStore for NamespacedStore {
         let store = self
             .store
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {}", e)))?;
+            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {e}")))?;
         store.get(&prefixed_key)
     }
 
@@ -168,7 +167,7 @@ impl KVStore for NamespacedStore {
         let mut store = self
             .store
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {}", e)))?;
+            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {e}")))?;
         store.set(prefixed_key, value)
     }
 
@@ -183,7 +182,7 @@ impl KVStore for NamespacedStore {
         let mut store = self
             .store
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {}", e)))?;
+            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {e}")))?;
         store.delete(&prefixed_key)
     }
 
@@ -192,7 +191,7 @@ impl KVStore for NamespacedStore {
         let store = self
             .store
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {}", e)))?;
+            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {e}")))?;
         store.has(&prefixed_key)
     }
 
