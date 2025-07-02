@@ -1,0 +1,67 @@
+# Example WASM module loader configuration
+
+# Directory containing WASM modules
+modules_dir = "./wasm_modules"
+
+# Cache size for compiled modules
+cache_size = 100
+
+# Default memory limit (512MB)
+memory_limit = 536870912
+
+# Default CPU time limit in milliseconds (5 seconds)
+cpu_time_limit = 5000
+
+# Allow hot reloading of modules
+allow_hot_reload = true
+
+# Module configurations
+[[modules]]
+name = "auth"
+path = "auth.wasm"
+preload = true
+capabilities = ["read_state", "write_state", "emit_event", "log", "allocate_memory"]
+memory_limit = 67108864  # 64MB
+gas_limit = 1000000
+endpoints = ["validate_account", "create_account"]
+message_types = ["/cosmos.auth.v1beta1.MsgUpdateParams"]
+
+[[modules]]
+name = "bank" 
+path = "bank.wasm"
+preload = true
+capabilities = ["read_state", "write_state", "emit_event", "send_message", "log", "allocate_memory"]
+memory_limit = 134217728  # 128MB
+gas_limit = 2000000
+endpoints = ["transfer", "get_balance", "get_supply"]
+message_types = [
+    "/cosmos.bank.v1beta1.MsgSend",
+    "/cosmos.bank.v1beta1.MsgMultiSend"
+]
+
+[[modules]]
+name = "staking"
+path = "staking.wasm"
+preload = false  # Load on demand
+capabilities = ["read_state", "write_state", "emit_event", "send_message", "access_block", "log", "allocate_memory"]
+endpoints = ["delegate", "undelegate", "get_validators"]
+message_types = [
+    "/cosmos.staking.v1beta1.MsgDelegate",
+    "/cosmos.staking.v1beta1.MsgUndelegate",
+    "/cosmos.staking.v1beta1.MsgBeginRedelegate",
+    "/cosmos.staking.v1beta1.MsgCreateValidator",
+    "/cosmos.staking.v1beta1.MsgEditValidator"
+]
+
+[[modules]]
+name = "governance"
+path = "gov.wasm"
+preload = false
+capabilities = ["read_state", "write_state", "emit_event", "send_message", "access_transaction", "log", "allocate_memory"]
+endpoints = ["submit_proposal", "vote", "get_proposals"]
+message_types = [
+    "/cosmos.gov.v1beta1.MsgSubmitProposal",
+    "/cosmos.gov.v1beta1.MsgVote",
+    "/cosmos.gov.v1beta1.MsgVoteWeighted",
+    "/cosmos.gov.v1beta1.MsgDeposit"
+]
