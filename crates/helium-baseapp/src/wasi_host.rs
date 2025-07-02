@@ -239,7 +239,7 @@ impl WasiHost {
     /// Load a WASM module from file
     pub fn load_module_from_file(&self, name: String, path: PathBuf) -> Result<()> {
         let wasm_bytes = std::fs::read(&path).map_err(|e| {
-            WasiHostError::InvalidModule(format!("Failed to read file {:?}: {}", path, e))
+            WasiHostError::InvalidModule(format!("Failed to read file {path:?}: {e}"))
         })?;
         self.load_module(name, &wasm_bytes)
     }
@@ -247,14 +247,14 @@ impl WasiHost {
     /// Validate a WASM module without loading it
     pub fn validate_module(&self, wasm_bytes: &[u8]) -> Result<()> {
         debug!("Validating WASM module");
-        
+
         // Compile the module to validate it
-        let module = Module::new(&self.engine, wasm_bytes)
-            .map_err(|e| WasiHostError::ModuleCompilation(e.into()))?;
-        
+        let module =
+            Module::new(&self.engine, wasm_bytes).map_err(WasiHostError::ModuleCompilation)?;
+
         // Validate module exports
         self.validate_module_exports(&module)?;
-        
+
         info!("WASM module validation successful");
         Ok(())
     }
@@ -268,7 +268,7 @@ impl WasiHost {
             let modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
             modules
                 .get(name)
                 .ok_or_else(|| WasiHostError::ModuleNotFound(name.to_string()))?
@@ -308,7 +308,7 @@ impl WasiHost {
         let mut instances = self
             .instances
             .lock()
-            .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
         instances.insert(name.to_string(), host_instance);
 
         // Update module state
@@ -316,7 +316,7 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
             if let Some(module) = modules.get_mut(name) {
                 module.state = ModuleState::Initialized;
             }
@@ -343,12 +343,11 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             if let Some(module) = modules.get_mut(module_name) {
                 if !module.is_ready() {
                     return Err(WasiHostError::ModuleExecution(format!(
-                        "Module {} is not ready for execution",
-                        module_name
+                        "Module {module_name} is not ready for execution"
                     )));
                 }
                 module.state = ModuleState::Executing;
@@ -362,7 +361,7 @@ impl WasiHost {
             let mut instances = self
                 .instances
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
             let host_instance = instances
                 .get_mut(module_name)
@@ -374,8 +373,7 @@ impl WasiHost {
                 .get_func(&mut host_instance.store, function_name)
                 .ok_or_else(|| {
                     WasiHostError::ModuleExecution(format!(
-                        "Function {} not found in module {}",
-                        function_name, module_name
+                        "Function {function_name} not found in module {module_name}"
                     ))
                 })?;
 
@@ -392,7 +390,7 @@ impl WasiHost {
                 Err(e) => {
                     // Check if this is a trap
                     if let Some(trap) = e.downcast_ref::<wasmtime::Trap>() {
-                        let error = WasiHostError::WasmTrap(trap.clone());
+                        let error = WasiHostError::WasmTrap(*trap);
                         self.set_module_error(module_name, error.to_string()).ok();
                         return Err(error);
                     }
@@ -429,7 +427,7 @@ impl WasiHost {
                 let mut modules = self
                     .modules
                     .lock()
-                    .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                    .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
                 if let Some(module) = modules.get_mut(module_name) {
                     module.state = ModuleState::Initialized;
                 }
@@ -443,7 +441,7 @@ impl WasiHost {
                 match e {
                     WasiHostError::OutOfGas(_) | WasiHostError::MemoryLimitExceeded(_) => {
                         let mut modules = self.modules.lock().map_err(|e| {
-                            WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e))
+                            WasiHostError::ModuleExecution(format!("Lock poisoned: {e}"))
                         })?;
                         if let Some(module) = modules.get_mut(module_name) {
                             module.state = ModuleState::Initialized;
@@ -470,7 +468,7 @@ impl WasiHost {
             let mut instances = self
                 .instances
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             instances.remove(name);
         }
 
@@ -479,7 +477,7 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             modules.remove(name);
         }
 
@@ -492,7 +490,7 @@ impl WasiHost {
         let modules = self
             .modules
             .lock()
-            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
         modules
             .get(name)
@@ -505,7 +503,7 @@ impl WasiHost {
         let modules = self
             .modules
             .lock()
-            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
         Ok(modules.keys().cloned().collect())
     }
@@ -519,7 +517,7 @@ impl WasiHost {
             let modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
             let module = modules
                 .get(name)
@@ -527,8 +525,7 @@ impl WasiHost {
 
             if !matches!(module.state, ModuleState::Error(_)) {
                 return Err(WasiHostError::ModuleExecution(format!(
-                    "Module {} is not in error state, cannot recover",
-                    name
+                    "Module {name} is not in error state, cannot recover"
                 )));
             }
         }
@@ -538,7 +535,7 @@ impl WasiHost {
             let mut instances = self
                 .instances
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             instances.remove(name);
         }
 
@@ -547,7 +544,7 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             if let Some(module) = modules.get_mut(name) {
                 module.state = ModuleState::Loaded;
             }
@@ -565,7 +562,7 @@ impl WasiHost {
         let mut modules = self
             .modules
             .lock()
-            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
         if let Some(module) = modules.get_mut(name) {
             module.state = ModuleState::Error(error.clone());
@@ -634,51 +631,55 @@ impl WasiHost {
     }
 
     /// Execute a WASM module with input data and capture output
-    pub fn execute_module_with_input(&self, wasm_bytes: &[u8], _input: &[u8]) -> Result<ExecutionResult> {
+    pub fn execute_module_with_input(
+        &self,
+        wasm_bytes: &[u8],
+        _input: &[u8],
+    ) -> Result<ExecutionResult> {
         debug!("Executing WASM module with input");
-        
+
         // Compile the module
-        let module = Module::new(&self.engine, wasm_bytes)
-            .map_err(|e| WasiHostError::ModuleCompilation(e.into()))?;
-        
+        let module =
+            Module::new(&self.engine, wasm_bytes).map_err(WasiHostError::ModuleCompilation)?;
+
         // For now, use a simplified approach with inherit_stdio
         // TODO: Implement proper I/O capture using MemoryPipe when API is stable
-        let wasi_ctx = WasiCtxBuilder::new()
-            .inherit_stdio()
-            .inherit_env()
-            .build();
-        
+        let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().inherit_env().build();
+
         let mut store = Store::new(&self.engine, wasi_ctx);
-        
+
         // Set fuel for gas metering
-        store.set_fuel(self.default_gas_limit)
+        store
+            .set_fuel(self.default_gas_limit)
             .map_err(|e| WasiHostError::ModuleInstantiation(e.to_string()))?;
-        
+
         // Create WASI linker - using direct import since the API keeps changing
         let mut linker = Linker::new(&self.engine);
         // Add basic host functions for now
         self.add_host_functions(&mut linker)?;
-        
+
         // Instantiate the module
-        let instance = linker.instantiate(&mut store, &module)
+        let instance = linker
+            .instantiate(&mut store, &module)
             .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?;
-        
+
         // Get the entry point function (looking for 'ante_handle' or '_start')
-        let exit_code = if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "ante_handle") {
-            // Custom entry point
-            func.call(&mut store, ())
-                .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
-        } else if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
-            // Standard WASI entry point
-            func.call(&mut store, ())
-                .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?;
-            0 // Success
-        } else {
-            return Err(WasiHostError::ModuleExecution(
-                "No entry point found (expected 'ante_handle' or '_start')".to_string()
-            ));
-        };
-        
+        let exit_code =
+            if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "ante_handle") {
+                // Custom entry point
+                func.call(&mut store, ())
+                    .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
+            } else if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
+                // Standard WASI entry point
+                func.call(&mut store, ())
+                    .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?;
+                0 // Success
+            } else {
+                return Err(WasiHostError::ModuleExecution(
+                    "No entry point found (expected 'ante_handle' or '_start')".to_string(),
+                ));
+            };
+
         // For now, return empty output - will be improved with proper I/O capture
         Ok(ExecutionResult {
             exit_code,

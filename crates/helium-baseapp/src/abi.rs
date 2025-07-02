@@ -10,7 +10,6 @@
 //! - Stderr capture: Detailed error messages captured from guest
 //! - Capability-based security: Host functions require proper capabilities
 
-use std::io::{Write};
 use std::sync::{Arc, Mutex};
 
 use helium_store::KVStore;
@@ -19,8 +18,8 @@ use thiserror::Error;
 use tracing::{debug, error, info, warn};
 use wasmtime::{AsContextMut, *};
 
-use crate::vfs::VirtualFilesystem;
 use crate::capabilities::CapabilityManager;
+use crate::vfs::VirtualFilesystem;
 
 /// ABI error types
 #[derive(Error, Debug)]
@@ -179,12 +178,12 @@ impl AbiContext {
             capability_manager: None,
         }
     }
-    
+
     /// Set the VFS instance
     pub fn set_vfs(&mut self, vfs: Arc<VirtualFilesystem>) {
         self.vfs = Some(vfs);
     }
-    
+
     /// Set the capability manager
     pub fn set_capability_manager(&mut self, cap_manager: Arc<CapabilityManager>) {
         self.capability_manager = Some(cap_manager);
@@ -212,7 +211,7 @@ impl AbiContext {
         let mut buffer = self
             .stderr_buffer
             .lock()
-            .map_err(|e| AbiError::ExecutionError(format!("Stderr lock poisoned: {}", e)))?;
+            .map_err(|e| AbiError::ExecutionError(format!("Stderr lock poisoned: {e}")))?;
         buffer.extend_from_slice(data);
         Ok(())
     }
@@ -222,7 +221,7 @@ impl AbiContext {
         let mut buffer = self
             .stderr_buffer
             .lock()
-            .map_err(|e| AbiError::ExecutionError(format!("Stderr lock poisoned: {}", e)))?;
+            .map_err(|e| AbiError::ExecutionError(format!("Stderr lock poisoned: {e}")))?;
         Ok(std::mem::take(&mut *buffer))
     }
 }
@@ -327,7 +326,7 @@ impl MemoryManager {
             .unwrap_or(data.len());
 
         String::from_utf8(data[start..end].to_vec())
-            .map_err(|e| AbiError::InvalidMemoryAccess(format!("Invalid UTF-8 string: {}", e)))
+            .map_err(|e| AbiError::InvalidMemoryAccess(format!("Invalid UTF-8 string: {e}")))
     }
 
     /// Write a string to WASM memory (null-terminated)
@@ -360,13 +359,13 @@ impl ProtobufHelper {
     pub fn serialize<T: prost::Message>(msg: &T) -> Result<Vec<u8>> {
         let mut buf = Vec::new();
         msg.encode(&mut buf)
-            .map_err(|e| AbiError::ProtobufError(format!("Encoding failed: {}", e)))?;
+            .map_err(|e| AbiError::ProtobufError(format!("Encoding failed: {e}")))?;
         Ok(buf)
     }
 
     /// Deserialize bytes to a protobuf message
     pub fn deserialize<T: prost::Message + Default>(data: &[u8]) -> Result<T> {
-        T::decode(data).map_err(|e| AbiError::ProtobufError(format!("Decoding failed: {}", e)))
+        T::decode(data).map_err(|e| AbiError::ProtobufError(format!("Decoding failed: {e}")))
     }
 
     /// Serialize and write protobuf message to WASM memory
@@ -419,50 +418,56 @@ impl HostFunctions {
     /// Add logging functions
     fn add_logging_functions(linker: &mut Linker<AbiContext>) -> Result<()> {
         // host_log(level: i32, ptr: u32, len: u32) -> i32
-        linker.func_wrap("env", "host_log", |mut caller: Caller<'_, AbiContext>, level: i32, ptr: u32, len: u32| -> i32 {
-            // Check logging capability and get module ID before mutable borrow
-            let (has_capability, module_id) = {
-                let context = caller.data();
-                let has_cap = context.has_capability(&Capability::Log);
-                (has_cap, context.module_id.clone())
-            };
-            
-            if !has_capability {
-                error!("Log capability check failed: missing Log capability");
-                return AbiResultCode::PermissionDenied as i32;
-            }
-            
-            // Get memory and read log message
-            let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
-                Some(memory) => memory,
-                None => {
-                    error!("Failed to get WASM memory for logging");
-                    return AbiResultCode::InvalidOperation as i32;
-                }
-            };
-            
-            let memory_manager = MemoryManager::new(memory);
-            let region = MemoryRegion::new(ptr, len);
-            
-            let message = match memory_manager.read_memory(&mut caller, &region) {
-                Ok(data) => String::from_utf8_lossy(&data).to_string(),
-                Err(e) => {
-                    error!("Failed to read log message from WASM memory: {}", e);
-                    return AbiResultCode::InvalidArg as i32;
-                }
-            };
-            
-            // Log message with appropriate level
-            match level {
-                0 => debug!("[WASM:{}] {}", module_id, message),
-                1 => info!("[WASM:{}] {}", module_id, message),
-                2 => warn!("[WASM:{}] {}", module_id, message),
-                3 => error!("[WASM:{}] {}", module_id, message),
-                _ => debug!("[WASM:{}] UNKNOWN({}): {}", module_id, level, message),
-            }
-            
-            AbiResultCode::Success as i32
-        }).map_err(|e| AbiError::ExecutionError(e.to_string()))?;
+        linker
+            .func_wrap(
+                "env",
+                "host_log",
+                |mut caller: Caller<'_, AbiContext>, level: i32, ptr: u32, len: u32| -> i32 {
+                    // Check logging capability and get module ID before mutable borrow
+                    let (has_capability, module_id) = {
+                        let context = caller.data();
+                        let has_cap = context.has_capability(&Capability::Log);
+                        (has_cap, context.module_id.clone())
+                    };
+
+                    if !has_capability {
+                        error!("Log capability check failed: missing Log capability");
+                        return AbiResultCode::PermissionDenied as i32;
+                    }
+
+                    // Get memory and read log message
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(memory) => memory,
+                        None => {
+                            error!("Failed to get WASM memory for logging");
+                            return AbiResultCode::InvalidOperation as i32;
+                        }
+                    };
+
+                    let memory_manager = MemoryManager::new(memory);
+                    let region = MemoryRegion::new(ptr, len);
+
+                    let message = match memory_manager.read_memory(&mut caller, &region) {
+                        Ok(data) => String::from_utf8_lossy(&data).to_string(),
+                        Err(e) => {
+                            error!("Failed to read log message from WASM memory: {}", e);
+                            return AbiResultCode::InvalidArg as i32;
+                        }
+                    };
+
+                    // Log message with appropriate level
+                    match level {
+                        0 => debug!("[WASM:{}] {}", module_id, message),
+                        1 => info!("[WASM:{}] {}", module_id, message),
+                        2 => warn!("[WASM:{}] {}", module_id, message),
+                        3 => error!("[WASM:{}] {}", module_id, message),
+                        _ => debug!("[WASM:{}] UNKNOWN({}): {}", module_id, level, message),
+                    }
+
+                    AbiResultCode::Success as i32
+                },
+            )
+            .map_err(|e| AbiError::ExecutionError(e.to_string()))?;
         Ok(())
     }
 
@@ -531,198 +536,238 @@ impl HostFunctions {
     /// Add state access functions
     fn add_state_functions(linker: &mut Linker<AbiContext>) -> Result<()> {
         // host_state_get(key_ptr: u32, key_len: u32, value_ptr: u32, value_len_ptr: u32) -> i32
-        linker.func_wrap("env", "host_state_get", |mut caller: Caller<'_, AbiContext>, key_ptr: u32, key_len: u32, value_ptr: u32, value_len_ptr: u32| -> i32 {
-            // Get context references before any mutable borrow
-            let (module_id, has_vfs) = {
-                let context = caller.data();
-                (context.module_id.clone(), context.vfs.is_some())
-            };
-            
-            if !has_vfs {
-                error!("No VFS available in context for module {}", module_id);
-                return AbiResultCode::InvalidOperation as i32;
-            }
-            
-            // Get memory and read key from WASM memory
-            let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
-                Some(memory) => memory,
-                None => {
-                    error!("Failed to get WASM memory for state access");
-                    return AbiResultCode::InvalidOperation as i32;
-                }
-            };
-            
-            let memory_manager = MemoryManager::new(memory);
-            let key_region = MemoryRegion::new(key_ptr, key_len);
-            
-            let key_bytes = match memory_manager.read_memory(&mut caller, &key_region) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Failed to read key from WASM memory: {}", e);
-                    return AbiResultCode::InvalidArg as i32;
-                }
-            };
-            
-            // Convert key to path format: /state/{module_id}/{key}
-            let key_str = String::from_utf8_lossy(&key_bytes);
-            let path = format!("/state/{}/{}", module_id, key_str);
-            
-            // Get VFS reference and perform read
-            let vfs = caller.data().vfs.as_ref().unwrap().clone();
-            
-            // Open file for reading through VFS
-            let fd = match vfs.open(std::path::Path::new(&path), false) {
-                Ok(fd) => fd,
-                Err(e) => {
-                    debug!("VFS file not found for key '{}': {}", key_str, e);
-                    return AbiResultCode::NotFound as i32;
-                }
-            };
-            
-            // Read file content
-            let mut buffer = Vec::new();
-            let mut chunk = vec![0u8; 4096];
-            loop {
-                match vfs.read(fd, &mut chunk) {
-                    Ok(0) => break, // EOF
-                    Ok(n) => buffer.extend_from_slice(&chunk[..n]),
-                    Err(e) => {
-                        error!("Failed to read from VFS: {}", e);
-                        let _ = vfs.close(fd);
-                        return AbiResultCode::StoreError as i32;
+        linker
+            .func_wrap(
+                "env",
+                "host_state_get",
+                |mut caller: Caller<'_, AbiContext>,
+                 key_ptr: u32,
+                 key_len: u32,
+                 value_ptr: u32,
+                 value_len_ptr: u32|
+                 -> i32 {
+                    // Get context references before any mutable borrow
+                    let (module_id, has_vfs) = {
+                        let context = caller.data();
+                        (context.module_id.clone(), context.vfs.is_some())
+                    };
+
+                    if !has_vfs {
+                        error!("No VFS available in context for module {}", module_id);
+                        return AbiResultCode::InvalidOperation as i32;
                     }
-                }
-            }
-            
-            // Close the file
-            if let Err(e) = vfs.close(fd) {
-                error!("Failed to close VFS file: {}", e);
-            }
-            
-            // Write result to WASM memory
-            let value_region = MemoryRegion::new(value_ptr, buffer.len() as u32);
-            let value_len_region = MemoryRegion::new(value_len_ptr, 4); // u32 size
-            
-            // Get fresh memory reference after VFS operations
-            let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
-                Some(memory) => memory,
-                None => {
-                    error!("Failed to get WASM memory for writing result");
-                    return AbiResultCode::InvalidOperation as i32;
-                }
-            };
-            
-            let memory_manager = MemoryManager::new(memory);
-            
-            // Write the value
-            if let Err(e) = memory_manager.write_memory(&mut caller, &value_region, &buffer) {
-                error!("Failed to write value to WASM memory: {}", e);
-                return AbiResultCode::InvalidArg as i32;
-            }
-            
-            // Write the length
-            let len_bytes = (buffer.len() as u32).to_le_bytes();
-            if let Err(e) = memory_manager.write_memory(&mut caller, &value_len_region, &len_bytes) {
-                error!("Failed to write value length to WASM memory: {}", e);
-                return AbiResultCode::InvalidArg as i32;
-            }
-            
-            debug!("WASM module {} successfully read state key '{}' ({} bytes)", 
-                   module_id, key_str, buffer.len());
-            
-            AbiResultCode::Success as i32
-        }).map_err(|e| AbiError::ExecutionError(e.to_string()))?;
-        // host_state_set(key_ptr: u32, key_len: u32, value_ptr: u32, value_len: u32) -> i32
-        linker.func_wrap("env", "host_state_set", |mut caller: Caller<'_, AbiContext>, key_ptr: u32, key_len: u32, value_ptr: u32, value_len: u32| -> i32 {
-            // Get context references before any mutable borrow
-            let (module_id, has_vfs) = {
-                let context = caller.data();
-                (context.module_id.clone(), context.vfs.is_some())
-            };
-            
-            if !has_vfs {
-                error!("No VFS available in context for module {}", module_id);
-                return AbiResultCode::InvalidOperation as i32;
-            }
-            
-            // Get memory and read key/value from WASM memory
-            let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
-                Some(memory) => memory,
-                None => {
-                    error!("Failed to get WASM memory for state write");
-                    return AbiResultCode::InvalidOperation as i32;
-                }
-            };
-            
-            let memory_manager = MemoryManager::new(memory);
-            let key_region = MemoryRegion::new(key_ptr, key_len);
-            let value_region = MemoryRegion::new(value_ptr, value_len);
-            
-            let key_bytes = match memory_manager.read_memory(&mut caller, &key_region) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Failed to read key from WASM memory: {}", e);
-                    return AbiResultCode::InvalidArg as i32;
-                }
-            };
-            
-            let value_bytes = match memory_manager.read_memory(&mut caller, &value_region) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Failed to read value from WASM memory: {}", e);
-                    return AbiResultCode::InvalidArg as i32;
-                }
-            };
-            
-            // Convert key to path format: /state/{module_id}/{key}
-            let key_str = String::from_utf8_lossy(&key_bytes);
-            let path = format!("/state/{}/{}", module_id, key_str);
-            
-            // Get VFS reference
-            let vfs = caller.data().vfs.as_ref().unwrap().clone();
-            
-            // Open file for writing through VFS (create if not exists)
-            let fd = match vfs.open(std::path::Path::new(&path), true) {
-                Ok(fd) => fd,
-                Err(_) => {
-                    // Try to create the file
-                    match vfs.create(std::path::Path::new(&path)) {
+
+                    // Get memory and read key from WASM memory
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(memory) => memory,
+                        None => {
+                            error!("Failed to get WASM memory for state access");
+                            return AbiResultCode::InvalidOperation as i32;
+                        }
+                    };
+
+                    let memory_manager = MemoryManager::new(memory);
+                    let key_region = MemoryRegion::new(key_ptr, key_len);
+
+                    let key_bytes = match memory_manager.read_memory(&mut caller, &key_region) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Failed to read key from WASM memory: {}", e);
+                            return AbiResultCode::InvalidArg as i32;
+                        }
+                    };
+
+                    // Convert key to path format: /state/{module_id}/{key}
+                    let key_str = String::from_utf8_lossy(&key_bytes);
+                    let path = format!("/state/{module_id}/{key_str}");
+
+                    // Get VFS reference and perform read
+                    let vfs = caller.data().vfs.as_ref().unwrap().clone();
+
+                    // Open file for reading through VFS
+                    let fd = match vfs.open(std::path::Path::new(&path), false) {
                         Ok(fd) => fd,
                         Err(e) => {
-                            error!("Failed to create VFS file for key '{}': {}", key_str, e);
+                            debug!("VFS file not found for key '{}': {}", key_str, e);
+                            return AbiResultCode::NotFound as i32;
+                        }
+                    };
+
+                    // Read file content
+                    let mut buffer = Vec::new();
+                    let mut chunk = vec![0u8; 4096];
+                    loop {
+                        match vfs.read(fd, &mut chunk) {
+                            Ok(0) => break, // EOF
+                            Ok(n) => buffer.extend_from_slice(&chunk[..n]),
+                            Err(e) => {
+                                error!("Failed to read from VFS: {}", e);
+                                let _ = vfs.close(fd);
+                                return AbiResultCode::StoreError as i32;
+                            }
+                        }
+                    }
+
+                    // Close the file
+                    if let Err(e) = vfs.close(fd) {
+                        error!("Failed to close VFS file: {}", e);
+                    }
+
+                    // Write result to WASM memory
+                    let value_region = MemoryRegion::new(value_ptr, buffer.len() as u32);
+                    let value_len_region = MemoryRegion::new(value_len_ptr, 4); // u32 size
+
+                    // Get fresh memory reference after VFS operations
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(memory) => memory,
+                        None => {
+                            error!("Failed to get WASM memory for writing result");
+                            return AbiResultCode::InvalidOperation as i32;
+                        }
+                    };
+
+                    let memory_manager = MemoryManager::new(memory);
+
+                    // Write the value
+                    if let Err(e) = memory_manager.write_memory(&mut caller, &value_region, &buffer)
+                    {
+                        error!("Failed to write value to WASM memory: {}", e);
+                        return AbiResultCode::InvalidArg as i32;
+                    }
+
+                    // Write the length
+                    let len_bytes = (buffer.len() as u32).to_le_bytes();
+                    if let Err(e) =
+                        memory_manager.write_memory(&mut caller, &value_len_region, &len_bytes)
+                    {
+                        error!("Failed to write value length to WASM memory: {}", e);
+                        return AbiResultCode::InvalidArg as i32;
+                    }
+
+                    debug!(
+                        "WASM module {} successfully read state key '{}' ({} bytes)",
+                        module_id,
+                        key_str,
+                        buffer.len()
+                    );
+
+                    AbiResultCode::Success as i32
+                },
+            )
+            .map_err(|e| AbiError::ExecutionError(e.to_string()))?;
+        // host_state_set(key_ptr: u32, key_len: u32, value_ptr: u32, value_len: u32) -> i32
+        linker
+            .func_wrap(
+                "env",
+                "host_state_set",
+                |mut caller: Caller<'_, AbiContext>,
+                 key_ptr: u32,
+                 key_len: u32,
+                 value_ptr: u32,
+                 value_len: u32|
+                 -> i32 {
+                    // Get context references before any mutable borrow
+                    let (module_id, has_vfs) = {
+                        let context = caller.data();
+                        (context.module_id.clone(), context.vfs.is_some())
+                    };
+
+                    if !has_vfs {
+                        error!("No VFS available in context for module {}", module_id);
+                        return AbiResultCode::InvalidOperation as i32;
+                    }
+
+                    // Get memory and read key/value from WASM memory
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(memory) => memory,
+                        None => {
+                            error!("Failed to get WASM memory for state write");
+                            return AbiResultCode::InvalidOperation as i32;
+                        }
+                    };
+
+                    let memory_manager = MemoryManager::new(memory);
+                    let key_region = MemoryRegion::new(key_ptr, key_len);
+                    let value_region = MemoryRegion::new(value_ptr, value_len);
+
+                    let key_bytes = match memory_manager.read_memory(&mut caller, &key_region) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Failed to read key from WASM memory: {}", e);
+                            return AbiResultCode::InvalidArg as i32;
+                        }
+                    };
+
+                    let value_bytes = match memory_manager.read_memory(&mut caller, &value_region) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Failed to read value from WASM memory: {}", e);
+                            return AbiResultCode::InvalidArg as i32;
+                        }
+                    };
+
+                    // Convert key to path format: /state/{module_id}/{key}
+                    let key_str = String::from_utf8_lossy(&key_bytes);
+                    let path = format!("/state/{module_id}/{key_str}");
+
+                    // Get VFS reference
+                    let vfs = caller.data().vfs.as_ref().unwrap().clone();
+
+                    // Open file for writing through VFS (create if not exists)
+                    let fd = match vfs.open(std::path::Path::new(&path), true) {
+                        Ok(fd) => fd,
+                        Err(_) => {
+                            // Try to create the file
+                            match vfs.create(std::path::Path::new(&path)) {
+                                Ok(fd) => fd,
+                                Err(e) => {
+                                    error!(
+                                        "Failed to create VFS file for key '{}': {}",
+                                        key_str, e
+                                    );
+                                    return AbiResultCode::StoreError as i32;
+                                }
+                            }
+                        }
+                    };
+
+                    // Write value to file
+                    match vfs.write(fd, &value_bytes) {
+                        Ok(written) => {
+                            if written != value_bytes.len() {
+                                error!(
+                                    "Partial write: expected {} bytes, wrote {}",
+                                    value_bytes.len(),
+                                    written
+                                );
+                                let _ = vfs.close(fd);
+                                return AbiResultCode::StoreError as i32;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to write to VFS: {}", e);
+                            let _ = vfs.close(fd);
                             return AbiResultCode::StoreError as i32;
                         }
                     }
-                }
-            };
-            
-            // Write value to file
-            match vfs.write(fd, &value_bytes) {
-                Ok(written) => {
-                    if written != value_bytes.len() {
-                        error!("Partial write: expected {} bytes, wrote {}", value_bytes.len(), written);
-                        let _ = vfs.close(fd);
+
+                    // Close the file (commits the write)
+                    if let Err(e) = vfs.close(fd) {
+                        error!("Failed to close VFS file: {}", e);
                         return AbiResultCode::StoreError as i32;
                     }
-                }
-                Err(e) => {
-                    error!("Failed to write to VFS: {}", e);
-                    let _ = vfs.close(fd);
-                    return AbiResultCode::StoreError as i32;
-                }
-            }
-            
-            // Close the file (commits the write)
-            if let Err(e) = vfs.close(fd) {
-                error!("Failed to close VFS file: {}", e);
-                return AbiResultCode::StoreError as i32;
-            }
-            
-            debug!("WASM module {} successfully wrote state key '{}' ({} bytes)", 
-                   module_id, key_str, value_bytes.len());
-            
-            AbiResultCode::Success as i32
-        }).map_err(|e| AbiError::ExecutionError(e.to_string()))?;
+
+                    debug!(
+                        "WASM module {} successfully wrote state key '{}' ({} bytes)",
+                        module_id,
+                        key_str,
+                        value_bytes.len()
+                    );
+
+                    AbiResultCode::Success as i32
+                },
+            )
+            .map_err(|e| AbiError::ExecutionError(e.to_string()))?;
 
         Ok(())
     }
@@ -734,7 +779,7 @@ impl HostFunctions {
             .func_wrap(
                 "env",
                 "host_get_tx_data",
-                |caller: Caller<'_, AbiContext>, ptr: u32, len_ptr: u32| -> i32 {
+                |caller: Caller<'_, AbiContext>, _ptr: u32, _len_ptr: u32| -> i32 {
                     let context = caller.data();
 
                     // Check transaction access capability
@@ -760,215 +805,279 @@ impl HostFunctions {
     /// Add utility functions
     fn add_utility_functions(linker: &mut Linker<AbiContext>) -> Result<()> {
         // host_emit_event(event_ptr: u32, event_len: u32) -> i32
-        linker.func_wrap("env", "host_emit_event", |caller: Caller<'_, AbiContext>, event_ptr: u32, event_len: u32| -> i32 {
-            let context = caller.data();
-            
-            // Check emit event capability
-            if let Err(e) = context.require_capability(&Capability::EmitEvent) {
-                error!("Emit event capability check failed: {}", e);
-                return AbiResultCode::PermissionDenied as i32;
-            }
-            
-            debug!("WASM module {} emitting event: ptr={}, len={}", 
-                   context.module_id, event_ptr, event_len);
-            
-            // Implementation would read event data from WASM memory and emit it
-            AbiResultCode::Success as i32
-        }).map_err(|e| AbiError::ExecutionError(e.to_string()))?;
-        
-        // host_abort(message_ptr: u32, message_len: u32) -> i32 (does not return)
-        linker.func_wrap("env", "host_abort", |mut caller: Caller<'_, AbiContext>, message_ptr: u32, message_len: u32| -> i32 {
-            // Get module ID before mutable borrow
-            let module_id = caller.data().module_id.clone();
-            
-            // Get memory and read abort message
-            if let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) {
-                let memory_manager = MemoryManager::new(memory);
-                let region = MemoryRegion::new(message_ptr, message_len);
-                
-                if let Ok(message_bytes) = memory_manager.read_memory(&mut caller, &region) {
-                    let message = String::from_utf8_lossy(&message_bytes);
-                    error!("WASM module {} aborted: {}", module_id, message);
-                    
-                    // Write to stderr buffer after releasing the mutable borrow
+        linker
+            .func_wrap(
+                "env",
+                "host_emit_event",
+                |caller: Caller<'_, AbiContext>, event_ptr: u32, event_len: u32| -> i32 {
                     let context = caller.data();
-                    if let Err(e) = context.write_stderr(&message_bytes) {
-                        error!("Failed to write abort message to stderr: {}", e);
+
+                    // Check emit event capability
+                    if let Err(e) = context.require_capability(&Capability::EmitEvent) {
+                        error!("Emit event capability check failed: {}", e);
+                        return AbiResultCode::PermissionDenied as i32;
                     }
-                } else {
-                    error!("WASM module {} aborted with invalid message pointer", module_id);
-                }
-            }
-            
-            // This should trigger a trap to halt execution
-            AbiResultCode::Error as i32
-        }).map_err(|e| AbiError::ExecutionError(e.to_string()))?;
+
+                    debug!(
+                        "WASM module {} emitting event: ptr={}, len={}",
+                        context.module_id, event_ptr, event_len
+                    );
+
+                    // Implementation would read event data from WASM memory and emit it
+                    AbiResultCode::Success as i32
+                },
+            )
+            .map_err(|e| AbiError::ExecutionError(e.to_string()))?;
+
+        // host_abort(message_ptr: u32, message_len: u32) -> i32 (does not return)
+        linker
+            .func_wrap(
+                "env",
+                "host_abort",
+                |mut caller: Caller<'_, AbiContext>, message_ptr: u32, message_len: u32| -> i32 {
+                    // Get module ID before mutable borrow
+                    let module_id = caller.data().module_id.clone();
+
+                    // Get memory and read abort message
+                    if let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory())
+                    {
+                        let memory_manager = MemoryManager::new(memory);
+                        let region = MemoryRegion::new(message_ptr, message_len);
+
+                        if let Ok(message_bytes) = memory_manager.read_memory(&mut caller, &region)
+                        {
+                            let message = String::from_utf8_lossy(&message_bytes);
+                            error!("WASM module {} aborted: {}", module_id, message);
+
+                            // Write to stderr buffer after releasing the mutable borrow
+                            let context = caller.data();
+                            if let Err(e) = context.write_stderr(&message_bytes) {
+                                error!("Failed to write abort message to stderr: {}", e);
+                            }
+                        } else {
+                            error!(
+                                "WASM module {} aborted with invalid message pointer",
+                                module_id
+                            );
+                        }
+                    }
+
+                    // This should trigger a trap to halt execution
+                    AbiResultCode::Error as i32
+                },
+            )
+            .map_err(|e| AbiError::ExecutionError(e.to_string()))?;
         Ok(())
     }
-    
+
     /// Add IPC (Inter-Process Communication) functions for module-to-module communication
     fn add_ipc_functions(linker: &mut Linker<AbiContext>) -> Result<()> {
         // host_ipc_send(module_ptr: u32, module_len: u32, msg_ptr: u32, msg_len: u32) -> i32
-        linker.func_wrap("env", "host_ipc_send", |mut caller: Caller<'_, AbiContext>, module_ptr: u32, module_len: u32, msg_ptr: u32, msg_len: u32| -> i32 {
-            // Get context references
-            let (sender_module, has_cap_manager) = {
-                let context = caller.data();
-                (context.module_id.clone(), context.capability_manager.is_some())
-            };
-            
-            if !has_cap_manager {
-                error!("No capability manager available for IPC");
-                return AbiResultCode::InvalidOperation as i32;
-            }
-            
-            // Get memory and read target module name and message
-            let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
-                Some(memory) => memory,
-                None => {
-                    error!("Failed to get WASM memory for IPC send");
-                    return AbiResultCode::InvalidOperation as i32;
-                }
-            };
-            
-            let memory_manager = MemoryManager::new(memory);
-            let module_region = MemoryRegion::new(module_ptr, module_len);
-            let msg_region = MemoryRegion::new(msg_ptr, msg_len);
-            
-            let target_module_bytes = match memory_manager.read_memory(&mut caller, &module_region) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Failed to read target module name from WASM memory: {}", e);
-                    return AbiResultCode::InvalidArg as i32;
-                }
-            };
-            
-            let msg_bytes = match memory_manager.read_memory(&mut caller, &msg_region) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Failed to read message from WASM memory: {}", e);
-                    return AbiResultCode::InvalidArg as i32;
-                }
-            };
-            
-            let target_module = String::from_utf8_lossy(&target_module_bytes);
-            
-            // Check if sender has permission to send messages to target
-            let cap_manager = caller.data().capability_manager.as_ref().unwrap().clone();
-            
-            let send_cap = crate::capabilities::CapabilityType::SendMessage(target_module.to_string());
-            match cap_manager.require_capability(&sender_module, &send_cap) {
-                Ok(_) => {},
-                Err(e) => {
-                    error!("Module {} lacks capability to send messages to {}: {}", 
-                           sender_module, target_module, e);
-                    return AbiResultCode::PermissionDenied as i32;
-                }
-            }
-            
-            // TODO: Actually implement IPC message queue or routing mechanism
-            // For now, just log the message
-            info!("IPC: {} -> {}: {} bytes", sender_module, target_module, msg_bytes.len());
-            
-            AbiResultCode::Success as i32
-        }).map_err(|e| AbiError::ExecutionError(e.to_string()))?;
-        
+        linker
+            .func_wrap(
+                "env",
+                "host_ipc_send",
+                |mut caller: Caller<'_, AbiContext>,
+                 module_ptr: u32,
+                 module_len: u32,
+                 msg_ptr: u32,
+                 msg_len: u32|
+                 -> i32 {
+                    // Get context references
+                    let (sender_module, has_cap_manager) = {
+                        let context = caller.data();
+                        (
+                            context.module_id.clone(),
+                            context.capability_manager.is_some(),
+                        )
+                    };
+
+                    if !has_cap_manager {
+                        error!("No capability manager available for IPC");
+                        return AbiResultCode::InvalidOperation as i32;
+                    }
+
+                    // Get memory and read target module name and message
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(memory) => memory,
+                        None => {
+                            error!("Failed to get WASM memory for IPC send");
+                            return AbiResultCode::InvalidOperation as i32;
+                        }
+                    };
+
+                    let memory_manager = MemoryManager::new(memory);
+                    let module_region = MemoryRegion::new(module_ptr, module_len);
+                    let msg_region = MemoryRegion::new(msg_ptr, msg_len);
+
+                    let target_module_bytes =
+                        match memory_manager.read_memory(&mut caller, &module_region) {
+                            Ok(bytes) => bytes,
+                            Err(e) => {
+                                error!("Failed to read target module name from WASM memory: {}", e);
+                                return AbiResultCode::InvalidArg as i32;
+                            }
+                        };
+
+                    let msg_bytes = match memory_manager.read_memory(&mut caller, &msg_region) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Failed to read message from WASM memory: {}", e);
+                            return AbiResultCode::InvalidArg as i32;
+                        }
+                    };
+
+                    let target_module = String::from_utf8_lossy(&target_module_bytes);
+
+                    // Check if sender has permission to send messages to target
+                    let cap_manager = caller.data().capability_manager.as_ref().unwrap().clone();
+
+                    let send_cap =
+                        crate::capabilities::CapabilityType::SendMessage(target_module.to_string());
+                    match cap_manager.require_capability(&sender_module, &send_cap) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!(
+                                "Module {} lacks capability to send messages to {}: {}",
+                                sender_module, target_module, e
+                            );
+                            return AbiResultCode::PermissionDenied as i32;
+                        }
+                    }
+
+                    // TODO: Actually implement IPC message queue or routing mechanism
+                    // For now, just log the message
+                    info!(
+                        "IPC: {} -> {}: {} bytes",
+                        sender_module,
+                        target_module,
+                        msg_bytes.len()
+                    );
+
+                    AbiResultCode::Success as i32
+                },
+            )
+            .map_err(|e| AbiError::ExecutionError(e.to_string()))?;
+
         // host_ipc_receive(buffer_ptr: u32, buffer_len: u32, actual_len_ptr: u32) -> i32
-        linker.func_wrap("env", "host_ipc_receive", |mut caller: Caller<'_, AbiContext>, buffer_ptr: u32, buffer_len: u32, actual_len_ptr: u32| -> i32 {
-            let module_id = caller.data().module_id.clone();
-            
-            // TODO: Implement actual IPC message queue
-            // For now, return no messages
-            debug!("Module {} checking for IPC messages", module_id);
-            
-            // Write 0 to actual_len_ptr to indicate no messages
-            let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
-                Some(memory) => memory,
-                None => {
-                    error!("Failed to get WASM memory for IPC receive");
-                    return AbiResultCode::InvalidOperation as i32;
-                }
-            };
-            
-            let memory_manager = MemoryManager::new(memory);
-            let len_region = MemoryRegion::new(actual_len_ptr, 4);
-            let zero_bytes = 0u32.to_le_bytes();
-            
-            if let Err(e) = memory_manager.write_memory(&mut caller, &len_region, &zero_bytes) {
-                error!("Failed to write message length: {}", e);
-                return AbiResultCode::InvalidArg as i32;
-            }
-            
-            AbiResultCode::Success as i32
-        }).map_err(|e| AbiError::ExecutionError(e.to_string()))?;
-        
+        linker
+            .func_wrap(
+                "env",
+                "host_ipc_receive",
+                |mut caller: Caller<'_, AbiContext>,
+                 _buffer_ptr: u32,
+                 _buffer_len: u32,
+                 actual_len_ptr: u32|
+                 -> i32 {
+                    let module_id = caller.data().module_id.clone();
+
+                    // TODO: Implement actual IPC message queue
+                    // For now, return no messages
+                    debug!("Module {} checking for IPC messages", module_id);
+
+                    // Write 0 to actual_len_ptr to indicate no messages
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(memory) => memory,
+                        None => {
+                            error!("Failed to get WASM memory for IPC receive");
+                            return AbiResultCode::InvalidOperation as i32;
+                        }
+                    };
+
+                    let memory_manager = MemoryManager::new(memory);
+                    let len_region = MemoryRegion::new(actual_len_ptr, 4);
+                    let zero_bytes = 0u32.to_le_bytes();
+
+                    if let Err(e) =
+                        memory_manager.write_memory(&mut caller, &len_region, &zero_bytes)
+                    {
+                        error!("Failed to write message length: {}", e);
+                        return AbiResultCode::InvalidArg as i32;
+                    }
+
+                    AbiResultCode::Success as i32
+                },
+            )
+            .map_err(|e| AbiError::ExecutionError(e.to_string()))?;
+
         Ok(())
     }
-    
+
     /// Add capability checking function
     fn add_capability_functions(linker: &mut Linker<AbiContext>) -> Result<()> {
         // host_capability_check(cap_ptr: u32, cap_len: u32) -> i32
-        linker.func_wrap("env", "host_capability_check", |mut caller: Caller<'_, AbiContext>, cap_ptr: u32, cap_len: u32| -> i32 {
-            // Get context references
-            let (module_id, has_cap_manager) = {
-                let context = caller.data();
-                (context.module_id.clone(), context.capability_manager.is_some())
-            };
-            
-            if !has_cap_manager {
-                error!("No capability manager available");
-                return AbiResultCode::InvalidOperation as i32;
-            }
-            
-            // Get memory and read capability string
-            let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
-                Some(memory) => memory,
-                None => {
-                    error!("Failed to get WASM memory for capability check");
-                    return AbiResultCode::InvalidOperation as i32;
-                }
-            };
-            
-            let memory_manager = MemoryManager::new(memory);
-            let cap_region = MemoryRegion::new(cap_ptr, cap_len);
-            
-            let cap_bytes = match memory_manager.read_memory(&mut caller, &cap_region) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Failed to read capability string from WASM memory: {}", e);
-                    return AbiResultCode::InvalidArg as i32;
-                }
-            };
-            
-            let cap_str = String::from_utf8_lossy(&cap_bytes);
-            
-            // Parse capability string
-            let cap_manager = caller.data().capability_manager.as_ref().unwrap().clone();
-            
-            let capability = match crate::capabilities::CapabilityType::from_string(&cap_str) {
-                Ok(cap) => cap,
-                Err(e) => {
-                    error!("Invalid capability format '{}': {}", cap_str, e);
-                    return AbiResultCode::InvalidArg as i32;
-                }
-            };
-            
-            // Check if module has the capability
-            match cap_manager.has_capability(&module_id, &capability) {
-                Ok(true) => {
-                    debug!("Module {} has capability: {}", module_id, cap_str);
-                    AbiResultCode::Success as i32
-                }
-                Ok(false) => {
-                    debug!("Module {} lacks capability: {}", module_id, cap_str);
-                    AbiResultCode::PermissionDenied as i32
-                }
-                Err(e) => {
-                    error!("Error checking capability: {}", e);
-                    AbiResultCode::Error as i32
-                }
-            }
-        }).map_err(|e| AbiError::ExecutionError(e.to_string()))?;
-        
+        linker
+            .func_wrap(
+                "env",
+                "host_capability_check",
+                |mut caller: Caller<'_, AbiContext>, cap_ptr: u32, cap_len: u32| -> i32 {
+                    // Get context references
+                    let (module_id, has_cap_manager) = {
+                        let context = caller.data();
+                        (
+                            context.module_id.clone(),
+                            context.capability_manager.is_some(),
+                        )
+                    };
+
+                    if !has_cap_manager {
+                        error!("No capability manager available");
+                        return AbiResultCode::InvalidOperation as i32;
+                    }
+
+                    // Get memory and read capability string
+                    let memory = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                        Some(memory) => memory,
+                        None => {
+                            error!("Failed to get WASM memory for capability check");
+                            return AbiResultCode::InvalidOperation as i32;
+                        }
+                    };
+
+                    let memory_manager = MemoryManager::new(memory);
+                    let cap_region = MemoryRegion::new(cap_ptr, cap_len);
+
+                    let cap_bytes = match memory_manager.read_memory(&mut caller, &cap_region) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Failed to read capability string from WASM memory: {}", e);
+                            return AbiResultCode::InvalidArg as i32;
+                        }
+                    };
+
+                    let cap_str = String::from_utf8_lossy(&cap_bytes);
+
+                    // Parse capability string
+                    let cap_manager = caller.data().capability_manager.as_ref().unwrap().clone();
+
+                    let capability =
+                        match crate::capabilities::CapabilityType::from_string(&cap_str) {
+                            Ok(cap) => cap,
+                            Err(e) => {
+                                error!("Invalid capability format '{}': {}", cap_str, e);
+                                return AbiResultCode::InvalidArg as i32;
+                            }
+                        };
+
+                    // Check if module has the capability
+                    match cap_manager.has_capability(&module_id, &capability) {
+                        Ok(true) => {
+                            debug!("Module {} has capability: {}", module_id, cap_str);
+                            AbiResultCode::Success as i32
+                        }
+                        Ok(false) => {
+                            debug!("Module {} lacks capability: {}", module_id, cap_str);
+                            AbiResultCode::PermissionDenied as i32
+                        }
+                        Err(e) => {
+                            error!("Error checking capability: {}", e);
+                            AbiResultCode::Error as i32
+                        }
+                    }
+                },
+            )
+            .map_err(|e| AbiError::ExecutionError(e.to_string()))?;
+
         Ok(())
     }
 }

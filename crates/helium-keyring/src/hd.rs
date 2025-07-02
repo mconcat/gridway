@@ -2,18 +2,17 @@
 //!
 //! This module implements BIP32/BIP44 key derivation following Cosmos SDK standards.
 //! Standard Cosmos derivation path: m/44'/118'/0'/0/0
-//! 
+//!
 //! Reference: https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
 //!            https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 
+use crate::KeyringError;
 use bip39::{Language, Mnemonic};
 use helium_crypto::PrivateKey;
+use hmac::{Hmac, Mac};
 use k256::ecdsa::SigningKey as Secp256k1PrivKey;
 use sha2::{Digest, Sha256, Sha512};
-use hmac::{Hmac, Mac};
-use crate::KeyringError;
 
-type HmacSha256 = Hmac<Sha256>;
 type HmacSha512 = Hmac<Sha512>;
 
 /// Cosmos SDK coin type as defined in SLIP-0044
@@ -33,8 +32,10 @@ pub struct ExtendedPrivateKey {
     /// Depth in the derivation tree
     depth: u8,
     /// Parent key fingerprint (first 4 bytes of parent public key hash)
+    #[allow(dead_code)]
     parent_fingerprint: [u8; 4],
     /// Child index for this key
+    #[allow(dead_code)]
     child_index: u32,
 }
 
@@ -82,7 +83,7 @@ impl DerivationPath {
             };
 
             let index = index_str.parse::<u32>().map_err(|_| {
-                KeyringError::BackendError(format!("Invalid path component: {}", component))
+                KeyringError::BackendError(format!("Invalid path component: {component}"))
             })?;
 
             if hardened && index >= (1u32 << 31) {
@@ -92,7 +93,11 @@ impl DerivationPath {
             }
 
             components.push(PathComponent {
-                index: if hardened { index + (1u32 << 31) } else { index },
+                index: if hardened {
+                    index + (1u32 << 31)
+                } else {
+                    index
+                },
                 hardened,
             });
         }
@@ -107,7 +112,7 @@ impl DerivationPath {
 
     /// Create a custom Cosmos path with different account/address indices
     pub fn cosmos_custom(account: u32, address_index: u32) -> Self {
-        Self::parse(&format!("m/44'/118'/{}'/0/{}", account, address_index)).unwrap()
+        Self::parse(&format!("m/44'/118'/{account}'/0/{address_index}")).unwrap()
     }
 
     /// Get the components of this path
@@ -126,9 +131,8 @@ impl ExtendedPrivateKey {
         }
 
         // HMAC-SHA512 with key "Bitcoin seed" for master key generation (BIP32 standard)
-        let mut mac = HmacSha512::new_from_slice(b"Bitcoin seed").map_err(|_| {
-            KeyringError::BackendError("Failed to create HMAC".to_string())
-        })?;
+        let mut mac = HmacSha512::new_from_slice(b"Bitcoin seed")
+            .map_err(|_| KeyringError::BackendError("Failed to create HMAC".to_string()))?;
         mac.update(seed);
         let result = mac.finalize().into_bytes();
 
@@ -187,16 +191,15 @@ impl ExtendedPrivateKey {
 
         // Add tweak to parent private key (mod curve order)
         let mut new_private_key = self.private_key;
-        if let Err(_) = add_scalar(&mut new_private_key, &tweak) {
+        if add_scalar(&mut new_private_key, &tweak).is_err() {
             return Err(KeyringError::BackendError(
                 "Child key derivation resulted in invalid key".to_string(),
             ));
         }
 
         // Calculate parent fingerprint (first 4 bytes of parent public key hash)
-        let parent_private_key = Secp256k1PrivKey::from_slice(&self.private_key).map_err(|_| {
-            KeyringError::BackendError("Invalid parent private key".to_string())
-        })?;
+        let parent_private_key = Secp256k1PrivKey::from_slice(&self.private_key)
+            .map_err(|_| KeyringError::BackendError("Invalid parent private key".to_string()))?;
         let parent_public_key = parent_private_key.verifying_key();
         let parent_public_key_bytes = parent_public_key.to_encoded_point(true);
         let mut hasher = Sha256::new();
@@ -225,9 +228,8 @@ impl ExtendedPrivateKey {
 
     /// Get the private key as a PrivateKey enum
     pub fn private_key(&self) -> Result<PrivateKey, KeyringError> {
-        let key = Secp256k1PrivKey::from_slice(&self.private_key).map_err(|e| {
-            KeyringError::BackendError(format!("Invalid private key: {}", e))
-        })?;
+        let key = Secp256k1PrivKey::from_slice(&self.private_key)
+            .map_err(|e| KeyringError::BackendError(format!("Invalid private key: {e}")))?;
         Ok(PrivateKey::Secp256k1(key))
     }
 
@@ -287,7 +289,7 @@ pub fn derive_private_key_from_mnemonic(
 
     // Derive the final private key
     let derived_key = master_key.derive_path(derivation_path)?;
-    
+
     derived_key.private_key()
 }
 
@@ -304,8 +306,8 @@ pub fn generate_mnemonic() -> Result<Mnemonic, KeyringError> {
 /// Generate a new mnemonic with specific entropy length
 pub fn generate_mnemonic_with_entropy(entropy_bits: usize) -> Result<Mnemonic, KeyringError> {
     use rand::RngCore;
-    
-    if entropy_bits % 32 != 0 || entropy_bits < 128 || entropy_bits > 256 {
+
+    if !entropy_bits.is_multiple_of(32) || !(128..=256).contains(&entropy_bits) {
         return Err(KeyringError::BackendError(
             "Entropy must be 128, 160, 192, 224, or 256 bits".to_string(),
         ));
@@ -321,8 +323,7 @@ pub fn generate_mnemonic_with_entropy(entropy_bits: usize) -> Result<Mnemonic, K
 
 /// Validate a mnemonic phrase
 pub fn validate_mnemonic(mnemonic: &str) -> Result<(), KeyringError> {
-    Mnemonic::parse_in(Language::English, mnemonic)
-        .map_err(|_| KeyringError::InvalidMnemonic)?;
+    Mnemonic::parse_in(Language::English, mnemonic).map_err(|_| KeyringError::InvalidMnemonic)?;
     Ok(())
 }
 
@@ -357,7 +358,7 @@ mod tests {
     fn test_derivation_path_parsing_errors() {
         // Invalid start
         assert!(DerivationPath::parse("44'/118'/0'/0/0").is_err());
-        
+
         // Invalid component
         assert!(DerivationPath::parse("m/44'/abc'/0'/0/0").is_err());
     }
@@ -366,11 +367,11 @@ mod tests {
     fn test_master_key_generation() {
         let seed = b"test seed for master key generation";
         let master_key = ExtendedPrivateKey::from_seed(seed).unwrap();
-        
+
         assert_eq!(master_key.depth, 0);
         assert_eq!(master_key.parent_fingerprint, [0; 4]);
         assert_eq!(master_key.child_index, 0);
-        
+
         // Should be able to get a valid private key
         let private_key = master_key.private_key().unwrap();
         assert!(matches!(private_key, PrivateKey::Secp256k1(_)));
@@ -380,17 +381,17 @@ mod tests {
     fn test_child_key_derivation() {
         let seed = b"test seed for child key derivation";
         let master_key = ExtendedPrivateKey::from_seed(seed).unwrap();
-        
+
         // Derive hardened child
         let child = master_key.derive_child(0x80000000).unwrap(); // Index 0, hardened
         assert_eq!(child.depth, 1);
         assert_eq!(child.child_index, 0x80000000);
-        
+
         // Derive non-hardened child
         let child2 = master_key.derive_child(0).unwrap(); // Index 0, not hardened
         assert_eq!(child2.depth, 1);
         assert_eq!(child2.child_index, 0);
-        
+
         // Children should be different
         assert_ne!(child.private_key_bytes(), child2.private_key_bytes());
     }
@@ -399,12 +400,12 @@ mod tests {
     fn test_full_path_derivation() {
         let seed = b"test seed for full path derivation";
         let master_key = ExtendedPrivateKey::from_seed(seed).unwrap();
-        
+
         let path = DerivationPath::cosmos_default();
         let derived_key = master_key.derive_path(&path).unwrap();
-        
+
         assert_eq!(derived_key.depth, 5);
-        
+
         // Should be able to get a valid private key
         let private_key = derived_key.private_key().unwrap();
         assert!(matches!(private_key, PrivateKey::Secp256k1(_)));
@@ -413,16 +414,16 @@ mod tests {
     #[test]
     fn test_mnemonic_derivation() {
         let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        
+
         // Derive with default path
         let private_key = derive_private_key_from_mnemonic(mnemonic, None).unwrap();
         assert!(matches!(private_key, PrivateKey::Secp256k1(_)));
-        
+
         // Derive with custom path
         let custom_path = DerivationPath::cosmos_custom(1, 0);
         let private_key2 = derive_private_key_from_mnemonic(mnemonic, Some(&custom_path)).unwrap();
         assert!(matches!(private_key2, PrivateKey::Secp256k1(_)));
-        
+
         // Different paths should produce different keys
         let key1_bytes = match private_key {
             PrivateKey::Secp256k1(k) => k.to_bytes(),
@@ -439,13 +440,13 @@ mod tests {
     fn test_mnemonic_generation() {
         let mnemonic = generate_mnemonic().unwrap();
         let mnemonic_str = mnemonic.to_string();
-        
+
         // Should be 24 words for 256-bit entropy
         assert_eq!(mnemonic_str.split_whitespace().count(), 24);
-        
+
         // Should be valid
         validate_mnemonic(&mnemonic_str).unwrap();
-        
+
         // Should be able to derive a key from it
         let private_key = derive_private_key_from_mnemonic(&mnemonic_str, None).unwrap();
         assert!(matches!(private_key, PrivateKey::Secp256k1(_)));
@@ -456,11 +457,11 @@ mod tests {
         // Valid mnemonic
         let valid = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         validate_mnemonic(valid).unwrap();
-        
+
         // Invalid mnemonic (wrong checksum)
         let invalid = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon";
         assert!(validate_mnemonic(invalid).is_err());
-        
+
         // Invalid mnemonic (wrong word)
         let invalid2 = "invalid abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         assert!(validate_mnemonic(invalid2).is_err());
@@ -469,11 +470,11 @@ mod tests {
     #[test]
     fn test_deterministic_derivation() {
         let mnemonic = "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius";
-        
+
         // Derive the same key multiple times
         let key1 = derive_private_key_from_mnemonic(mnemonic, None).unwrap();
         let key2 = derive_private_key_from_mnemonic(mnemonic, None).unwrap();
-        
+
         let key1_bytes = match key1 {
             PrivateKey::Secp256k1(k) => k.to_bytes(),
             _ => unreachable!(),
@@ -482,7 +483,7 @@ mod tests {
             PrivateKey::Secp256k1(k) => k.to_bytes(),
             _ => unreachable!(),
         };
-        
+
         // Should be identical
         assert_eq!(key1_bytes.as_slice(), key2_bytes.as_slice());
     }
@@ -492,11 +493,11 @@ mod tests {
         // Test 128-bit entropy (12 words)
         let mnemonic_12 = generate_mnemonic_with_entropy(128).unwrap();
         assert_eq!(mnemonic_12.to_string().split_whitespace().count(), 12);
-        
+
         // Test 256-bit entropy (24 words)
         let mnemonic_24 = generate_mnemonic_with_entropy(256).unwrap();
         assert_eq!(mnemonic_24.to_string().split_whitespace().count(), 24);
-        
+
         // Test invalid entropy
         assert!(generate_mnemonic_with_entropy(100).is_err());
         assert!(generate_mnemonic_with_entropy(300).is_err());

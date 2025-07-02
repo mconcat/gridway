@@ -614,7 +614,7 @@ mod base64_bytes_vec {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S>(bytes_vec: &Vec<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(bytes_vec: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -680,6 +680,12 @@ impl GrpcServerBuilder {
         // using generated proto code. For now, this is a placeholder.
 
         Ok(server)
+    }
+}
+
+impl Default for GrpcServerBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
