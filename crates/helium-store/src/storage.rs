@@ -1,43 +1,43 @@
 //! Storage initialization and configuration module
-//! 
+//!
 //! This module provides RocksDB-based storage initialization and management for Helium.
-//! 
+//!
 //! # Example
-//! 
+//!
 //! ```rust,no_run
 //! use helium_store::{StorageConfig, init_storage};
 //! use std::path::Path;
-//! 
+//!
 //! // Create storage configuration
 //! let mut config = StorageConfig::default();
 //! config.cache_size = Some(1024 * 1024 * 1024); // 1GB cache
 //! config.compression = Some("lz4".to_string());
-//! 
+//!
 //! // Initialize storage
 //! let home_dir = Path::new("/path/to/helium/home");
 //! let storage = init_storage(home_dir, &config).unwrap();
-//! 
+//!
 //! // Access different databases
 //! let app_store = &storage.app;
 //! let block_store = &storage.blocks;
 //! let state_store = &storage.state;
 //! ```
-//! 
+//!
 //! # Configuration Options
-//! 
+//!
 //! The `StorageConfig` struct provides the following options:
-//! 
+//!
 //! - `cache_size`: LRU block cache size in bytes (default: 512MB)
 //! - `write_buffer_size`: Write buffer size in bytes (default: 64MB)
 //! - `max_open_files`: Maximum number of open files (default: 5000)
 //! - `block_size`: Block size in bytes (default: 4KB)
 //! - `compression`: Compression type - "lz4", "snappy", "zstd", or "none" (default: "lz4")
 //! - `compaction_style`: Compaction style - "level", "universal", or "fifo" (default: "level")
-//! 
+//!
 //! # Directory Structure
-//! 
+//!
 //! The storage system creates the following directory structure:
-//! 
+//!
 //! ```text
 //! data/
 //!   application.db/    # Main application state
@@ -45,16 +45,16 @@
 //!   state.db/          # Consensus state
 //!   tx_index.db/       # Transaction indexing (optional)
 //! ```
-//! 
+//!
 //! # Migration Support
-//! 
+//!
 //! The module includes a migration system for upgrading storage schemas:
-//! 
+//!
 //! ```rust,no_run
 //! use helium_store::{StorageMigration, StoreError, KVStore, run_migrations};
-//! 
+//!
 //! struct MyMigration;
-//! 
+//!
 //! impl StorageMigration for MyMigration {
 //!     fn version(&self) -> u32 { 1 }
 //!     
@@ -68,7 +68,7 @@
 //!         "Initial migration"
 //!     }
 //! }
-//! 
+//!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # use helium_store::{StorageConfig, init_storage};
 //! # use std::path::Path;
@@ -85,7 +85,7 @@
 //! ```
 
 use crate::{KVStore, StoreError};
-use rocksdb::{Cache, DB, Options as RocksDBOptions, DBCompressionType, BlockBasedOptions};
+use rocksdb::{BlockBasedOptions, Cache, DBCompressionType, Options as RocksDBOptions, DB};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
@@ -110,7 +110,7 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            cache_size: Some(512 * 1024 * 1024), // 512MB
+            cache_size: Some(512 * 1024 * 1024),       // 512MB
             write_buffer_size: Some(64 * 1024 * 1024), // 64MB
             max_open_files: Some(5000),
             block_size: Some(4 * 1024), // 4KB
@@ -141,26 +141,26 @@ impl KVStore for RocksDBStore {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
         self.db
             .get(key)
-            .map_err(|e| StoreError::Backend(format!("RocksDB get error: {}", e)))
+            .map_err(|e| StoreError::Backend(format!("RocksDB get error: {e}")))
     }
 
     fn set(&mut self, key: &[u8], value: &[u8]) -> Result<(), StoreError> {
         self.db
             .put(key, value)
-            .map_err(|e| StoreError::Backend(format!("RocksDB put error: {}", e)))
+            .map_err(|e| StoreError::Backend(format!("RocksDB put error: {e}")))
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<(), StoreError> {
         self.db
             .delete(key)
-            .map_err(|e| StoreError::Backend(format!("RocksDB delete error: {}", e)))
+            .map_err(|e| StoreError::Backend(format!("RocksDB delete error: {e}")))
     }
 
     fn has(&self, key: &[u8]) -> Result<bool, StoreError> {
         self.db
             .get(key)
             .map(|v| v.is_some())
-            .map_err(|e| StoreError::Backend(format!("RocksDB get error: {}", e)))
+            .map_err(|e| StoreError::Backend(format!("RocksDB get error: {e}")))
     }
 
     fn prefix_iterator(&self, prefix: &[u8]) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + '_> {
@@ -210,8 +210,9 @@ impl Storage {
 
     /// Set the version of a store
     pub fn set_version(&mut self, version: u32) -> Result<(), StoreError> {
-        let app_store = Arc::get_mut(&mut self.app)
-            .ok_or_else(|| StoreError::Backend("Cannot get mutable reference to app store".into()))?;
+        let app_store = Arc::get_mut(&mut self.app).ok_or_else(|| {
+            StoreError::Backend("Cannot get mutable reference to app store".into())
+        })?;
         app_store.set(Self::VERSION_KEY, &version.to_be_bytes())
     }
 }
@@ -231,8 +232,7 @@ fn configure_db_options(config: &StorageConfig) -> Result<RocksDBOptions, StoreE
             "none" => DBCompressionType::None,
             _ => {
                 return Err(StoreError::InvalidConfig(format!(
-                    "Unknown compression type: {}",
-                    compression
+                    "Unknown compression type: {compression}"
                 )))
             }
         };
@@ -260,7 +260,7 @@ fn configure_db_options(config: &StorageConfig) -> Result<RocksDBOptions, StoreE
     if let Some(block_size) = config.block_size {
         block_opts.set_block_size(block_size);
     }
-    
+
     // Apply block-based options to the main options
     opts.set_block_based_table_factory(&block_opts);
 
@@ -272,8 +272,7 @@ fn configure_db_options(config: &StorageConfig) -> Result<RocksDBOptions, StoreE
             "fifo" => opts.set_fifo_compaction_options(&Default::default()),
             _ => {
                 return Err(StoreError::InvalidConfig(format!(
-                    "Unknown compaction style: {}",
-                    compaction_style
+                    "Unknown compaction style: {compaction_style}"
                 )))
             }
         }
@@ -292,7 +291,7 @@ pub fn init_storage(home_dir: &Path, config: &StorageConfig) -> Result<Storage, 
     // Create data directory
     let data_dir = home_dir.join("data");
     std::fs::create_dir_all(&data_dir)
-        .map_err(|e| StoreError::Backend(format!("Failed to create data directory: {}", e)))?;
+        .map_err(|e| StoreError::Backend(format!("Failed to create data directory: {e}")))?;
 
     // Configure RocksDB options
     let db_opts = configure_db_options(config)?;
@@ -300,26 +299,26 @@ pub fn init_storage(home_dir: &Path, config: &StorageConfig) -> Result<Storage, 
     // Open application database
     let app_path = data_dir.join("application.db");
     let app_db = DB::open(&db_opts, &app_path)
-        .map_err(|e| StoreError::Backend(format!("Failed to open application.db: {}", e)))?;
+        .map_err(|e| StoreError::Backend(format!("Failed to open application.db: {e}")))?;
     let app_store = Arc::new(RocksDBStore::new(app_db));
 
     // Open blockstore database
     let block_path = data_dir.join("blockstore.db");
     let block_db = DB::open(&db_opts, &block_path)
-        .map_err(|e| StoreError::Backend(format!("Failed to open blockstore.db: {}", e)))?;
+        .map_err(|e| StoreError::Backend(format!("Failed to open blockstore.db: {e}")))?;
     let block_store = Arc::new(RocksDBStore::new(block_db));
 
     // Open state database
     let state_path = data_dir.join("state.db");
     let state_db = DB::open(&db_opts, &state_path)
-        .map_err(|e| StoreError::Backend(format!("Failed to open state.db: {}", e)))?;
+        .map_err(|e| StoreError::Backend(format!("Failed to open state.db: {e}")))?;
     let state_store = Arc::new(RocksDBStore::new(state_db));
 
     // Open transaction index database (optional)
     let tx_index_path = data_dir.join("tx_index.db");
     let tx_index_store = if tx_index_path.exists() || config.cache_size.is_some() {
         let tx_index_db = DB::open(&db_opts, &tx_index_path)
-            .map_err(|e| StoreError::Backend(format!("Failed to open tx_index.db: {}", e)))?;
+            .map_err(|e| StoreError::Backend(format!("Failed to open tx_index.db: {e}")))?;
         Some(Arc::new(RocksDBStore::new(tx_index_db)))
     } else {
         None
@@ -351,7 +350,7 @@ pub fn run_migrations(
     migrations: Vec<Box<dyn StorageMigration>>,
 ) -> Result<(), StoreError> {
     let current_version = storage.get_version()?;
-    
+
     for migration in migrations {
         if migration.version() > current_version {
             println!(
@@ -359,18 +358,19 @@ pub fn run_migrations(
                 migration.version(),
                 migration.description()
             );
-            
+
             // Get mutable reference to app store for migration
-            let app_store = Arc::get_mut(&mut storage.app)
-                .ok_or_else(|| StoreError::Backend("Cannot get mutable reference for migration".into()))?;
-            
+            let app_store = Arc::get_mut(&mut storage.app).ok_or_else(|| {
+                StoreError::Backend("Cannot get mutable reference for migration".into())
+            })?;
+
             migration.migrate(app_store)?;
             storage.set_version(migration.version())?;
-            
+
             println!("Migration v{} completed successfully", migration.version());
         }
     }
-    
+
     Ok(())
 }
 
@@ -383,15 +383,15 @@ mod tests {
     fn test_storage_initialization() {
         let temp_dir = TempDir::new().unwrap();
         let config = StorageConfig::default();
-        
+
         let _storage = init_storage(temp_dir.path(), &config).unwrap();
-        
+
         // Verify data directory structure
         assert!(temp_dir.path().join("data").exists());
         assert!(temp_dir.path().join("data/application.db").exists());
         assert!(temp_dir.path().join("data/blockstore.db").exists());
         assert!(temp_dir.path().join("data/state.db").exists());
-        
+
         // Test basic operations - can't open same DB twice, so use storage directly
         // Storage is already opened, test is complete
     }
@@ -399,19 +399,19 @@ mod tests {
     #[test]
     fn test_storage_config_validation() {
         let mut config = StorageConfig::default();
-        
+
         // Test valid compression types
         config.compression = Some("lz4".to_string());
         assert!(configure_db_options(&config).is_ok());
-        
+
         config.compression = Some("invalid".to_string());
         assert!(configure_db_options(&config).is_err());
-        
+
         // Test valid compaction styles
         config.compression = Some("lz4".to_string());
         config.compaction_style = Some("level".to_string());
         assert!(configure_db_options(&config).is_ok());
-        
+
         config.compaction_style = Some("invalid".to_string());
         assert!(configure_db_options(&config).is_err());
     }
@@ -439,18 +439,18 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = StorageConfig::default();
         let mut storage = init_storage(temp_dir.path(), &config).unwrap();
-        
+
         // Run migrations
         let migrations: Vec<Box<dyn StorageMigration>> = vec![
             Box::new(TestMigration { version: 1 }),
             Box::new(TestMigration { version: 2 }),
         ];
-        
+
         run_migrations(&mut storage, migrations).unwrap();
-        
+
         // Verify version was updated
         assert_eq!(storage.get_version().unwrap(), 2);
-        
+
         // Verify migration was run
         let migrated = storage.app.get(b"migrated").unwrap().unwrap();
         assert_eq!(u32::from_be_bytes(migrated.try_into().unwrap()), 2);

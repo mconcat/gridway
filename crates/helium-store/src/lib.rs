@@ -3,19 +3,19 @@
 //! This crate provides key-value storage abstractions and implementations
 //! for helium applications, including multi-store support and caching layers.
 
+pub mod global;
 pub mod jmt;
 pub mod state;
-pub mod global;
 pub mod storage;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 
+pub use global::{GlobalAppStore, NamespacedStore};
 pub use jmt::{Hash, JMTStore, VersionedJMTStore};
 pub use state::StateManager;
-pub use global::{GlobalAppStore, NamespacedStore};
-pub use storage::{Storage, StorageConfig, StorageMigration, init_storage, run_migrations};
+pub use storage::{init_storage, run_migrations, Storage, StorageConfig, StorageMigration};
 
 /// Store error types
 #[derive(Error, Debug)]
@@ -151,7 +151,6 @@ impl KVStore for MemStore {
     }
 }
 
-
 /// Cache layer for stores
 pub struct CacheStore<S: KVStore> {
     inner: S,
@@ -182,7 +181,7 @@ impl<S: KVStore> CacheStore<S> {
         }
         Ok(())
     }
-    
+
     /// Consume the cache store and return the inner store after writing changes
     pub fn into_inner(mut self) -> Result<S> {
         self.write()?;
@@ -195,32 +194,32 @@ impl<S: KVStore> CacheStore<S> {
         self.cache_hits.store(0, Ordering::Relaxed);
         self.cache_misses.store(0, Ordering::Relaxed);
     }
-    
+
     /// Invalidate a specific key in the cache
     pub fn invalidate(&mut self, key: &[u8]) {
         self.cache.remove(key);
     }
-    
+
     /// Invalidate all keys matching a prefix
     pub fn invalidate_prefix(&mut self, prefix: &[u8]) {
         self.cache.retain(|k, _| !k.starts_with(prefix));
     }
-    
+
     /// Get the number of cached entries
     pub fn cache_size(&self) -> usize {
         self.cache.len()
     }
-    
+
     /// Check if a key is cached
     pub fn is_cached(&self, key: &[u8]) -> bool {
         self.cache.contains_key(key)
     }
-    
+
     /// Get a snapshot of all cached changes
     pub fn get_cached_changes(&self) -> HashMap<Vec<u8>, Option<Vec<u8>>> {
         self.cache.clone()
     }
-    
+
     /// Get cache hit rate (hits / (hits + misses))
     pub fn cache_hit_rate(&self) -> f64 {
         let hits = self.cache_hits.load(Ordering::Relaxed);
@@ -232,12 +231,15 @@ impl<S: KVStore> CacheStore<S> {
             hits as f64 / total as f64
         }
     }
-    
+
     /// Get cache statistics (hits, misses)
     pub fn cache_stats(&self) -> (u64, u64) {
-        (self.cache_hits.load(Ordering::Relaxed), self.cache_misses.load(Ordering::Relaxed))
+        (
+            self.cache_hits.load(Ordering::Relaxed),
+            self.cache_misses.load(Ordering::Relaxed),
+        )
     }
-    
+
     /// Reset cache statistics
     pub fn reset_stats(&mut self) {
         self.cache_hits.store(0, Ordering::Relaxed);
@@ -271,9 +273,10 @@ impl<S: KVStore> KVStore for CacheStore<S> {
         // Create a combined iterator that merges cached and inner store entries
         let prefix_vec = prefix.to_vec();
         let prefix_clone = prefix_vec.clone();
-        
+
         // Get cached entries matching the prefix
-        let mut cached_entries: Vec<(Vec<u8>, Vec<u8>)> = self.cache
+        let mut cached_entries: Vec<(Vec<u8>, Vec<u8>)> = self
+            .cache
             .iter()
             .filter_map(|(k, v)| {
                 if k.starts_with(&prefix_vec) {
@@ -283,32 +286,33 @@ impl<S: KVStore> KVStore for CacheStore<S> {
                 }
             })
             .collect();
-        
+
         // Sort cached entries by key for deterministic ordering
         cached_entries.sort_by(|a, b| a.0.cmp(&b.0));
-        
+
         // Get inner store entries
         let inner_iter = self.inner.prefix_iterator(&prefix_clone);
-        
+
         // Track which keys are in the cache (including deletions)
-        let cache_keys: HashSet<Vec<u8>> = self.cache
+        let cache_keys: HashSet<Vec<u8>> = self
+            .cache
             .keys()
             .filter(|k| k.starts_with(&prefix_vec))
             .cloned()
             .collect();
-        
+
         // Filter out inner entries that are overridden in cache
         let filtered_inner: Vec<(Vec<u8>, Vec<u8>)> = inner_iter
             .filter(|(k, _)| !cache_keys.contains(k))
             .collect();
-        
+
         // Merge cached and filtered inner entries
         let mut all_entries = cached_entries;
         all_entries.extend(filtered_inner);
-        
+
         // Sort all entries by key
         all_entries.sort_by(|a, b| a.0.cmp(&b.0));
-        
+
         Box::new(all_entries.into_iter())
     }
 }
@@ -335,82 +339,82 @@ mod tests {
     fn test_cache_store_basic() {
         let inner = MemStore::new();
         let mut cache = CacheStore::new(inner);
-        
+
         // Test basic get/set operations
         cache.set(b"key1", b"value1").unwrap();
         assert_eq!(cache.get(b"key1").unwrap(), Some(b"value1".to_vec()));
-        
+
         // Test cache size
         assert_eq!(cache.cache_size(), 1);
         assert!(cache.is_cached(b"key1"));
-        
+
         // Test delete
         cache.delete(b"key1").unwrap();
         assert_eq!(cache.get(b"key1").unwrap(), None);
         assert_eq!(cache.cache_size(), 1); // Still in cache as None
     }
-    
+
     #[test]
     fn test_cache_store_write() {
         let mut inner = MemStore::new();
         inner.set(b"existing", b"original").unwrap();
-        
+
         let mut cache = CacheStore::new(inner);
-        
+
         // Modify existing key
         cache.set(b"existing", b"modified").unwrap();
-        
+
         // Add new key
         cache.set(b"new", b"value").unwrap();
-        
+
         // Delete a key
         cache.set(b"to_delete", b"temp").unwrap();
         cache.delete(b"to_delete").unwrap();
-        
+
         // Write changes
         cache.write().unwrap();
-        
+
         // Cache should be empty after write
         assert_eq!(cache.cache_size(), 0);
     }
-    
+
     #[test]
     fn test_cache_store_discard() {
         let inner = MemStore::new();
         let mut cache = CacheStore::new(inner);
-        
+
         cache.set(b"key1", b"value1").unwrap();
         cache.set(b"key2", b"value2").unwrap();
         assert_eq!(cache.cache_size(), 2);
-        
+
         cache.discard();
         assert_eq!(cache.cache_size(), 0);
     }
-    
+
     #[test]
     fn test_cache_invalidation() {
         let inner = MemStore::new();
         let mut cache = CacheStore::new(inner);
-        
+
         cache.set(b"key1", b"value1").unwrap();
         cache.set(b"key2", b"value2").unwrap();
-        
+
         // Invalidate specific key
         cache.invalidate(b"key1");
         assert!(!cache.is_cached(b"key1"));
         assert!(cache.is_cached(b"key2"));
-        
+
         // Invalidate by prefix
         cache.set(b"prefix:a", b"a").unwrap();
         cache.set(b"prefix:b", b"b").unwrap();
         cache.set(b"other:c", b"c").unwrap();
-        
+
         cache.invalidate_prefix(b"prefix:");
         assert!(!cache.is_cached(b"prefix:a"));
         assert!(!cache.is_cached(b"prefix:b"));
         assert!(cache.is_cached(b"other:c"));
     }
-    
+
     #[test]
     fn test_cache_aware_prefix_iterator() {
         let mut inner = MemStore::new();
@@ -418,21 +422,21 @@ mod tests {
         inner.set(b"app:key2", b"inner2").unwrap();
         inner.set(b"app:key3", b"inner3").unwrap();
         inner.set(b"other:key", b"other").unwrap();
-        
+
         let mut cache = CacheStore::new(inner);
-        
+
         // Override one key in cache
         cache.set(b"app:key2", b"cached2").unwrap();
-        
+
         // Add new key in cache
         cache.set(b"app:key4", b"cached4").unwrap();
-        
+
         // Delete one key
         cache.delete(b"app:key3").unwrap();
-        
+
         // Iterate with prefix
         let items: Vec<_> = cache.prefix_iterator(b"app:").collect();
-        
+
         // Should return: key1 (from inner), key2 (from cache), key4 (from cache)
         // Should NOT return: key3 (deleted)
         assert_eq!(items.len(), 3);
@@ -440,53 +444,62 @@ mod tests {
         assert_eq!(items[1], (b"app:key2".to_vec(), b"cached2".to_vec()));
         assert_eq!(items[2], (b"app:key4".to_vec(), b"cached4".to_vec()));
     }
-    
+
     #[test]
     fn test_cache_store_get_changes() {
         let inner = MemStore::new();
         let mut cache = CacheStore::new(inner);
-        
+
         cache.set(b"add", b"new_value").unwrap();
         cache.delete(b"remove").unwrap();
-        
+
         let changes = cache.get_cached_changes();
         assert_eq!(changes.len(), 2);
-        assert_eq!(changes.get(&b"add".to_vec()), Some(&Some(b"new_value".to_vec())));
-        assert_eq!(changes.get(&b"remove".to_vec()), Some(&None));
+        assert_eq!(
+            changes.get(b"add".as_slice()),
+            Some(&Some(b"new_value".to_vec()))
+        );
+        assert_eq!(changes.get(b"remove".as_slice()), Some(&None));
     }
-    
+
     #[test]
     fn test_cache_performance_metrics() {
         let mut inner = MemStore::new();
         inner.set(b"existing", b"value").unwrap();
-        
+
         let mut cache = CacheStore::new(inner);
-        
+
         // Initial stats should be zero
         assert_eq!(cache.cache_stats(), (0, 0));
         assert_eq!(cache.cache_hit_rate(), 0.0);
-        
+
         // Cache miss on first get
         assert_eq!(cache.get(b"existing").unwrap(), Some(b"value".to_vec()));
         assert_eq!(cache.cache_stats(), (0, 1));
         assert_eq!(cache.cache_hit_rate(), 0.0);
-        
+
         // Cache hit on subsequent get of cached value
         cache.set(b"cached", b"cached_value").unwrap();
-        assert_eq!(cache.get(b"cached").unwrap(), Some(b"cached_value".to_vec()));
+        assert_eq!(
+            cache.get(b"cached").unwrap(),
+            Some(b"cached_value".to_vec())
+        );
         assert_eq!(cache.cache_stats(), (1, 1));
         assert_eq!(cache.cache_hit_rate(), 0.5);
-        
+
         // Another cache hit
-        assert_eq!(cache.get(b"cached").unwrap(), Some(b"cached_value".to_vec()));
+        assert_eq!(
+            cache.get(b"cached").unwrap(),
+            Some(b"cached_value".to_vec())
+        );
         assert_eq!(cache.cache_stats(), (2, 1));
         assert!((cache.cache_hit_rate() - 0.666667).abs() < 0.001);
-        
+
         // Reset stats
         cache.reset_stats();
         assert_eq!(cache.cache_stats(), (0, 0));
         assert_eq!(cache.cache_hit_rate(), 0.0);
-        
+
         // Discard should also reset stats
         cache.set(b"temp", b"temp").unwrap();
         let _ = cache.get(b"temp");
