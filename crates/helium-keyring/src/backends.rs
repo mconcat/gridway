@@ -332,7 +332,10 @@ impl OsKeyring {
                 println!("DEBUG: store_key_in_os: successfully stored key '{}'", name);
             }
             Err(e) => {
-                println!("DEBUG: store_key_in_os: WARNING - could not verify key '{}' was stored: {:?}", name, e);
+                println!(
+                    "DEBUG: store_key_in_os: WARNING - could not verify key '{}' was stored: {:?}",
+                    name, e
+                );
             }
         }
 
@@ -455,14 +458,20 @@ impl OsKeyring {
 
             // Add a small delay to ensure the keyring write is flushed
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            
+
             // Verify the write was successful
             match registry_entry.get_password() {
                 Ok(stored_json) => {
-                    println!("DEBUG: add_key_to_registry: verified write, stored: {}", stored_json);
+                    println!(
+                        "DEBUG: add_key_to_registry: verified write, stored: {}",
+                        stored_json
+                    );
                 }
                 Err(e) => {
-                    println!("DEBUG: add_key_to_registry: WARNING - could not verify write: {:?}", e);
+                    println!(
+                        "DEBUG: add_key_to_registry: WARNING - could not verify write: {:?}",
+                        e
+                    );
                 }
             }
         }
@@ -566,10 +575,7 @@ impl OsKeyring {
     }
 
     /// Convert serializable key to stored key format
-    fn to_stored_key(
-        &self,
-        serializable: SerializableKey,
-    ) -> Result<StoredKey, KeyringError> {
+    fn to_stored_key(&self, serializable: SerializableKey) -> Result<StoredKey, KeyringError> {
         let privkey = match serializable.key_type.as_str() {
             "secp256k1" => {
                 let key =
