@@ -63,8 +63,8 @@ format!("Error: {}", msg)
 // GOOD
 format!("Error: {msg}")
 
-// EXCEPTION - Field access needs old style
-format!("Value: {}", obj.field)  // Can't use {obj.field} syntax
+// Field access is supported from Rust 1.58+
+format!("Value: {obj.field}")
 ```
 
 ### 2. Test Expectation Mismatches
