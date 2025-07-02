@@ -4,12 +4,7 @@ use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(
-    name = "helium",
-    about = "Helium blockchain node",
-    version,
-    author
-)]
+#[command(name = "helium", about = "Helium blockchain node", version, author)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -21,41 +16,53 @@ enum Commands {
     Init {
         #[arg(long, value_name = "ID", help = "Chain ID")]
         chain_id: String,
-        
-        #[arg(long, value_name = "DIR", help = "Home directory for configuration and data")]
+
+        #[arg(
+            long,
+            value_name = "DIR",
+            help = "Home directory for configuration and data"
+        )]
         home: Option<PathBuf>,
-        
+
         #[arg(long, value_name = "FILE", help = "Genesis file path")]
         genesis: Option<PathBuf>,
     },
-    
+
     #[command(about = "Start the node and connect to network")]
     Start {
-        #[arg(long, value_name = "DIR", help = "Home directory for configuration and data")]
+        #[arg(
+            long,
+            value_name = "DIR",
+            help = "Home directory for configuration and data"
+        )]
         home: Option<PathBuf>,
-        
+
         #[arg(long, value_name = "FILE", help = "Configuration file path")]
         config: Option<PathBuf>,
-        
-        #[arg(long, value_name = "LEVEL", help = "Log level (trace, debug, info, warn, error)")]
+
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            help = "Log level (trace, debug, info, warn, error)"
+        )]
         log_level: Option<String>,
     },
-    
+
     #[command(about = "Display version information")]
     Version,
-    
+
     #[command(about = "Genesis file utilities")]
     Genesis {
         #[command(subcommand)]
         command: GenesisCommands,
     },
-    
+
     #[command(about = "Key management utilities")]
     Keys {
         #[command(subcommand)]
         command: KeysCommands,
     },
-    
+
     #[command(about = "Configuration management")]
     Config {
         #[command(subcommand)]
@@ -70,12 +77,12 @@ enum GenesisCommands {
         #[arg(value_name = "FILE", help = "Genesis file path")]
         file: PathBuf,
     },
-    
+
     #[command(about = "Export genesis state")]
     Export {
         #[arg(long, value_name = "DIR", help = "Home directory")]
         home: Option<PathBuf>,
-        
+
         #[arg(long, value_name = "FILE", help = "Output file path")]
         output: Option<PathBuf>,
     },
@@ -87,20 +94,20 @@ enum KeysCommands {
     Add {
         #[arg(value_name = "NAME", help = "Key name")]
         name: String,
-        
+
         #[arg(long, help = "Recover key from mnemonic")]
         recover: bool,
     },
-    
+
     #[command(about = "List all keys")]
     List,
-    
+
     #[command(about = "Show key details")]
     Show {
         #[arg(value_name = "NAME", help = "Key name")]
         name: String,
     },
-    
+
     #[command(about = "Delete a key")]
     Delete {
         #[arg(value_name = "NAME", help = "Key name")]
@@ -115,7 +122,7 @@ enum ConfigCommands {
         #[arg(long, value_name = "DIR", help = "Home directory")]
         home: Option<PathBuf>,
     },
-    
+
     #[command(about = "Validate configuration")]
     Validate {
         #[arg(value_name = "FILE", help = "Configuration file path")]
@@ -126,77 +133,81 @@ enum ConfigCommands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+
     match cli.command {
-        Commands::Init { chain_id, home, genesis } => {
-            init_command(chain_id, home, genesis).await
-        }
-        Commands::Start { home, config, log_level } => {
-            start_command(home, config, log_level).await
-        }
-        Commands::Version => {
-            version_command()
-        }
-        Commands::Genesis { command } => {
-            genesis_command(command).await
-        }
-        Commands::Keys { command } => {
-            keys_command(command).await
-        }
-        Commands::Config { command } => {
-            config_command(command).await
-        }
+        Commands::Init {
+            chain_id,
+            home,
+            genesis,
+        } => init_command(chain_id, home, genesis).await,
+        Commands::Start {
+            home,
+            config,
+            log_level,
+        } => start_command(home, config, log_level).await,
+        Commands::Version => version_command(),
+        Commands::Genesis { command } => genesis_command(command).await,
+        Commands::Keys { command } => keys_command(command).await,
+        Commands::Config { command } => config_command(command).await,
     }
 }
 
-async fn init_command(chain_id: String, home: Option<PathBuf>, genesis: Option<PathBuf>) -> Result<()> {
+async fn init_command(
+    chain_id: String,
+    home: Option<PathBuf>,
+    genesis: Option<PathBuf>,
+) -> Result<()> {
     setup_logging(None)?;
-    
+
     let home_dir = get_home_dir(home)?;
-    
+
     tracing::info!("Initializing node with chain-id: {}", chain_id);
     tracing::info!("Home directory: {}", home_dir.display());
-    
+
     // Create directory structure
     create_directories(&home_dir)?;
-    
+
     // Initialize configuration files
     init_config_files(&home_dir, &chain_id)?;
-    
+
     // Generate node key if not exists
     init_node_key(&home_dir)?;
-    
+
     // Validate and copy genesis file if provided
     if let Some(genesis_path) = genesis {
         init_genesis_file(&home_dir, &genesis_path)?;
     }
-    
+
     tracing::info!("Node initialized successfully");
     Ok(())
 }
 
-async fn start_command(home: Option<PathBuf>, config: Option<PathBuf>, log_level: Option<String>) -> Result<()> {
+async fn start_command(
+    home: Option<PathBuf>,
+    config: Option<PathBuf>,
+    log_level: Option<String>,
+) -> Result<()> {
     setup_logging(log_level)?;
-    
+
     let home_dir = get_home_dir(home)?;
     let config_path = config.unwrap_or_else(|| home_dir.join("config").join("app.toml"));
-    
+
     tracing::info!("Starting node...");
     tracing::info!("Home directory: {}", home_dir.display());
     tracing::info!("Config file: {}", config_path.display());
-    
+
     // Load configuration
     let config = load_config(&config_path)?;
-    
+
     // Initialize storage backends
     init_storage(&home_dir, &config)?;
-    
+
     // Load WASM modules
     load_wasm_modules(&config)?;
-    
+
     // Start ABCI server
     start_abci_server(&home_dir, &config).await?;
-    
+
     Ok(())
 }
 
@@ -208,7 +219,7 @@ fn version_command() -> Result<()> {
 
 async fn genesis_command(command: GenesisCommands) -> Result<()> {
     setup_logging(None)?;
-    
+
     match command {
         GenesisCommands::Validate { file } => {
             validate_genesis_file(&file)?;
@@ -226,7 +237,7 @@ async fn genesis_command(command: GenesisCommands) -> Result<()> {
 
 async fn keys_command(command: KeysCommands) -> Result<()> {
     setup_logging(None)?;
-    
+
     match command {
         KeysCommands::Add { name, recover } => {
             if recover {
@@ -250,7 +261,7 @@ async fn keys_command(command: KeysCommands) -> Result<()> {
 
 async fn config_command(command: ConfigCommands) -> Result<()> {
     setup_logging(None)?;
-    
+
     match command {
         ConfigCommands::Show { home } => {
             let home_dir = get_home_dir(home)?;
@@ -270,17 +281,16 @@ fn setup_logging(log_level: Option<String>) -> Result<()> {
     let filter = if let Some(level) = log_level {
         EnvFilter::try_new(level)?
     } else {
-        EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("info"))
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
     };
-    
+
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
         .with_thread_ids(false)
         .with_thread_names(false)
         .init();
-    
+
     Ok(())
 }
 
@@ -303,25 +313,26 @@ fn create_directories(home_dir: &PathBuf) -> Result<()> {
 fn init_config_files(home_dir: &PathBuf, chain_id: &str) -> Result<()> {
     let app_config_path = home_dir.join("config").join("app.toml");
     let config_path = home_dir.join("config").join("config.toml");
-    
+
     if !app_config_path.exists() {
         let app_config = generate_app_config(chain_id);
         std::fs::write(&app_config_path, app_config)?;
         tracing::info!("Created app configuration: {}", app_config_path.display());
     }
-    
+
     if !config_path.exists() {
         let config = generate_config();
         std::fs::write(&config_path, config)?;
         tracing::info!("Created node configuration: {}", config_path.display());
     }
-    
+
     Ok(())
 }
 
 fn generate_app_config(chain_id: &str) -> String {
-    format!(r#"# Application Configuration
-chain_id = "{}"
+    format!(
+        r#"# Application Configuration
+chain_id = "{chain_id}"
 
 [app]
 minimum_gas_prices = "0.025uhelium"
@@ -343,7 +354,8 @@ address = "0.0.0.0:9090"
 modules_dir = "./wasm_modules"
 cache_size = 100
 memory_limit = "512MB"
-"#, chain_id)
+"#
+    )
 }
 
 fn generate_config() -> String {
@@ -357,7 +369,8 @@ laddr = "tcp://127.0.0.1:26657"
 [p2p]
 laddr = "tcp://0.0.0.0:26656"
 persistent_peers = ""
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn init_node_key(home_dir: &PathBuf) -> Result<()> {
@@ -373,14 +386,14 @@ fn init_node_key(home_dir: &PathBuf) -> Result<()> {
 
 fn init_genesis_file(home_dir: &PathBuf, genesis_path: &PathBuf) -> Result<()> {
     let dest_path = home_dir.join("config").join("genesis.json");
-    
+
     // Validate genesis file
     validate_genesis_file(genesis_path)?;
-    
+
     // Copy to config directory
     std::fs::copy(genesis_path, &dest_path)?;
     tracing::info!("Genesis file copied to: {}", dest_path.display());
-    
+
     Ok(())
 }
 
@@ -417,11 +430,11 @@ fn load_wasm_modules(_config: &AppConfig) -> Result<()> {
 async fn start_abci_server(_home_dir: &PathBuf, _config: &AppConfig) -> Result<()> {
     // TODO: Start ABCI server using helium-server
     tracing::info!("ABCI server started");
-    
+
     // Keep the server running
     tokio::signal::ctrl_c().await?;
     tracing::info!("Shutting down...");
-    
+
     Ok(())
 }
 
@@ -447,7 +460,7 @@ fn list_keys() -> Result<()> {
 
 fn show_key(name: &str) -> Result<()> {
     // TODO: Show key details
-    println!("Key: {}", name);
+    println!("Key: {name}");
     Ok(())
 }
 
@@ -462,7 +475,7 @@ fn delete_key(name: &str) -> Result<()> {
 fn show_config(home_dir: &PathBuf) -> Result<()> {
     let app_config_path = home_dir.join("config").join("app.toml");
     let content = std::fs::read_to_string(app_config_path)?;
-    println!("{}", content);
+    println!("{content}");
     Ok(())
 }
 

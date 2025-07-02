@@ -8,7 +8,7 @@
 //! different namespaces: `/state/auth/`, `/state/bank/`, etc.
 
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -151,6 +151,11 @@ pub trait VfsInterface: Send + Sync {
     fn write(&self, path: &Path, data: &[u8]) -> Result<usize>;
 }
 
+// Type aliases to simplify complex types
+type StoreMap = HashMap<String, Arc<Mutex<dyn KVStore>>>;
+type MountMap = HashMap<PathBuf, Mount>;
+type FileDescriptorMap = HashMap<u32, FileDescriptor>;
+
 /// Virtual Filesystem for WASI State Access
 ///
 /// The VFS maps blockchain state stores to a filesystem-like interface where:
@@ -159,11 +164,11 @@ pub trait VfsInterface: Send + Sync {
 /// - Special paths can be mounted to provide access to other interfaces (e.g., IBC)
 pub struct VirtualFilesystem {
     /// Mapping from namespace to store
-    stores: Arc<Mutex<HashMap<String, Arc<Mutex<dyn KVStore>>>>>,
+    stores: Arc<Mutex<StoreMap>>,
     /// Mounted interfaces
-    mounts: Arc<Mutex<HashMap<PathBuf, Mount>>>,
+    mounts: Arc<Mutex<MountMap>>,
     /// Open file descriptors
-    file_descriptors: Arc<Mutex<HashMap<u32, FileDescriptor>>>,
+    file_descriptors: Arc<Mutex<FileDescriptorMap>>,
     /// Next available file descriptor ID
     next_fd: Arc<Mutex<u32>>,
     /// Capability-based access control
@@ -189,7 +194,7 @@ impl VirtualFilesystem {
         let mut stores = self
             .stores
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         stores.insert(namespace.clone(), store);
 
         info!("Successfully mounted store for namespace: {}", namespace);
@@ -203,7 +208,7 @@ impl VirtualFilesystem {
         let mut mounts = self
             .mounts
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         mounts.insert(path.clone(), mount);
 
         info!("Successfully mounted interface at path: {}", path.display());
@@ -217,7 +222,7 @@ impl VirtualFilesystem {
         let mut capabilities = self
             .capabilities
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         capabilities.push(capability);
 
         Ok(())
@@ -228,15 +233,14 @@ impl VirtualFilesystem {
         let capabilities = self
             .capabilities
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
         let required_cap = match operation {
             "read" => Capability::Read(path.to_path_buf()),
             "write" => Capability::Write(path.to_path_buf()),
             _ => {
                 return Err(VfsError::InvalidOperation(format!(
-                    "Unknown operation: {}",
-                    operation
+                    "Unknown operation: {operation}"
                 )))
             }
         };
@@ -257,7 +261,7 @@ impl VirtualFilesystem {
         let mounts = self
             .mounts
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
         if mounts.contains_key(path) {
             return Ok(("".to_string(), path.to_str().unwrap().as_bytes().to_vec()));
@@ -270,10 +274,8 @@ impl VirtualFilesystem {
         // Expected format: /{namespace}/{key...}
         let parts: Vec<&str> = path_str.trim_start_matches('/').split('/').collect();
 
-        if parts.is_empty() {
-            return Err(VfsError::InvalidPath(
-                "Path cannot be empty".to_string(),
-            ));
+        if parts.is_empty() || (parts.len() == 1 && parts[0].is_empty()) {
+            return Err(VfsError::InvalidPath("Path cannot be empty".to_string()));
         }
 
         let namespace = parts[0].to_string();
@@ -294,7 +296,7 @@ impl VirtualFilesystem {
         let mut next_fd = self
             .next_fd
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         let fd = *next_fd;
         *next_fd += 1;
         Ok(fd)
@@ -311,21 +313,25 @@ impl VirtualFilesystem {
             self.check_access(path, "read")?;
         }
 
-        let mounts = self
-            .mounts
-            .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
-
-        if let Some(mount) = mounts.get(path) {
-            let fd = self.next_fd_id()?;
-            let file_desc = FileDescriptor::new(fd, path.to_path_buf(), "".to_string(), vec![], writable);
-            let mut fds = self
-                .file_descriptors
+        // Check mounts first
+        {
+            let mounts = self
+                .mounts
                 .lock()
-                .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
-            fds.insert(fd, file_desc);
-            return Ok(fd);
-        }
+                .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
+
+            if let Some(_mount) = mounts.get(path) {
+                let fd = self.next_fd_id()?;
+                let file_desc =
+                    FileDescriptor::new(fd, path.to_path_buf(), "".to_string(), vec![], writable);
+                let mut fds = self
+                    .file_descriptors
+                    .lock()
+                    .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
+                fds.insert(fd, file_desc);
+                return Ok(fd);
+            }
+        } // mounts lock is dropped here
 
         let (namespace, key) = self.parse_path(path)?;
 
@@ -333,10 +339,10 @@ impl VirtualFilesystem {
         let stores = self
             .stores
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         let store = stores
             .get(&namespace)
-            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found: {}", namespace)))?
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found: {namespace}")))?
             .clone();
         drop(stores);
 
@@ -344,7 +350,7 @@ impl VirtualFilesystem {
         let content = {
             let store = store
                 .lock()
-                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {}", e)))?;
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {e}")))?;
             store.get(&key)?.unwrap_or_default()
         };
 
@@ -356,7 +362,7 @@ impl VirtualFilesystem {
         let mut fds = self
             .file_descriptors
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         fds.insert(fd, file_desc);
 
         info!(
@@ -378,14 +384,14 @@ impl VirtualFilesystem {
         let mut fds = self
             .file_descriptors
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
-        let file_desc = fds.get_mut(&fd).ok_or_else(|| VfsError::FdNotFound(fd))?;
+        let file_desc = fds.get_mut(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
         let mounts = self
             .mounts
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
         if let Some(mount) = mounts.get(&file_desc.path) {
             return match mount {
@@ -393,7 +399,9 @@ impl VirtualFilesystem {
                     let interface = interface.lock().unwrap();
                     interface.read(&file_desc.path, buffer)
                 }
-                _ => Err(VfsError::InvalidOperation("Read not supported for this mount type".to_string())),
+                _ => Err(VfsError::InvalidOperation(
+                    "Read not supported for this mount type".to_string(),
+                )),
             };
         }
 
@@ -423,7 +431,7 @@ impl VirtualFilesystem {
         let stores = self
             .stores
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
         let store = stores
             .get(&file_desc.namespace)
@@ -437,7 +445,7 @@ impl VirtualFilesystem {
         let entries = {
             let store = store
                 .lock()
-                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {}", e)))?;
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {e}")))?;
 
             let mut entries = Vec::new();
             let iter = store.prefix_iterator(&[]);
@@ -475,9 +483,9 @@ impl VirtualFilesystem {
         let mut fds = self
             .file_descriptors
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
-        let file_desc = fds.get_mut(&fd).ok_or_else(|| VfsError::FdNotFound(fd))?;
+        let file_desc = fds.get_mut(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
         if !file_desc.writable {
             return Err(VfsError::AccessDenied(
@@ -488,7 +496,7 @@ impl VirtualFilesystem {
         let mounts = self
             .mounts
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
         if let Some(mount) = mounts.get(&file_desc.path) {
             return match mount {
@@ -496,7 +504,9 @@ impl VirtualFilesystem {
                     let interface = interface.lock().unwrap();
                     interface.write(&file_desc.path, data)
                 }
-                _ => Err(VfsError::InvalidOperation("Write not supported for this mount type".to_string())),
+                _ => Err(VfsError::InvalidOperation(
+                    "Write not supported for this mount type".to_string(),
+                )),
             };
         }
 
@@ -528,9 +538,9 @@ impl VirtualFilesystem {
         let mut fds = self
             .file_descriptors
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
-        let file_desc = fds.get_mut(&fd).ok_or_else(|| VfsError::FdNotFound(fd))?;
+        let file_desc = fds.get_mut(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
         let new_pos = match pos {
             SeekFrom::Start(offset) => offset,
@@ -556,29 +566,32 @@ impl VirtualFilesystem {
         // Check read access
         self.check_access(path, "read")?;
 
-        let mounts = self
-            .mounts
-            .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+        // Check mounts first, but drop lock before parse_path
+        {
+            let mounts = self
+                .mounts
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
-        if mounts.contains_key(path) {
-            return Ok(FileInfo {
-                file_type: FileType::Mount,
-                size: 0,
-                modified: SystemTime::now(),
-                path: path.to_path_buf(),
-            });
-        }
+            if mounts.contains_key(path) {
+                return Ok(FileInfo {
+                    file_type: FileType::Mount,
+                    size: 0,
+                    modified: SystemTime::now(),
+                    path: path.to_path_buf(),
+                });
+            }
+        } // mounts lock is dropped here
 
         let (namespace, key) = self.parse_path(path)?;
 
         let stores = self
             .stores
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         let store = stores
             .get(&namespace)
-            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found: {}", namespace)))?
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found: {namespace}")))?
             .clone();
         drop(stores);
 
@@ -594,7 +607,7 @@ impl VirtualFilesystem {
             // File stat
             let store = store
                 .lock()
-                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {}", e)))?;
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {e}")))?;
 
             if let Some(value) = store.get(&key)? {
                 Ok(FileInfo {
@@ -616,16 +629,16 @@ impl VirtualFilesystem {
         let mut fds = self
             .file_descriptors
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
 
-        let file_desc = fds.remove(&fd).ok_or_else(|| VfsError::FdNotFound(fd))?;
+        let file_desc = fds.remove(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
         // If file was writable and has content, write back to store
         if file_desc.writable && !file_desc.key.is_empty() {
             let stores = self
                 .stores
                 .lock()
-                .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+                .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
             let store = stores
                 .get(&file_desc.namespace)
                 .ok_or_else(|| {
@@ -636,8 +649,8 @@ impl VirtualFilesystem {
 
             let mut store = store
                 .lock()
-                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {}", e)))?;
-            store.set(file_desc.key, file_desc.content)?;
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {e}")))?;
+            store.set(&file_desc.key, &file_desc.content)?;
         }
 
         info!("Successfully closed fd: {}", fd);
@@ -663,17 +676,17 @@ impl VirtualFilesystem {
         let stores = self
             .stores
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         let store = stores
             .get(&namespace)
-            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found: {}", namespace)))?
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found: {namespace}")))?
             .clone();
         drop(stores);
 
         {
             let store = store
                 .lock()
-                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {}", e)))?;
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {e}")))?;
             if store.has(&key)? {
                 return Err(VfsError::FileExists(path.to_string_lossy().to_string()));
             }
@@ -701,16 +714,16 @@ impl VirtualFilesystem {
         let stores = self
             .stores
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         let store = stores
             .get(&namespace)
-            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found: {}", namespace)))?
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found: {namespace}")))?
             .clone();
         drop(stores);
 
         let mut store = store
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Store lock poisoned: {e}")))?;
         store.delete(&key)?;
 
         info!("Successfully deleted file: {}", path.display());
@@ -722,7 +735,7 @@ impl VirtualFilesystem {
         let fds = self
             .file_descriptors
             .lock()
-            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {}", e)))?;
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned: {e}")))?;
         Ok(fds.keys().cloned().collect())
     }
 }
@@ -841,7 +854,8 @@ mod tests {
 
         // List directory
         let dir_path = PathBuf::from("/auth/");
-        vfs.add_capability(Capability::Read(dir_path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(dir_path.clone()))
+            .unwrap();
         let fd = vfs.open(&dir_path, false).unwrap();
         let mut buffer = vec![0u8; 1024];
         let read = vfs.read(fd, &mut buffer).unwrap();
@@ -901,7 +915,8 @@ mod tests {
 
         // Test directory stat
         let dir_path = PathBuf::from("/auth/");
-        vfs.add_capability(Capability::Read(dir_path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(dir_path.clone()))
+            .unwrap();
         let dir_info = vfs.stat(&dir_path).unwrap();
         assert_eq!(dir_info.file_type, FileType::Directory);
     }

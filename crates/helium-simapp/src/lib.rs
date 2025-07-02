@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// Simulation error types
 #[derive(Error, Debug)]
@@ -151,11 +151,16 @@ impl Simulator {
     pub fn new(config: SimConfig) -> Self {
         Self::with_app_config(config, Config::default())
     }
-    
+
     /// Create a new simulator with app config
     pub fn with_app_config(config: SimConfig, app_config: Config) -> Self {
         let accounts = (0..config.num_accounts)
-            .map(|i| Account::new(format!("account_{}", i), app_config.simulation.default_balance))
+            .map(|i| {
+                Account::new(
+                    format!("account_{i}"),
+                    app_config.simulation.default_balance,
+                )
+            })
             .collect();
 
         Self {
@@ -267,7 +272,7 @@ impl Simulator {
             let block = self.generate_block(height as u64, &mut rng);
             self.process_block(block);
 
-            if height % 100 == 0 {
+            if height.is_multiple_of(100) {
                 debug!(height = %height, "Processed blocks");
             }
 
@@ -280,7 +285,7 @@ impl Simulator {
         self.stats.avg_tps = self.stats.txs_processed as f64 / duration.as_secs_f64();
 
         info!("Simulation completed!");
-        info!(blocks = %self.stats.blocks_processed, txs = %self.stats.txs_processed, 
+        info!(blocks = %self.stats.blocks_processed, txs = %self.stats.txs_processed,
               avg_tps = %self.stats.avg_tps, "Simulation results");
 
         Ok(self.stats.clone())
@@ -337,7 +342,7 @@ pub async fn run_cli() -> Result<()> {
             };
 
             let mut simulator = Simulator::new(sim_config);
-            let stats = simulator.run().await?;
+            let _stats = simulator.run().await?;
             if let Some(output_path) = output {
                 simulator.export_results(&output_path)?;
                 info!(path = %output_path, "Results exported");

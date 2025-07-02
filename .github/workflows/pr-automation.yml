@@ -1,0 +1,108 @@
+name: PR Automation
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+jobs:
+  auto-label:
+    name: Auto Label PR
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Label based on changed files
+      uses: actions/labeler@v5
+      with:
+        repo-token: "${{ secrets.GITHUB_TOKEN }}"
+        configuration-path: .github/labeler.yml
+    
+  size-label:
+    name: Add Size Label
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Add size label
+      uses: codelytv/pr-size-labeler@v1
+      with:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        xs_label: 'size/XS'
+        xs_max_size: '10'
+        s_label: 'size/S'
+        s_max_size: '100'
+        m_label: 'size/M'
+        m_max_size: '500'
+        l_label: 'size/L'
+        l_max_size: '1000'
+        xl_label: 'size/XL'
+        fail_if_xl: 'false'
+    
+  breaking-change-check:
+    name: Check for Breaking Changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Check for breaking changes
+      run: |
+        # Check if Cargo.toml version was bumped (indicating breaking change)
+        if git diff origin/${{ github.base_ref }}...HEAD --name-only | grep -q "Cargo.toml"; then
+          if git diff origin/${{ github.base_ref }}...HEAD -- Cargo.toml | grep -q "^+version"; then
+            echo "::warning::Cargo.toml version changed - possible breaking change"
+            echo "BREAKING_CHANGE=true" >> $GITHUB_ENV
+          fi
+        fi
+        
+        # Check for removed public APIs
+        # This is a simplified check - you might want to use cargo-semver-checks
+        if git diff origin/${{ github.base_ref }}...HEAD -- '*.rs' | grep -E "^-\s*pub\s+(fn|struct|enum|trait|type|const)" > /dev/null; then
+          echo "::warning::Public API items removed - possible breaking change"
+          echo "BREAKING_CHANGE=true" >> $GITHUB_ENV
+        fi
+    
+    - name: Add breaking change label
+      if: env.BREAKING_CHANGE == 'true'
+      uses: actions-ecosystem/action-add-labels@v1
+      with:
+        labels: breaking-change
+    
+  pr-description-check:
+    name: Check PR Description
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Check PR description
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const pr = context.payload.pull_request;
+          const minLength = 50;
+          
+          if (!pr.body || pr.body.trim().length < minLength) {
+            core.setFailed(`PR description must be at least ${minLength} characters long`);
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body: `👋 Hey @${pr.user.login}! Please add a more detailed description to your PR (at least ${minLength} characters). This helps reviewers understand your changes better.`
+            });
+          }

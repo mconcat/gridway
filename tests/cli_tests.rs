@@ -18,14 +18,16 @@ fn test_init_command_missing_chain_id() {
     cmd.arg("init")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("required arguments were not provided"));
+        .stderr(predicate::str::contains(
+            "required arguments were not provided",
+        ));
 }
 
 #[test]
 fn test_init_command_with_chain_id() {
     let temp_dir = TempDir::new().unwrap();
     let mut cmd = Command::cargo_bin("helium").unwrap();
-    
+
     cmd.arg("init")
         .arg("--chain-id")
         .arg("test-chain-1")
@@ -33,16 +35,20 @@ fn test_init_command_with_chain_id() {
         .arg(temp_dir.path())
         .assert()
         .success();
-    
+
     // Verify directories were created
     assert!(temp_dir.path().join("config").exists());
     assert!(temp_dir.path().join("data").exists());
     assert!(temp_dir.path().join("wasm_modules").exists());
-    
+
     // Verify config files were created
     assert!(temp_dir.path().join("config").join("app.toml").exists());
     assert!(temp_dir.path().join("config").join("config.toml").exists());
-    assert!(temp_dir.path().join("config").join("node_key.json").exists());
+    assert!(temp_dir
+        .path()
+        .join("config")
+        .join("node_key.json")
+        .exists());
 }
 
 #[test]
@@ -68,20 +74,22 @@ fn test_config_validate_missing_file() {
 #[test]
 fn test_config_show_with_home() {
     let temp_dir = TempDir::new().unwrap();
-    
+
     // First initialize the node
     let mut init_cmd = Command::cargo_bin("helium").unwrap();
-    init_cmd.arg("init")
+    init_cmd
+        .arg("init")
         .arg("--chain-id")
         .arg("test-chain-1")
         .arg("--home")
         .arg(temp_dir.path())
         .assert()
         .success();
-    
+
     // Then show the config
     let mut show_cmd = Command::cargo_bin("helium").unwrap();
-    show_cmd.arg("config")
+    show_cmd
+        .arg("config")
         .arg("show")
         .arg("--home")
         .arg(temp_dir.path())
