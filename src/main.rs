@@ -1,17 +1,17 @@
 use anyhow::Result;
+use base64::{engine::general_purpose, Engine as _};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
-use tracing_subscriber::EnvFilter;
-use helium_keyring::{backends::MemoryKeyring, Keyring};
 use helium_crypto::PrivateKey;
+use helium_keyring::{backends::MemoryKeyring, Keyring};
+use k256::ecdsa::SigningKey;
+use rand::RngCore;
 use std::fs::OpenOptions;
 #[cfg(unix)]
 use std::fs::Permissions;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use rand::RngCore;
-use base64::{engine::general_purpose, Engine as _};
-use k256::ecdsa::SigningKey;
+use std::path::PathBuf;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "helium", about = "Helium blockchain node", version, author)]
@@ -201,7 +201,7 @@ async fn start_command(
 
     let home_dir = get_home_dir(home)?;
     let config_path = config.unwrap_or_else(|| home_dir.join("config").join("app.toml"));
-    
+
     // Validate config file exists
     if !config_path.exists() {
         return Err(anyhow::anyhow!(
@@ -209,7 +209,7 @@ async fn start_command(
             config_path.display()
         ));
     }
-    
+
     tracing::info!("Starting node...");
     tracing::info!("Home directory: {}", home_dir.display());
     tracing::info!("Config file: {}", config_path.display());
@@ -259,19 +259,19 @@ async fn keys_command(command: KeysCommands) -> Result<()> {
     match command {
         KeysCommands::Add { name, recover } => {
             if recover {
-                recover_key(&name)?;
+                recover_key(&name).await?;
             } else {
-                add_new_key(&name)?;
+                add_new_key(&name).await?;
             }
         }
         KeysCommands::List => {
-            list_keys()?;
+            list_keys().await?;
         }
         KeysCommands::Show { name } => {
-            show_key(&name)?;
+            show_key(&name).await?;
         }
         KeysCommands::Delete { name } => {
-            delete_key(&name)?;
+            delete_key(&name).await?;
         }
     }
     Ok(())
@@ -410,7 +410,7 @@ fn init_node_key(home_dir: &PathBuf) -> Result<()> {
                 "value": general_purpose::STANDARD.encode(private_key_bytes)
             },
             "pub_key": {
-                "type": "secp256k1", 
+                "type": "secp256k1",
                 "value": general_purpose::STANDARD.encode(public_key.to_bytes())
             }
         });
@@ -421,15 +421,15 @@ fn init_node_key(home_dir: &PathBuf) -> Result<()> {
             .write(true)
             .truncate(true)
             .open(&key_path)?;
-        
+
         // Set secure permissions before writing (Unix only)
         #[cfg(unix)]
         file.set_permissions(Permissions::from_mode(0o600))?;
-        
+
         // Write the key data
         use std::io::Write;
         writeln!(file, "{}", serde_json::to_string_pretty(&node_key)?)?;
-        
+
         tracing::info!("Generated secure node key: {}", key_path.display());
     }
     Ok(())
@@ -457,23 +457,27 @@ fn validate_genesis_file(path: &PathBuf) -> Result<()> {
 
 fn export_genesis(home_dir: &PathBuf, output_path: &PathBuf) -> Result<()> {
     let genesis_path = home_dir.join("config").join("genesis.json");
-    
+
     // Check if genesis file exists
     if !genesis_path.exists() {
         return Err(anyhow::anyhow!(
-            "Genesis file not found at: {}. Initialize the node first or provide a genesis file.", 
+            "Genesis file not found at: {}. Initialize the node first or provide a genesis file.",
             genesis_path.display()
         ));
     }
-    
+
     // Read and validate the genesis file
     let genesis_content = std::fs::read_to_string(&genesis_path)?;
     let _: serde_json::Value = serde_json::from_str(&genesis_content)?;
-    
+
     // Copy genesis to output path
     std::fs::copy(&genesis_path, output_path)?;
-    
-    tracing::info!("Genesis exported from {} to {}", genesis_path.display(), output_path.display());
+
+    tracing::info!(
+        "Genesis exported from {} to {}",
+        genesis_path.display(),
+        output_path.display()
+    );
     Ok(())
 }
 
@@ -508,142 +512,130 @@ async fn start_abci_server(_home_dir: &PathBuf, _config: &AppConfig) -> Result<(
 
 // Key management functions
 
-fn add_new_key(name: &str) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let mut keyring = get_keyring().await?;
-        
-        match keyring.create_key(name).await {
-            Ok(key_info) => {
-                println!("Key '{}' added successfully", name);
-                println!("Address: {}", key_info.address);
-                println!("Public Key: {:?}", key_info.pubkey);
-                Ok(())
-            }
-            Err(helium_keyring::KeyringError::KeyExists(_)) => {
-                Err(anyhow::anyhow!("Key '{}' already exists", name))
-            }
-            Err(e) => Err(anyhow::anyhow!("Failed to create key: {}", e))
+async fn add_new_key(name: &str) -> Result<()> {
+    let mut keyring = get_keyring().await?;
+
+    match keyring.create_key(name).await {
+        Ok(key_info) => {
+            println!("Key '{name}' added successfully");
+            println!("Address: {}", key_info.address);
+            println!("Public Key: {:?}", key_info.pubkey);
+            Ok(())
         }
-    })
+        Err(helium_keyring::KeyringError::KeyExists(_)) => {
+            Err(anyhow::anyhow!("Key '{}' already exists", name))
+        }
+        Err(e) => Err(anyhow::anyhow!("Failed to create key: {}", e)),
+    }
 }
 
-fn recover_key(name: &str) -> Result<()> {
+async fn recover_key(name: &str) -> Result<()> {
     use std::io::{self, Write};
-    
+
     print!("Enter mnemonic phrase: ");
     io::stdout().flush()?;
-    
+
     let mut mnemonic = String::new();
     io::stdin().read_line(&mut mnemonic)?;
     let mnemonic = mnemonic.trim();
-    
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let mut keyring = get_keyring().await?;
-        
-        match keyring.import_key(name, mnemonic).await {
-            Ok(key_info) => {
-                println!("Key '{}' recovered successfully", name);
-                println!("Address: {}", key_info.address);
-                println!("Public Key: {:?}", key_info.pubkey);
-                Ok(())
-            }
-            Err(helium_keyring::KeyringError::KeyExists(_)) => {
-                Err(anyhow::anyhow!("Key '{}' already exists", name))
-            }
-            Err(helium_keyring::KeyringError::InvalidMnemonic) => {
-                Err(anyhow::anyhow!("Invalid mnemonic phrase"))
-            }
-            Err(e) => Err(anyhow::anyhow!("Failed to recover key: {}", e))
+
+    let mut keyring = get_keyring().await?;
+
+    match keyring.import_key(name, mnemonic).await {
+        Ok(key_info) => {
+            println!("Key '{name}' recovered successfully");
+            println!("Address: {}", key_info.address);
+            println!("Public Key: {:?}", key_info.pubkey);
+            Ok(())
         }
-    })
+        Err(helium_keyring::KeyringError::KeyExists(_)) => {
+            Err(anyhow::anyhow!("Key '{}' already exists", name))
+        }
+        Err(helium_keyring::KeyringError::InvalidMnemonic) => {
+            Err(anyhow::anyhow!("Invalid mnemonic phrase"))
+        }
+        Err(e) => Err(anyhow::anyhow!("Failed to recover key: {}", e)),
+    }
 }
 
-fn list_keys() -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let keyring = get_keyring().await?;
-        
-        match keyring.list_keys().await {
-            Ok(keys) => {
-                if keys.is_empty() {
-                    println!("No keys found");
-                } else {
-                    println!("{:<20} {:<10} {}", "NAME", "TYPE", "ADDRESS");
-                    println!("{}", "-".repeat(60));
-                    for key in keys {
-                        let key_type = match key.pubkey {
-                            helium_crypto::PublicKey::Secp256k1(_) => "secp256k1",
-                            helium_crypto::PublicKey::Ed25519(_) => "ed25519",
-                        };
-                        println!("{:<20} {:<10} {}", key.name, key_type, key.address);
-                    }
+async fn list_keys() -> Result<()> {
+    let keyring = get_keyring().await?;
+
+    match keyring.list_keys().await {
+        Ok(keys) => {
+            if keys.is_empty() {
+                println!("No keys found");
+            } else {
+                println!("{:<20} {:<10} ADDRESS", "NAME", "TYPE");
+                println!("{}", "-".repeat(60));
+                for key in keys {
+                    let key_type = match key.pubkey {
+                        helium_crypto::PublicKey::Secp256k1(_) => "secp256k1",
+                        helium_crypto::PublicKey::Ed25519(_) => "ed25519",
+                    };
+                    println!("{:<20} {:<10} {}", key.name, key_type, key.address);
                 }
-                Ok(())
             }
-            Err(e) => Err(anyhow::anyhow!("Failed to list keys: {}", e))
+            Ok(())
         }
-    })
+        Err(e) => Err(anyhow::anyhow!("Failed to list keys: {}", e)),
+    }
 }
 
-fn show_key(name: &str) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let keyring = get_keyring().await?;
-        
-        match keyring.get_key(name).await {
-            Ok(key_info) => {
-                let key_type = match key_info.pubkey {
-                    helium_crypto::PublicKey::Secp256k1(_) => "secp256k1",
-                    helium_crypto::PublicKey::Ed25519(_) => "ed25519",
-                };
-                
-                println!("Key details for '{}':", name);
-                println!("  Name: {}", key_info.name);
-                println!("  Type: {}", key_type);
-                println!("  Address: {}", key_info.address);
-                println!("  Public Key: {}", serde_json::to_string_pretty(&key_info.pubkey)?);
-                Ok(())
-            }
-            Err(helium_keyring::KeyringError::KeyNotFound(_)) => {
-                Err(anyhow::anyhow!("Key '{}' not found", name))
-            }
-            Err(e) => Err(anyhow::anyhow!("Failed to get key: {}", e))
+async fn show_key(name: &str) -> Result<()> {
+    let keyring = get_keyring().await?;
+
+    match keyring.get_key(name).await {
+        Ok(key_info) => {
+            let key_type = match key_info.pubkey {
+                helium_crypto::PublicKey::Secp256k1(_) => "secp256k1",
+                helium_crypto::PublicKey::Ed25519(_) => "ed25519",
+            };
+
+            println!("Key details for '{name}':");
+            println!("  Name: {}", key_info.name);
+            println!("  Type: {key_type}");
+            println!("  Address: {}", key_info.address);
+            println!(
+                "  Public Key: {}",
+                serde_json::to_string_pretty(&key_info.pubkey)?
+            );
+            Ok(())
         }
-    })
+        Err(helium_keyring::KeyringError::KeyNotFound(_)) => {
+            Err(anyhow::anyhow!("Key '{}' not found", name))
+        }
+        Err(e) => Err(anyhow::anyhow!("Failed to get key: {}", e)),
+    }
 }
 
-fn delete_key(name: &str) -> Result<()> {
+async fn delete_key(name: &str) -> Result<()> {
     use std::io::{self, Write};
-    
-    print!("Are you sure you want to delete key '{}'? [y/N]: ", name);
+
+    print!("Are you sure you want to delete key '{name}'? [y/N]: ");
     io::stdout().flush()?;
-    
+
     let mut confirmation = String::new();
     io::stdin().read_line(&mut confirmation)?;
     let confirmation = confirmation.trim().to_lowercase();
-    
+
     if confirmation != "y" && confirmation != "yes" {
         println!("Key deletion cancelled");
         return Ok(());
     }
-    
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let mut keyring = get_keyring().await?;
-        
-        match keyring.delete_key(name).await {
-            Ok(()) => {
-                println!("Key '{}' deleted successfully", name);
-                Ok(())
-            }
-            Err(helium_keyring::KeyringError::KeyNotFound(_)) => {
-                Err(anyhow::anyhow!("Key '{}' not found", name))
-            }
-            Err(e) => Err(anyhow::anyhow!("Failed to delete key: {}", e))
+
+    let mut keyring = get_keyring().await?;
+
+    match keyring.delete_key(name).await {
+        Ok(()) => {
+            println!("Key '{name}' deleted successfully");
+            Ok(())
         }
-    })
+        Err(helium_keyring::KeyringError::KeyNotFound(_)) => {
+            Err(anyhow::anyhow!("Key '{}' not found", name))
+        }
+        Err(e) => Err(anyhow::anyhow!("Failed to delete key: {}", e)),
+    }
 }
 
 // Keyring helper function
@@ -725,21 +717,30 @@ struct WasmSection {
 
 fn parse_memory_limit(s: &str) -> Result<u64, String> {
     let s = s.trim().to_uppercase();
-    
+
     if s.ends_with("KB") {
-        let num: u64 = s[..s.len()-2].parse().map_err(|e| format!("Invalid number: {}", e))?;
+        let num: u64 = s[..s.len() - 2]
+            .parse()
+            .map_err(|e| format!("Invalid number: {e}"))?;
         Ok(num * 1024)
     } else if s.ends_with("MB") {
-        let num: u64 = s[..s.len()-2].parse().map_err(|e| format!("Invalid number: {}", e))?;
+        let num: u64 = s[..s.len() - 2]
+            .parse()
+            .map_err(|e| format!("Invalid number: {e}"))?;
         Ok(num * 1024 * 1024)
     } else if s.ends_with("GB") {
-        let num: u64 = s[..s.len()-2].parse().map_err(|e| format!("Invalid number: {}", e))?;
+        let num: u64 = s[..s.len() - 2]
+            .parse()
+            .map_err(|e| format!("Invalid number: {e}"))?;
         Ok(num * 1024 * 1024 * 1024)
     } else if s.ends_with("B") {
-        let num: u64 = s[..s.len()-1].parse().map_err(|e| format!("Invalid number: {}", e))?;
+        let num: u64 = s[..s.len() - 1]
+            .parse()
+            .map_err(|e| format!("Invalid number: {e}"))?;
         Ok(num)
     } else {
         // Assume bytes if no unit
-        s.parse().map_err(|e| format!("Invalid memory limit format: {}", e))
+        s.parse()
+            .map_err(|e| format!("Invalid memory limit format: {e}"))
     }
 }

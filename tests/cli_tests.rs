@@ -105,7 +105,7 @@ fn test_keys_list_command() {
         .arg("list")
         .assert()
         .success()
-        .stdout(predicate::str::contains("NAME"));
+        .stdout(predicate::str::contains("No keys found").or(predicate::str::contains("NAME")));
 }
 
 #[test]
