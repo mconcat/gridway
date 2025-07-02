@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start server
     let addr: SocketAddr = "127.0.0.1:1317".parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    
+
     info!("REST server listening on {}", addr);
     info!("Available endpoints:");
     info!("  GET  /cosmos/bank/v1beta1/balances/{{address}}");
@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  GET  /cosmos/auth/v1beta1/accounts/{{address}}");
     info!("  POST /cosmos/tx/v1beta1/txs");
     info!("  POST /cosmos/tx/v1beta1/simulate");
-    
+
     axum::serve(listener, app).await?;
 
     Ok(())

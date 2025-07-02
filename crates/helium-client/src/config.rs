@@ -1,9 +1,9 @@
 //! Configuration management for the helium client
 
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use std::fs;
 
 /// Configuration error types
 #[derive(Error, Debug)]
@@ -80,7 +80,7 @@ impl ClientConfig {
     /// Load configuration from default location or create default
     pub fn load_or_default() -> Result<Self, ConfigError> {
         let config_path = Self::default_config_file();
-        
+
         if config_path.exists() {
             Self::load_from_file(config_path)
         } else {
@@ -117,14 +117,17 @@ impl ClientConfig {
             "output" => self.output = value.to_string(),
             "timeout" => {
                 self.timeout = value.parse().map_err(|_| {
-                    ConfigError::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid timeout value"))
+                    ConfigError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Invalid timeout value",
+                    ))
                 })?;
             }
             "keyring_backend" => self.keyring_backend = value.to_string(),
             _ => {
                 return Err(ConfigError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!("Unknown configuration key: {}", key)
+                    format!("Unknown configuration key: {key}"),
                 )));
             }
         }
@@ -170,7 +173,10 @@ mod tests {
         assert_eq!(loaded_config.chain_id, original_config.chain_id);
         assert_eq!(loaded_config.output, original_config.output);
         assert_eq!(loaded_config.timeout, original_config.timeout);
-        assert_eq!(loaded_config.keyring_backend, original_config.keyring_backend);
+        assert_eq!(
+            loaded_config.keyring_backend,
+            original_config.keyring_backend
+        );
     }
 
     #[test]

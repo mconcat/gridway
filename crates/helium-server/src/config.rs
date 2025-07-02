@@ -7,21 +7,24 @@ use serde::{Deserialize, Serialize};
 pub struct AbciConfig {
     /// Listen address for ABCI connections (e.g., "tcp://0.0.0.0:26658")
     pub listen_address: String,
-    
+
     /// Optional gRPC address (e.g., "0.0.0.0:9090")
     pub grpc_address: Option<String>,
-    
+
     /// Maximum number of concurrent connections
     pub max_connections: usize,
-    
+
     /// Interval between flushes in milliseconds
     pub flush_interval: u64,
-    
+
     /// Number of blocks between state persistence
     pub persist_interval: u64,
-    
+
     /// Number of recent blocks to retain
     pub retain_blocks: u64,
+
+    /// Chain ID for the network
+    pub chain_id: String,
 }
 
 impl Default for AbciConfig {
@@ -33,6 +36,7 @@ impl Default for AbciConfig {
             flush_interval: 100,
             persist_interval: 1,
             retain_blocks: 0, // Keep all blocks by default
+            chain_id: "helium-1".to_string(),
         }
     }
 }

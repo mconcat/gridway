@@ -20,9 +20,9 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::info;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
+use tracing::info;
 // NOTE: REST gateway integration disabled due to compilation dependencies
 // Use the rest module directly when baseapp conflicts are resolved
 
