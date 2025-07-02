@@ -453,7 +453,6 @@ mod tests {
     use super::*;
     use crate::grpc::bank::Query;
     use helium_baseapp::BaseApp;
-    use helium_store::MemStore;
 
     async fn create_test_service() -> BankService {
         // Create StateManager with unique temp directory for each test

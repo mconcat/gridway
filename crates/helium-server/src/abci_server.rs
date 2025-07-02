@@ -785,8 +785,10 @@ mod tests {
 
         let response = server.check_tx(request).await.unwrap();
         let result = response.into_inner();
-        // Basic validation should pass for now
-        assert_eq!(result.code, 0);
+        // Without a valid tx_decoder module, invalid transactions will fail
+        // The test transaction [1, 2, 3, 4] is not a valid encoded transaction
+        assert_eq!(result.code, 1);
+        assert!(result.log.contains("no messages") || result.log.contains("decode failed"));
     }
 
     #[tokio::test]
