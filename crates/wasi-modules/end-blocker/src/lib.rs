@@ -426,6 +426,7 @@ impl WasiEndBlockHandler {
 #[no_mangle]
 pub extern "C" fn end_block() -> i32 {
     // Initialize logging
+    #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     let handler = WasiEndBlockHandler::new();

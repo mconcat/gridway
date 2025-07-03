@@ -473,7 +473,8 @@ struct SignDoc {
 /// This function is called by the WASI host to process transactions
 #[no_mangle]
 pub extern "C" fn ante_handle() -> i32 {
-    // Initialize logging
+    // Initialize logging (only for non-WASM targets)
+    #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     let mut handler = WasiAnteHandler::new();

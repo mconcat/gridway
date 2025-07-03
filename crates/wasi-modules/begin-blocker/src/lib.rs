@@ -348,6 +348,7 @@ impl WasiBeginBlockHandler {
 #[no_mangle]
 pub extern "C" fn begin_block() -> i32 {
     // Initialize logging
+    #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     let mut handler = WasiBeginBlockHandler::new();

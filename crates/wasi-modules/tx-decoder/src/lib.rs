@@ -447,7 +447,8 @@ fn decode_msg_vote(_bytes: &[u8]) -> TxDecodeResult<serde_json::Value> {
 /// This function is called by the WASI host to decode transactions
 #[no_mangle]
 pub extern "C" fn decode_tx() -> i32 {
-    // Initialize logging
+    // Initialize logging (only for non-WASM targets)
+    #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     let decoder = WasiTxDecoder::new();
