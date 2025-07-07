@@ -1,6 +1,7 @@
 //! Request-scoped context for the host environment
 
 use helium_store::GlobalAppStore;
+use helium_proto::cometbft::abci::v1::{Event, EventAttribute};
 
 /// Host-side context for request processing
 ///
@@ -46,19 +47,6 @@ impl EventManager {
     pub fn clear(&mut self) {
         self.events.clear();
     }
-}
-
-/// ABCI Event
-#[derive(Clone, Debug)]
-pub struct Event {
-    pub ty: String,
-    pub attributes: Vec<EventAttribute>,
-}
-
-#[derive(Clone, Debug)]
-pub struct EventAttribute {
-    pub key: String,
-    pub value: String,
 }
 
 /// Gas meter trait for tracking gas consumption

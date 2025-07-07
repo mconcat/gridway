@@ -684,7 +684,7 @@ impl BaseApp {
                 .and_then(|g| g.as_u64())
                 .unwrap_or(200000) as i64,
             gas_used: total_gas_used as i64,
-            events: vec![],
+            events,
             codespace: String::new(),
         })
     }
@@ -903,7 +903,7 @@ impl BaseApp {
                                 info: String::new(),
                                 gas_wanted: 100000_i64,
                                 gas_used: total_gas_used as i64,
-                                events: vec![],
+                                events,
                                 codespace: String::new(),
                             });
                         }
@@ -944,7 +944,7 @@ impl BaseApp {
                                 info: String::new(),
                                 gas_wanted: 200000_i64,
                                 gas_used: total_gas_used as i64,
-                                events: vec![],
+                                events,
                                 codespace: String::new(),
                             });
                         }
@@ -985,7 +985,7 @@ impl BaseApp {
                                 info: String::new(),
                                 gas_wanted: 300000_i64,
                                 gas_used: total_gas_used as i64,
-                                events: vec![],
+                                events,
                                 codespace: String::new(),
                             });
                         }
@@ -1015,7 +1015,7 @@ impl BaseApp {
                         info: String::new(),
                         gas_wanted: 100000_i64,
                         gas_used: total_gas_used as i64,
-                        events: vec![],
+                        events,
                         codespace: String::new(),
                     });
                 }
@@ -1029,7 +1029,7 @@ impl BaseApp {
             info: String::new(),
             gas_wanted: (total_gas_used + 10000) as i64,
             gas_used: total_gas_used as i64,
-            events: vec![],
+            events,
             codespace: String::new(),
         })
     }
