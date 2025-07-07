@@ -1,7 +1,7 @@
 //! Request-scoped context for the host environment
 
+use helium_proto::cometbft::abci::v1::Event;
 use helium_store::GlobalAppStore;
-use helium_proto::cometbft::abci::v1::{Event, EventAttribute};
 
 /// Host-side context for request processing
 ///

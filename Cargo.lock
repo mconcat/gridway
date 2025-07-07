@@ -1928,6 +1928,7 @@ dependencies = [
  "dirs 5.0.1",
  "helium-codec",
  "helium-math",
+ "helium-proto",
  "helium-store",
  "prost 0.12.6",
  "ripemd",
