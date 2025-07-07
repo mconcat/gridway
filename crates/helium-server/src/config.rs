@@ -25,6 +25,18 @@ pub struct AbciConfig {
 
     /// Chain ID for the network
     pub chain_id: String,
+
+    /// Directory for storing snapshots (optional)
+    pub snapshot_dir: Option<String>,
+
+    /// Interval between snapshots (in blocks)
+    pub snapshot_interval: u64,
+
+    /// Maximum number of snapshots to keep
+    pub max_snapshots: usize,
+
+    /// Maximum number of validators
+    pub max_validators: usize,
 }
 
 impl Default for AbciConfig {
@@ -37,6 +49,10 @@ impl Default for AbciConfig {
             persist_interval: 1,
             retain_blocks: 0, // Keep all blocks by default
             chain_id: "helium-1".to_string(),
+            snapshot_dir: Some("data/snapshots".to_string()),
+            snapshot_interval: 10000, // Every 10k blocks
+            max_snapshots: 3,
+            max_validators: 100,
         }
     }
 }

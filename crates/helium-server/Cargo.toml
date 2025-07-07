@@ -33,6 +33,7 @@ helium-log = { path = "../helium-log" }
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
+tempfile = "3.8"
 
 [build-dependencies]
 tonic-build = "0.11"

@@ -5,9 +5,12 @@
 
 pub mod abci_server;
 pub mod config;
+pub mod consensus;
 pub mod grpc;
 pub mod rest;
 pub mod services;
+pub mod snapshot;
+pub mod validators;
 
 use axum::{
     extract::State,
