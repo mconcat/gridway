@@ -13,10 +13,8 @@ use helium_proto::{
     cometbft::abci::v1::{Event as ProtoEvent, EventAttribute as ProtoEventAttribute},
     cosmos::{
         base::abci::v1beta1::{
-            AbciMessageLog as ProtoABCIMessageLog, 
-            StringEvent as ProtoStringEvent, 
-            Attribute as ProtoStringAttribute,
-            Event as CosmosEvent,
+            AbciMessageLog as ProtoABCIMessageLog, Attribute as ProtoStringAttribute,
+            Event as CosmosEvent, StringEvent as ProtoStringEvent,
         },
         tx::v1beta1::{GasInfo as ProtoGasInfo, Result as ProtoTxResult},
     },
@@ -56,11 +54,15 @@ impl From<CosmosEvent> for Event {
     fn from(proto: CosmosEvent) -> Self {
         Self {
             r#type: proto.r#type,
-            attributes: proto.attributes.into_iter().map(|attr| EventAttribute {
-                key: String::from_utf8_lossy(&attr.key).to_string(),
-                value: String::from_utf8_lossy(&attr.value).to_string(),
-                index: attr.index,
-            }).collect(),
+            attributes: proto
+                .attributes
+                .into_iter()
+                .map(|attr| EventAttribute {
+                    key: String::from_utf8_lossy(&attr.key).to_string(),
+                    value: String::from_utf8_lossy(&attr.value).to_string(),
+                    index: attr.index,
+                })
+                .collect(),
         }
     }
 }
@@ -530,8 +532,6 @@ pub struct AuthParams {
     /// Signature verification cost for secp256k1
     pub sig_verify_cost_secp256k1: u64,
 }
-
-
 
 /// Transaction
 #[derive(Clone, Debug, Deserialize, Serialize)]
