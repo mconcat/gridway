@@ -153,18 +153,41 @@ impl SnapshotManager {
             .as_u64()
             .ok_or_else(|| SnapshotError::InvalidFormat("Missing height".to_string()))?;
 
+        let format = metadata["format"]
+            .as_u64()
+            .ok_or_else(|| SnapshotError::InvalidFormat("Missing format".to_string()))?
+            as u32;
+
+        let chunks = metadata["chunks"]
+            .as_u64()
+            .ok_or_else(|| SnapshotError::InvalidFormat("Missing chunks".to_string()))?
+            as u32;
+
+        let hash_str = metadata["hash"]
+            .as_str()
+            .ok_or_else(|| SnapshotError::InvalidFormat("Missing hash".to_string()))?;
+
+        let hash = hex::decode(hash_str)
+            .map_err(|_| SnapshotError::InvalidFormat("Invalid hash encoding".to_string()))?;
+
+        let metadata_str = metadata["metadata"].as_str().unwrap_or("{}");
+
+        let created_at = metadata["created_at"]
+            .as_u64()
+            .ok_or_else(|| SnapshotError::InvalidFormat("Missing created_at".to_string()))?;
+
+        let size = metadata["size"]
+            .as_u64()
+            .ok_or_else(|| SnapshotError::InvalidFormat("Missing size".to_string()))?;
+
         let snapshot_metadata = SnapshotMetadata {
             height,
-            format: metadata["format"].as_u64().unwrap_or(1) as u32,
-            chunks: metadata["chunks"].as_u64().unwrap_or(0) as u32,
-            hash: hex::decode(metadata["hash"].as_str().unwrap_or("")).unwrap_or_default(),
-            metadata: metadata["metadata"]
-                .as_str()
-                .unwrap_or("{}")
-                .as_bytes()
-                .to_vec(),
-            created_at: metadata["created_at"].as_u64().unwrap_or(0),
-            size: metadata["size"].as_u64().unwrap_or(0),
+            format,
+            chunks,
+            hash,
+            metadata: metadata_str.as_bytes().to_vec(),
+            created_at,
+            size,
         };
 
         Ok((height, snapshot_metadata))
@@ -254,17 +277,30 @@ impl SnapshotManager {
 
     /// Export state from BaseApp
     async fn export_state(&self, app: &BaseApp) -> Result<Vec<u8>> {
-        // For now, we'll create a simple state export
-        // In a real implementation, this would serialize the entire state tree
+        let height = app.get_height();
+        let app_hash = app.get_last_app_hash();
+
+        // Create state export with metadata
         let state_export = serde_json::json!({
-            "height": app.get_height(),
-            "app_hash": hex::encode(app.get_last_app_hash()),
+            "version": self.format_version,
+            "height": height,
+            "app_hash": hex::encode(app_hash),
             "timestamp": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            // TODO: Export actual state data from stores
-            "stores": {},
+            // Store data would be exported here
+            // For now, we include minimal state information
+            "stores": {
+                "metadata": {
+                    "height": height,
+                    "hash": hex::encode(app_hash),
+                }
+            },
+            // In a full implementation, we would iterate through all stores
+            // and export their key-value pairs. This requires access to the
+            // underlying storage layer which is not yet exposed in BaseApp.
+            "note": "Full state export requires storage layer integration"
         });
 
         serde_json::to_vec(&state_export).map_err(|e| SnapshotError::Serialization(e.to_string()))
@@ -316,7 +352,10 @@ impl SnapshotManager {
             .join(height.to_string())
             .join(format!("chunk_{chunk_index:06}.dat"));
 
-        std::fs::read(&chunk_path).map_err(|_| SnapshotError::ChunkNotFound(chunk_index))
+        std::fs::read(&chunk_path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => SnapshotError::ChunkNotFound(chunk_index),
+            _ => SnapshotError::Io(e),
+        })
     }
 
     /// Verify snapshot integrity
@@ -370,13 +409,47 @@ impl SnapshotManager {
         let state_export: serde_json::Value = serde_json::from_slice(data)
             .map_err(|e| SnapshotError::Serialization(e.to_string()))?;
 
-        // TODO: Import actual state data to stores
-        // For now, we just validate the format
-        let _height = state_export["height"]
+        // Validate format version
+        let version = state_export["version"]
+            .as_u64()
+            .ok_or_else(|| SnapshotError::InvalidFormat("Missing version".to_string()))?;
+
+        if version != self.format_version as u64 {
+            return Err(SnapshotError::InvalidFormat(format!(
+                "Unsupported snapshot version: {version}, expected: {}",
+                self.format_version
+            )));
+        }
+
+        // Extract metadata
+        let height = state_export["height"]
             .as_u64()
             .ok_or_else(|| SnapshotError::InvalidFormat("Missing height".to_string()))?;
 
-        debug!("State import completed");
+        let app_hash_str = state_export["app_hash"]
+            .as_str()
+            .ok_or_else(|| SnapshotError::InvalidFormat("Missing app_hash".to_string()))?;
+
+        let _app_hash = hex::decode(app_hash_str)
+            .map_err(|_| SnapshotError::InvalidFormat("Invalid app_hash format".to_string()))?;
+
+        // In a full implementation, we would:
+        // 1. Clear existing state
+        // 2. Import key-value pairs from the snapshot
+        // 3. Update BaseApp's internal state (height, app_hash)
+
+        // For now, we log what would be imported
+        info!(
+            "Would import state at height {} with app_hash {}",
+            height, app_hash_str
+        );
+
+        // Note: BaseApp needs methods to:
+        // - Set the current height
+        // - Set the app hash
+        // - Access the underlying storage for state import
+
+        debug!("State import validated (full import pending storage integration)");
         Ok(())
     }
 
@@ -478,5 +551,167 @@ mod tests {
         // Different data should produce different hash
         let hash3 = manager.calculate_hash(b"different data");
         assert_ne!(hash1, hash3);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_metadata_loading() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SnapshotManager::new(temp_dir.path().to_path_buf()).unwrap();
+
+        // Create metadata file
+        let snapshot_dir = temp_dir.path().join("100");
+        std::fs::create_dir_all(&snapshot_dir).unwrap();
+
+        let metadata_json = serde_json::json!({
+            "height": 100,
+            "format": 1,
+            "chunks": 5,
+            "hash": "abcd1234",
+            "metadata": "{\"chain_id\":\"test\"}",
+            "created_at": 1234567890,
+            "size": 1024000,
+        });
+
+        let metadata_path = snapshot_dir.join("metadata.json");
+        std::fs::write(
+            &metadata_path,
+            serde_json::to_string_pretty(&metadata_json).unwrap(),
+        )
+        .unwrap();
+
+        // Load metadata
+        let (height, metadata) = manager.load_snapshot_metadata(&metadata_path).unwrap();
+
+        assert_eq!(height, 100);
+        assert_eq!(metadata.height, 100);
+        assert_eq!(metadata.format, 1);
+        assert_eq!(metadata.chunks, 5);
+        assert_eq!(hex::encode(&metadata.hash), "abcd1234");
+        assert_eq!(metadata.created_at, 1234567890);
+        assert_eq!(metadata.size, 1024000);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_metadata_validation() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SnapshotManager::new(temp_dir.path().to_path_buf()).unwrap();
+
+        // Create invalid metadata files
+        let snapshot_dir = temp_dir.path().join("100");
+        std::fs::create_dir_all(&snapshot_dir).unwrap();
+
+        // Missing required fields
+        let invalid_jsons = vec![
+            serde_json::json!({}),                                        // Empty
+            serde_json::json!({"format": 1}),                             // Missing height
+            serde_json::json!({"height": 100}),                           // Missing format
+            serde_json::json!({"height": 100, "format": 1}),              // Missing chunks
+            serde_json::json!({"height": 100, "format": 1, "chunks": 5}), // Missing hash
+            serde_json::json!({"height": 100, "format": 1, "chunks": 5, "hash": "invalid-hex"}), // Invalid hash
+        ];
+
+        for (i, invalid_json) in invalid_jsons.iter().enumerate() {
+            let metadata_path = snapshot_dir.join(format!("metadata_{}.json", i));
+            std::fs::write(&metadata_path, serde_json::to_string(invalid_json).unwrap()).unwrap();
+
+            // Should fail to load
+            assert!(manager.load_snapshot_metadata(&metadata_path).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_pruning() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut manager = SnapshotManager::new(temp_dir.path().to_path_buf()).unwrap();
+        manager.max_snapshots = 2; // Keep only 2 snapshots
+
+        // Create mock snapshots
+        for height in [100, 200, 300] {
+            let snapshot_dir = temp_dir.path().join(height.to_string());
+            std::fs::create_dir_all(&snapshot_dir).unwrap();
+
+            // Create a chunk file
+            let chunk_path = snapshot_dir.join("chunk_000000.dat");
+            std::fs::write(&chunk_path, b"test data").unwrap();
+
+            // Create metadata
+            let metadata = SnapshotMetadata {
+                height,
+                format: 1,
+                chunks: 1,
+                hash: vec![0u8; 32],
+                metadata: vec![],
+                created_at: height,
+                size: 9,
+            };
+
+            // Add to cache
+            manager.snapshots.write().await.insert(height, metadata);
+        }
+
+        // Prune old snapshots
+        manager.prune_old_snapshots().await.unwrap();
+
+        // Check that only the two most recent snapshots remain
+        let snapshots = manager.list_snapshots().await;
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[0].height, 300); // Most recent
+        assert_eq!(snapshots[1].height, 200);
+
+        // Check that the oldest snapshot was deleted from disk
+        assert!(!temp_dir.path().join("100").exists());
+        assert!(temp_dir.path().join("200").exists());
+        assert!(temp_dir.path().join("300").exists());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_chunk_error_handling() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SnapshotManager::new(temp_dir.path().to_path_buf()).unwrap();
+
+        // Create a snapshot with metadata but missing chunk
+        let height = 100;
+        let snapshot_dir = temp_dir.path().join(height.to_string());
+        std::fs::create_dir_all(&snapshot_dir).unwrap();
+
+        let metadata = SnapshotMetadata {
+            height,
+            format: 1,
+            chunks: 2,
+            hash: vec![0u8; 32],
+            metadata: vec![],
+            created_at: 1234567890,
+            size: 1000,
+        };
+
+        manager.snapshots.write().await.insert(height, metadata);
+
+        // Try to load non-existent chunk
+        let result = manager.load_chunk(height, 0).await;
+        assert!(matches!(result, Err(SnapshotError::ChunkNotFound(0))));
+
+        // Try to load out-of-range chunk
+        let result = manager.load_chunk(height, 5).await;
+        assert!(matches!(result, Err(SnapshotError::ChunkNotFound(5))));
+
+        // Create a chunk file with permission error (simulate IO error)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let chunk_path = snapshot_dir.join("chunk_000001.dat");
+            std::fs::write(&chunk_path, b"test").unwrap();
+            let mut perms = std::fs::metadata(&chunk_path).unwrap().permissions();
+            perms.set_mode(0o000); // No permissions
+            std::fs::set_permissions(&chunk_path, perms).unwrap();
+
+            // Should return IO error, not ChunkNotFound
+            let result = manager.load_chunk(height, 1).await;
+            assert!(matches!(result, Err(SnapshotError::Io(_))));
+
+            // Cleanup permissions
+            let mut perms = std::fs::metadata(&chunk_path).unwrap().permissions();
+            perms.set_mode(0o644);
+            std::fs::set_permissions(&chunk_path, perms).unwrap();
+        }
     }
 }

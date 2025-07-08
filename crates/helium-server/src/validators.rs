@@ -82,19 +82,17 @@ impl ValidatorManager {
         let store = self.store.read().await;
         let mut validators = self.validators.write().await;
 
-        // Load validator count
-        if let Some(count_bytes) = store
-            .get(b"validators/count")
+        // Load validator addresses for stable ordering
+        if let Some(addr_list_bytes) = store
+            .get(b"validators/addresses")
             .map_err(|e| ValidatorError::Store(e.to_string()))?
         {
-            let count =
-                u32::from_be_bytes(count_bytes.try_into().map_err(|_| {
-                    ValidatorError::Serialization("Invalid count format".to_string())
-                })?);
+            let addresses: Vec<String> = serde_json::from_slice(&addr_list_bytes)
+                .map_err(|e| ValidatorError::Serialization(e.to_string()))?;
 
-            // Load each validator
-            for i in 0..count {
-                let key = format!("validators/{i}");
+            // Load each validator by address
+            for addr_hex in addresses {
+                let key = format!("validators/addr/{addr_hex}");
                 if let Some(val_bytes) = store
                     .get(key.as_bytes())
                     .map_err(|e| ValidatorError::Store(e.to_string()))?
@@ -106,6 +104,34 @@ impl ValidatorManager {
             }
 
             info!("Loaded {} validators from store", validators.len());
+        } else {
+            // Fallback: try loading with old format for backward compatibility
+            if let Some(count_bytes) = store
+                .get(b"validators/count")
+                .map_err(|e| ValidatorError::Store(e.to_string()))?
+            {
+                let count = u32::from_be_bytes(count_bytes.try_into().map_err(|_| {
+                    ValidatorError::Serialization("Invalid count format".to_string())
+                })?);
+
+                // Load each validator
+                for i in 0..count {
+                    let key = format!("validators/{i}");
+                    if let Some(val_bytes) = store
+                        .get(key.as_bytes())
+                        .map_err(|e| ValidatorError::Store(e.to_string()))?
+                    {
+                        let validator: ValidatorInfo = serde_json::from_slice(&val_bytes)
+                            .map_err(|e| ValidatorError::Serialization(e.to_string()))?;
+                        validators.insert(validator.address.clone(), validator);
+                    }
+                }
+
+                info!(
+                    "Loaded {} validators from store (legacy format)",
+                    validators.len()
+                );
+            }
         }
 
         Ok(())
@@ -116,20 +142,34 @@ impl ValidatorManager {
         let validators = self.validators.read().await;
         let mut store = self.store.write().await;
 
-        // Save validator count
+        // Save validator count (kept for backward compatibility)
         let count = validators.len() as u32;
         store
             .set(b"validators/count", &count.to_be_bytes())
             .map_err(|e| ValidatorError::Store(e.to_string()))?;
 
-        // Save each validator
-        for (i, validator) in validators.values().enumerate() {
-            let key = format!("validators/{i}");
+        // Collect and save validator addresses for stable ordering
+        let addresses: Vec<String> = validators.keys().map(hex::encode).collect();
+        let addr_bytes = serde_json::to_vec(&addresses)
+            .map_err(|e| ValidatorError::Serialization(e.to_string()))?;
+        store
+            .set(b"validators/addresses", &addr_bytes)
+            .map_err(|e| ValidatorError::Store(e.to_string()))?;
+
+        // Save each validator by address
+        for (address, validator) in validators.iter() {
+            let key = format!("validators/addr/{}", hex::encode(address));
             let val_bytes = serde_json::to_vec(validator)
                 .map_err(|e| ValidatorError::Serialization(e.to_string()))?;
             store
                 .set(key.as_bytes(), &val_bytes)
                 .map_err(|e| ValidatorError::Store(e.to_string()))?;
+        }
+
+        // Clean up old indexed entries if they exist
+        for i in 0..count {
+            let old_key = format!("validators/{i}");
+            let _ = store.delete(old_key.as_bytes());
         }
 
         debug!("Saved {} validators to store", validators.len());
@@ -396,5 +436,183 @@ mod tests {
         // Check power reduced to 900
         let validator = manager.get_validator(&address).await.unwrap();
         assert_eq!(validator.power, 900);
+    }
+
+    #[tokio::test]
+    async fn test_validator_persistence() {
+        let manager = ValidatorManager::new(100);
+
+        // Add multiple validators
+        let validators = vec![
+            (vec![1, 1, 1], 1000, vec![1, 2, 3]),
+            (vec![2, 2, 2], 2000, vec![4, 5, 6]),
+            (vec![3, 3, 3], 3000, vec![7, 8, 9]),
+        ];
+
+        for (addr, power, pubkey) in &validators {
+            manager
+                .update_validator(addr.clone(), *power, pubkey.clone(), 1)
+                .await
+                .unwrap();
+        }
+
+        // Save to store
+        manager.save_validators().await.unwrap();
+
+        // Create new manager with same store
+        // We need to create a new MemStore since we can't clone the trait object
+        let mut new_store = Box::new(MemStore::new()) as Box<dyn KVStore>;
+
+        // Copy the validator data from the original store
+        {
+            let original_store = manager.store.read().await;
+
+            // Copy validator count
+            if let Some(count_bytes) = original_store.get(b"validators/count").unwrap() {
+                new_store.set(b"validators/count", &count_bytes).unwrap();
+            }
+
+            // Copy addresses list
+            if let Some(addr_bytes) = original_store.get(b"validators/addresses").unwrap() {
+                new_store.set(b"validators/addresses", &addr_bytes).unwrap();
+
+                // Copy each validator
+                let addresses: Vec<String> = serde_json::from_slice(&addr_bytes).unwrap();
+                for addr_hex in addresses {
+                    let key = format!("validators/addr/{addr_hex}");
+                    if let Some(val_bytes) = original_store.get(key.as_bytes()).unwrap() {
+                        new_store.set(key.as_bytes(), &val_bytes).unwrap();
+                    }
+                }
+            }
+        }
+
+        let new_manager = ValidatorManager::with_store(new_store, 100);
+
+        // Load validators
+        new_manager.load_validators().await.unwrap();
+
+        // Verify all validators were loaded correctly
+        for (addr, expected_power, expected_pubkey) in &validators {
+            let validator = new_manager.get_validator(addr).await.unwrap();
+            assert_eq!(validator.power, *expected_power);
+            assert_eq!(validator.pub_key, *expected_pubkey);
+        }
+
+        // Verify count
+        let all_validators = new_manager.get_validators().await;
+        assert_eq!(all_validators.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_validator_persistence_backward_compatibility() {
+        // Test that we can still load validators saved with the old format
+        let store = Arc::new(RwLock::new(Box::new(MemStore::new()) as Box<dyn KVStore>));
+
+        // Save validators in old format
+        {
+            let mut store_guard = store.write().await;
+
+            // Save count
+            store_guard
+                .set(b"validators/count", &3u32.to_be_bytes())
+                .unwrap();
+
+            // Save validators with indexed keys (old format)
+            let validators = vec![
+                ValidatorInfo {
+                    address: vec![1, 1, 1],
+                    power: 1000,
+                    pub_key: vec![1, 2, 3],
+                    last_update_height: 1,
+                    active: true,
+                },
+                ValidatorInfo {
+                    address: vec![2, 2, 2],
+                    power: 2000,
+                    pub_key: vec![4, 5, 6],
+                    last_update_height: 1,
+                    active: true,
+                },
+                ValidatorInfo {
+                    address: vec![3, 3, 3],
+                    power: 3000,
+                    pub_key: vec![7, 8, 9],
+                    last_update_height: 1,
+                    active: true,
+                },
+            ];
+
+            for (i, validator) in validators.iter().enumerate() {
+                let key = format!("validators/{i}");
+                let val_bytes = serde_json::to_vec(validator).unwrap();
+                store_guard.set(key.as_bytes(), &val_bytes).unwrap();
+            }
+        }
+
+        // Load with new manager
+        let store_box = {
+            let store_guard = store.read().await;
+            // Create a new MemStore and copy data
+            let mut new_store = Box::new(MemStore::new()) as Box<dyn KVStore>;
+
+            // Copy all old format data
+            if let Some(count_bytes) = store_guard.get(b"validators/count").unwrap() {
+                new_store.set(b"validators/count", &count_bytes).unwrap();
+            }
+            for i in 0..3 {
+                let key = format!("validators/{i}");
+                if let Some(val_bytes) = store_guard.get(key.as_bytes()).unwrap() {
+                    new_store.set(key.as_bytes(), &val_bytes).unwrap();
+                }
+            }
+            new_store
+        };
+
+        let manager = ValidatorManager::with_store(store_box, 100);
+        manager.load_validators().await.unwrap();
+
+        // Verify validators were loaded
+        let all_validators = manager.get_validators().await;
+        assert_eq!(all_validators.len(), 3);
+
+        // Save again (should use new format)
+        manager.save_validators().await.unwrap();
+
+        // Create another manager and load
+        let mut final_store = Box::new(MemStore::new()) as Box<dyn KVStore>;
+
+        // Copy data from manager's store
+        {
+            let manager_store = manager.store.read().await;
+
+            // Copy all relevant keys
+            for key in [
+                b"validators/count".as_slice(),
+                b"validators/addresses".as_slice(),
+            ] {
+                if let Some(data) = manager_store.get(key).unwrap() {
+                    final_store.set(key, &data).unwrap();
+                }
+            }
+
+            // Copy validator data
+            if let Some(addr_bytes) = manager_store.get(b"validators/addresses").unwrap() {
+                let addresses: Vec<String> = serde_json::from_slice(&addr_bytes).unwrap();
+                for addr_hex in addresses {
+                    let key = format!("validators/addr/{addr_hex}");
+                    if let Some(val_bytes) = manager_store.get(key.as_bytes()).unwrap() {
+                        final_store.set(key.as_bytes(), &val_bytes).unwrap();
+                    }
+                }
+            }
+        }
+
+        let new_manager = ValidatorManager::with_store(final_store, 100);
+        new_manager.load_validators().await.unwrap();
+
+        // Verify still works
+        let all_validators = new_manager.get_validators().await;
+        assert_eq!(all_validators.len(), 3);
     }
 }

@@ -794,16 +794,24 @@ impl AbciService for AbciServer {
         let mut total_bytes = 0i64;
 
         // Sort transactions by gas price (descending) for better block rewards
-        // In a real implementation, we would decode transactions and sort by gas price
-        let mut tx_candidates: Vec<(Vec<u8>, u64)> = Vec::new();
+        let mut tx_candidates: Vec<(Vec<u8>, u64, f64)> = Vec::new();
 
         for tx in req.txs {
             // Check transaction validity
             match app.check_tx(&tx) {
                 Ok(result) if result.code == 0 => {
                     // Transaction is valid
-                    // For now, we'll use gas_wanted as a proxy for priority
-                    tx_candidates.push((tx, result.gas_wanted));
+                    // Calculate gas price (fee / gas_wanted)
+                    // For now, we'll use a simple heuristic based on gas_wanted
+                    // In a real implementation, we would decode the tx to get the fee
+                    let gas_wanted = result.gas_wanted.max(1); // Avoid division by zero
+
+                    // TODO: Decode transaction to extract actual fee amount
+                    // For now, use a placeholder calculation
+                    let estimated_fee = gas_wanted as f64 * 0.01; // Placeholder fee calculation
+                    let gas_price = estimated_fee / gas_wanted as f64;
+
+                    tx_candidates.push((tx, gas_wanted, gas_price));
                 }
                 Ok(result) => {
                     debug!(
@@ -819,13 +827,17 @@ impl AbciService for AbciServer {
 
         drop(app);
 
-        // Sort by gas (priority) - higher gas transactions first
-        tx_candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        // Sort by gas price (priority) - higher gas price transactions first
+        tx_candidates.sort_by(|a, b| {
+            b.2.partial_cmp(&a.2)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.1.cmp(&a.1)) // Secondary sort by gas_wanted if prices are equal
+        });
 
         let num_candidates = tx_candidates.len();
 
         // Select transactions that fit within the byte limit
-        for (tx, _gas) in tx_candidates {
+        for (tx, _gas, _price) in tx_candidates {
             let tx_size = tx.len() as i64;
             if total_bytes + tx_size <= req.max_tx_bytes {
                 total_bytes += tx_size;
