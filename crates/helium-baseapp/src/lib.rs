@@ -147,10 +147,20 @@ pub struct QueryResponse {
 pub enum ExecMode {
     /// Check mode (validation only)
     Check,
+    /// ReCheck mode (re-validation in mempool)
+    ReCheck,
     /// Simulate mode
     Simulate,
-    /// Deliver mode (actual execution)
-    Deliver,
+    /// Prepare proposal mode (block proposer)
+    PrepareProposal,
+    /// Process proposal mode (block validation)
+    ProcessProposal,
+    /// Vote extension mode
+    VoteExtension,
+    /// Verify vote extension mode
+    VerifyVoteExtension,
+    /// Finalize mode (actual execution, previously Deliver)
+    Finalize,
 }
 
 /// Execution context
@@ -301,7 +311,7 @@ impl BaseApp {
             height,
             time,
             chain_id.clone(),
-            ExecMode::Deliver,
+            ExecMode::Finalize,
         ));
 
         // Load and execute BeginBlock WASI module
@@ -599,6 +609,11 @@ impl BaseApp {
 
     /// Check transaction validity
     pub fn check_tx(&self, tx_bytes: &[u8]) -> Result<TxResponse> {
+        self.check_tx_with_mode(tx_bytes, ExecMode::Check)
+    }
+
+    /// Check transaction validity with specific execution mode
+    pub fn check_tx_with_mode(&self, tx_bytes: &[u8], _mode: ExecMode) -> Result<TxResponse> {
         // First decode the transaction using WASI TxDecoder module
         let decoded_tx = self.decode_transaction_wasi(tx_bytes)?;
 
@@ -830,6 +845,102 @@ impl BaseApp {
         Ok(())
     }
 
+    /// Prepare a block proposal
+    pub fn prepare_proposal(
+        &mut self,
+        height: u64,
+        time: u64,
+        chain_id: String,
+        txs: Vec<Vec<u8>>,
+    ) -> Result<Vec<Vec<u8>>> {
+        // Set context with PrepareProposal mode
+        self.context = Some(Context::new(
+            height,
+            time,
+            chain_id,
+            ExecMode::PrepareProposal,
+        ));
+
+        // TODO: Implement transaction ordering, filtering, and addition via WASI modules
+        // For now, just return the same transactions
+        let result_txs = txs;
+
+        // Clear context after proposal preparation
+        self.context = None;
+
+        Ok(result_txs)
+    }
+
+    /// Process a block proposal
+    pub fn process_proposal(
+        &mut self,
+        height: u64,
+        time: u64,
+        chain_id: String,
+        _txs: &[Vec<u8>],
+    ) -> Result<bool> {
+        // Set context with ProcessProposal mode
+        self.context = Some(Context::new(
+            height,
+            time,
+            chain_id,
+            ExecMode::ProcessProposal,
+        ));
+
+        // TODO: Implement proposal validation via WASI modules
+        // For now, accept all proposals
+        let accept = true;
+
+        // Clear context after proposal processing
+        self.context = None;
+
+        Ok(accept)
+    }
+
+    /// Extend vote with application-specific data
+    pub fn extend_vote(&mut self, height: u64, time: u64, chain_id: String) -> Result<Vec<u8>> {
+        // Set context with VoteExtension mode
+        self.context = Some(Context::new(
+            height,
+            time,
+            chain_id,
+            ExecMode::VoteExtension,
+        ));
+
+        // TODO: Implement vote extension via WASI modules
+        let extension = vec![];
+
+        // Clear context
+        self.context = None;
+
+        Ok(extension)
+    }
+
+    /// Verify a vote extension
+    pub fn verify_vote_extension(
+        &mut self,
+        height: u64,
+        time: u64,
+        chain_id: String,
+        _vote_extension: &[u8],
+    ) -> Result<bool> {
+        // Set context with VerifyVoteExtension mode
+        self.context = Some(Context::new(
+            height,
+            time,
+            chain_id,
+            ExecMode::VerifyVoteExtension,
+        ));
+
+        // TODO: Implement vote extension verification via WASI modules
+        let valid = true;
+
+        // Clear context
+        self.context = None;
+
+        Ok(valid)
+    }
+
     /// Finalize block processing
     pub fn finalize_block(
         &mut self,
@@ -991,6 +1102,12 @@ impl BaseApp {
                 }
                 _ => {
                     // Route to module router for other message types
+                    let exec_mode = self
+                        .context
+                        .as_ref()
+                        .map(|ctx| ctx.exec_mode)
+                        .unwrap_or(ExecMode::Finalize);
+
                     let _execution_context = ExecutionContext {
                         message_type: type_url.to_string(),
                         message_data: serde_json::to_vec(msg_value).map_err(|e| {
@@ -1002,6 +1119,7 @@ impl BaseApp {
                             ctx.insert("height".to_string(), height.to_string());
                             ctx
                         },
+                        exec_mode,
                     };
 
                     // TODO: Create a proper SdkMsg implementation for unknown message types
@@ -1142,7 +1260,7 @@ mod tests {
         assert_eq!(ctx.block_height, 1);
         assert_eq!(ctx.block_time, 1234567890);
         assert_eq!(ctx.chain_id, "test-chain");
-        assert_eq!(ctx.exec_mode, ExecMode::Deliver);
+        assert_eq!(ctx.exec_mode, ExecMode::Finalize);
 
         app.end_block().unwrap();
         assert!(app.context.is_none());
@@ -1254,5 +1372,123 @@ mod tests {
         let response = app.check_tx(tx_bytes).unwrap();
         // Should fail because transaction decoder will have issues with mock data
         assert_eq!(response.code, 1);
+    }
+
+    #[test]
+    fn test_prepare_proposal() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+
+        let txs = vec![vec![1, 2, 3], vec![4, 5, 6]];
+        let result = app
+            .prepare_proposal(1, 1234567890, "test-chain".to_string(), txs.clone())
+            .unwrap();
+
+        // For now, prepare_proposal returns the same transactions
+        assert_eq!(result.len(), 2);
+        assert_eq!(result, txs);
+    }
+
+    #[test]
+    fn test_process_proposal() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+
+        let txs = vec![vec![1, 2, 3], vec![4, 5, 6]];
+        let accept = app
+            .process_proposal(1, 1234567890, "test-chain".to_string(), &txs)
+            .unwrap();
+
+        // For now, process_proposal accepts all proposals
+        assert!(accept);
+    }
+
+    #[test]
+    fn test_extend_vote() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+
+        let extension = app
+            .extend_vote(1, 1234567890, "test-chain".to_string())
+            .unwrap();
+
+        // For now, extend_vote returns empty extension
+        assert!(extension.is_empty());
+    }
+
+    #[test]
+    fn test_verify_vote_extension() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+
+        let vote_extension = vec![1, 2, 3];
+        let valid = app
+            .verify_vote_extension(1, 1234567890, "test-chain".to_string(), &vote_extension)
+            .unwrap();
+
+        // For now, verify_vote_extension accepts all extensions
+        assert!(valid);
+    }
+
+    #[test]
+    fn test_check_tx_with_recheck_mode() {
+        let app = BaseApp::new("test-app".to_string()).unwrap();
+
+        // Test with ReCheck mode
+        let response = app
+            .check_tx_with_mode(b"dummy_tx", ExecMode::ReCheck)
+            .unwrap();
+        // Should fail because the transaction will decode to have no messages
+        assert_eq!(response.code, 1);
+        assert_eq!(response.log, "transaction contains no messages");
+    }
+
+    #[test]
+    fn test_execution_context_exec_mode() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+
+        // Test PrepareProposal mode
+        app.context = Some(Context::new(
+            1,
+            1234567890,
+            "test-chain".to_string(),
+            ExecMode::PrepareProposal,
+        ));
+        assert_eq!(
+            app.context.as_ref().unwrap().exec_mode,
+            ExecMode::PrepareProposal
+        );
+
+        // Test ProcessProposal mode
+        app.context = Some(Context::new(
+            1,
+            1234567890,
+            "test-chain".to_string(),
+            ExecMode::ProcessProposal,
+        ));
+        assert_eq!(
+            app.context.as_ref().unwrap().exec_mode,
+            ExecMode::ProcessProposal
+        );
+
+        // Test VoteExtension mode
+        app.context = Some(Context::new(
+            1,
+            1234567890,
+            "test-chain".to_string(),
+            ExecMode::VoteExtension,
+        ));
+        assert_eq!(
+            app.context.as_ref().unwrap().exec_mode,
+            ExecMode::VoteExtension
+        );
+
+        // Test VerifyVoteExtension mode
+        app.context = Some(Context::new(
+            1,
+            1234567890,
+            "test-chain".to_string(),
+            ExecMode::VerifyVoteExtension,
+        ));
+        assert_eq!(
+            app.context.as_ref().unwrap().exec_mode,
+            ExecMode::VerifyVoteExtension
+        );
     }
 }

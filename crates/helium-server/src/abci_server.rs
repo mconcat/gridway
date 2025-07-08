@@ -370,8 +370,15 @@ impl AbciService for AbciServer {
         debug!("ABCI CheckTx: {} bytes, type={}", req.tx.len(), req.r#type);
 
         let app = self.app.read().await;
+
+        // Determine execution mode based on check tx type
+        let exec_mode = match req.r#type {
+            1 => helium_baseapp::ExecMode::ReCheck, // RECHECK = 1
+            _ => helium_baseapp::ExecMode::Check,   // NEW = 0 or any other value
+        };
+
         let result = app
-            .check_tx(&req.tx)
+            .check_tx_with_mode(&req.tx, exec_mode)
             .map_err(|e| Status::internal(format!("CheckTx failed: {e}")))?;
 
         Ok(Response::new(CheckTxResponse {
@@ -488,9 +495,20 @@ impl AbciService for AbciServer {
             req.max_tx_bytes
         );
 
-        // For now, just return the same transactions
-        // TODO: Implement transaction reordering, filtering, and addition
-        let txs = req.txs;
+        let mut app = self.app.write().await;
+
+        // Convert timestamp
+        let block_time = req.time.as_ref().map(|t| t.seconds as u64).unwrap_or(0);
+
+        // Prepare proposal through BaseApp
+        let txs = app
+            .prepare_proposal(
+                req.height as u64,
+                block_time,
+                self.chain_id.clone(),
+                req.txs,
+            )
+            .map_err(|e| Status::internal(format!("PrepareProposal failed: {e}")))?;
 
         Ok(Response::new(PrepareProposalResponse { txs }))
     }
@@ -508,12 +526,26 @@ impl AbciService for AbciServer {
             hex::encode(&req.proposer_address)
         );
 
-        // Basic validation
-        // TODO: Implement full proposal validation via WASI modules
-        let _app = self.app.write().await;
+        let mut app = self.app.write().await;
 
-        // For now, accept all valid proposals
-        let status = ProcessProposalStatus::AcceptProposal;
+        // Convert timestamp
+        let block_time = req.time.as_ref().map(|t| t.seconds as u64).unwrap_or(0);
+
+        // Process proposal through BaseApp
+        let accept = app
+            .process_proposal(
+                req.height as u64,
+                block_time,
+                self.chain_id.clone(),
+                &req.txs,
+            )
+            .map_err(|e| Status::internal(format!("ProcessProposal failed: {e}")))?;
+
+        let status = if accept {
+            ProcessProposalStatus::AcceptProposal
+        } else {
+            ProcessProposalStatus::RejectProposal
+        };
 
         Ok(Response::new(ProcessProposalResponse {
             status: status.into(),
@@ -528,10 +560,17 @@ impl AbciService for AbciServer {
         let req = request.into_inner();
         debug!("ABCI ExtendVote: height={}", req.height);
 
-        // TODO: Implement vote extensions when needed
-        Ok(Response::new(ExtendVoteResponse {
-            vote_extension: vec![],
-        }))
+        let mut app = self.app.write().await;
+
+        // Convert timestamp
+        let block_time = req.time.as_ref().map(|t| t.seconds as u64).unwrap_or(0);
+
+        // Generate vote extension through BaseApp
+        let vote_extension = app
+            .extend_vote(req.height as u64, block_time, self.chain_id.clone())
+            .map_err(|e| Status::internal(format!("ExtendVote failed: {e}")))?;
+
+        Ok(Response::new(ExtendVoteResponse { vote_extension }))
     }
 
     /// VerifyVoteExtension verifies application-specific vote extension data
@@ -546,9 +585,29 @@ impl AbciService for AbciServer {
             hex::encode(&req.validator_address)
         );
 
-        // TODO: Implement vote extension verification when needed
+        let mut app = self.app.write().await;
+
+        // VerifyVoteExtension doesn't have a time field, so use 0
+        let block_time = 0;
+
+        // Verify vote extension through BaseApp
+        let valid = app
+            .verify_vote_extension(
+                req.height as u64,
+                block_time,
+                self.chain_id.clone(),
+                &req.vote_extension,
+            )
+            .map_err(|e| Status::internal(format!("VerifyVoteExtension failed: {e}")))?;
+
+        let status = if valid {
+            VerifyVoteExtensionStatus::AcceptVote
+        } else {
+            VerifyVoteExtensionStatus::RejectVote
+        };
+
         Ok(Response::new(VerifyVoteExtensionResponse {
-            status: VerifyVoteExtensionStatus::AcceptVote.into(),
+            status: status.into(),
         }))
     }
 

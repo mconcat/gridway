@@ -204,6 +204,8 @@ pub struct ExecutionContext {
     pub gas_limit: u64,
     /// Transaction context (height, timestamp, etc.)
     pub tx_context: HashMap<String, String>,
+    /// Execution mode
+    pub exec_mode: crate::ExecMode,
 }
 
 /// Inter-module communication message
@@ -503,11 +505,23 @@ impl ModuleRouter {
         context: &ExecutionContext,
     ) -> Result<Vec<u8>> {
         // Create a standardized message envelope for WASM modules
+        let exec_mode_str = match context.exec_mode {
+            crate::ExecMode::Check => "check",
+            crate::ExecMode::ReCheck => "recheck",
+            crate::ExecMode::Simulate => "simulate",
+            crate::ExecMode::PrepareProposal => "prepare_proposal",
+            crate::ExecMode::ProcessProposal => "process_proposal",
+            crate::ExecMode::VoteExtension => "vote_extension",
+            crate::ExecMode::VerifyVoteExtension => "verify_vote_extension",
+            crate::ExecMode::Finalize => "finalize",
+        };
+
         let envelope = MessageEnvelope {
             type_url: message.type_url().to_string(),
             message_data: message.encode(),
             gas_limit: context.gas_limit,
             tx_context: context.tx_context.clone(),
+            exec_mode: exec_mode_str.to_string(),
         };
 
         // Serialize to JSON for now (could be protobuf in the future)
@@ -807,6 +821,8 @@ struct MessageEnvelope {
     gas_limit: u64,
     /// Transaction context
     tx_context: HashMap<String, String>,
+    /// Execution mode
+    exec_mode: String,
 }
 
 #[cfg(test)]
