@@ -8,6 +8,220 @@ pub mod services;
 use serde::{Deserialize, Serialize};
 use tonic::{Request, Response, Status};
 
+// Import proto types for wrapping
+use helium_proto::{
+    cometbft::abci::v1::{Event as ProtoEvent, EventAttribute as ProtoEventAttribute},
+    cosmos::{
+        base::abci::v1beta1::{
+            AbciMessageLog as ProtoABCIMessageLog, 
+            StringEvent as ProtoStringEvent, 
+            Attribute as ProtoStringAttribute,
+            Event as CosmosEvent,
+        },
+        tx::v1beta1::{GasInfo as ProtoGasInfo, Result as ProtoTxResult},
+    },
+};
+
+// Import the proto TxResponse for internal use
+use helium_proto::cosmos::tx::v1beta1::TxResponse as ProtoTxResponse;
+
+// Serde wrappers for proto types that need REST API serialization
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Event {
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub attributes: Vec<EventAttribute>,
+}
+
+impl From<ProtoEvent> for Event {
+    fn from(proto: ProtoEvent) -> Self {
+        Self {
+            r#type: proto.r#type,
+            attributes: proto.attributes.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<Event> for ProtoEvent {
+    fn from(event: Event) -> Self {
+        Self {
+            r#type: event.r#type,
+            attributes: event.attributes.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<CosmosEvent> for Event {
+    fn from(proto: CosmosEvent) -> Self {
+        Self {
+            r#type: proto.r#type,
+            attributes: proto.attributes.into_iter().map(|attr| EventAttribute {
+                key: String::from_utf8_lossy(&attr.key).to_string(),
+                value: String::from_utf8_lossy(&attr.value).to_string(),
+                index: attr.index,
+            }).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct EventAttribute {
+    pub key: String,
+    pub value: String,
+    pub index: bool,
+}
+
+impl From<ProtoEventAttribute> for EventAttribute {
+    fn from(proto: ProtoEventAttribute) -> Self {
+        Self {
+            key: proto.key,
+            value: proto.value,
+            index: proto.index,
+        }
+    }
+}
+
+impl From<EventAttribute> for ProtoEventAttribute {
+    fn from(attr: EventAttribute) -> Self {
+        Self {
+            key: attr.key,
+            value: attr.value,
+            index: attr.index,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ABCIMessageLog {
+    pub msg_index: u32,
+    pub log: String,
+    pub events: Vec<StringEvent>,
+}
+
+impl From<ProtoABCIMessageLog> for ABCIMessageLog {
+    fn from(proto: ProtoABCIMessageLog) -> Self {
+        Self {
+            msg_index: proto.msg_index,
+            log: proto.log,
+            events: proto.events.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct StringEvent {
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub attributes: Vec<StringAttribute>,
+}
+
+impl From<ProtoStringEvent> for StringEvent {
+    fn from(proto: ProtoStringEvent) -> Self {
+        Self {
+            r#type: proto.r#type,
+            attributes: proto.attributes.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct StringAttribute {
+    pub key: String,
+    pub value: String,
+}
+
+impl From<ProtoStringAttribute> for StringAttribute {
+    fn from(proto: ProtoStringAttribute) -> Self {
+        Self {
+            key: proto.key,
+            value: proto.value,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct GasInfo {
+    pub gas_wanted: u64,
+    pub gas_used: u64,
+}
+
+impl From<ProtoGasInfo> for GasInfo {
+    fn from(proto: ProtoGasInfo) -> Self {
+        Self {
+            gas_wanted: proto.gas_wanted as u64,
+            gas_used: proto.gas_used as u64,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Result_ {
+    #[serde(with = "base64_bytes")]
+    pub data: Vec<u8>,
+    pub log: String,
+    pub events: Vec<Event>,
+}
+
+impl From<ProtoTxResult> for Result_ {
+    fn from(proto: ProtoTxResult) -> Self {
+        Self {
+            data: proto.data,
+            log: proto.log,
+            // ProtoTxResult contains CosmosEvent which needs conversion
+            events: proto.events.into_iter().map(|e| Event::from(e)).collect(),
+        }
+    }
+}
+
+// Wrapper for TxResponse with serde support
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TxResponse {
+    /// Block height
+    pub height: i64,
+    /// Transaction hash
+    pub txhash: String,
+    /// Response code  
+    pub code: u32,
+    /// Response data
+    pub data: String,
+    /// Raw log
+    pub raw_log: String,
+    /// Parsed logs
+    pub logs: Vec<ABCIMessageLog>,
+    /// Additional info
+    pub info: String,
+    /// Gas wanted
+    pub gas_wanted: i64,
+    /// Gas used
+    pub gas_used: i64,
+    /// Transaction (using serde_json::Value to avoid Any issues)
+    pub tx: Option<serde_json::Value>,
+    /// Timestamp
+    pub timestamp: String,
+    /// Events
+    pub events: Vec<Event>,
+}
+
+impl From<ProtoTxResponse> for TxResponse {
+    fn from(proto: ProtoTxResponse) -> Self {
+        Self {
+            height: proto.height,
+            txhash: proto.txhash,
+            code: proto.code,
+            data: proto.data,
+            raw_log: proto.raw_log,
+            logs: proto.logs.into_iter().map(Into::into).collect(),
+            info: proto.info,
+            gas_wanted: proto.gas_wanted,
+            gas_used: proto.gas_used,
+            tx: None, // Proto tx contains Any which doesn't serialize well
+            timestamp: proto.timestamp,
+            events: proto.events.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 /// Bank service for balance queries and transfers
 pub mod bank {
     use super::*;
@@ -317,26 +531,7 @@ pub struct AuthParams {
     pub sig_verify_cost_secp256k1: u64,
 }
 
-/// Gas information
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct GasInfo {
-    /// Gas wanted
-    pub gas_wanted: u64,
-    /// Gas used
-    pub gas_used: u64,
-}
 
-/// Transaction execution result
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Result_ {
-    /// Result data
-    #[serde(with = "base64_bytes")]
-    pub data: Vec<u8>,
-    /// Log message
-    pub log: String,
-    /// Events emitted
-    pub events: Vec<Event>,
-}
 
 /// Transaction
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -431,86 +626,6 @@ pub struct Fee {
     pub payer: String,
     /// Granter address
     pub granter: String,
-}
-
-/// Transaction response
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TxResponse {
-    /// Block height
-    pub height: i64,
-    /// Transaction hash
-    pub txhash: String,
-    /// Response code
-    pub code: u32,
-    /// Response data
-    pub data: String,
-    /// Raw log
-    pub raw_log: String,
-    /// Parsed logs
-    pub logs: Vec<ABCIMessageLog>,
-    /// Additional info
-    pub info: String,
-    /// Gas wanted
-    pub gas_wanted: i64,
-    /// Gas used
-    pub gas_used: i64,
-    /// Transaction
-    pub tx: Option<Any>,
-    /// Timestamp
-    pub timestamp: String,
-    /// Events
-    pub events: Vec<Event>,
-}
-
-/// ABCI message log
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ABCIMessageLog {
-    /// Message index
-    pub msg_index: u32,
-    /// Log message
-    pub log: String,
-    /// Events
-    pub events: Vec<StringEvent>,
-}
-
-/// String event (for ABCI logs)
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct StringEvent {
-    /// Event type
-    #[serde(rename = "type")]
-    pub type_: String,
-    /// Attributes
-    pub attributes: Vec<StringAttribute>,
-}
-
-/// String attribute
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct StringAttribute {
-    /// Key
-    pub key: String,
-    /// Value
-    pub value: String,
-}
-
-/// Event
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Event {
-    /// Event type
-    #[serde(rename = "type")]
-    pub type_: String,
-    /// Attributes
-    pub attributes: Vec<EventAttribute>,
-}
-
-/// Event attribute
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct EventAttribute {
-    /// Key
-    pub key: String,
-    /// Value
-    pub value: String,
-    /// Index flag
-    pub index: bool,
 }
 
 /// Broadcast mode

@@ -261,7 +261,7 @@ impl tx::Service for TxService {
                         .events
                         .into_iter()
                         .map(|event| Event {
-                            type_: event.r#type,
+                            r#type: event.r#type,
                             attributes: event
                                 .attributes
                                 .into_iter()
@@ -327,7 +327,7 @@ impl tx::Service for TxService {
             tx: None,
             timestamp: "2024-01-01T12:00:00Z".to_string(),
             events: vec![Event {
-                type_: "transfer".to_string(),
+                r#type: "transfer".to_string(),
                 attributes: vec![
                     EventAttribute {
                         key: "sender".to_string(),

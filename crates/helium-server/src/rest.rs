@@ -448,7 +448,7 @@ async fn broadcast_tx(
                                 .events
                                 .into_iter()
                                 .map(|event| TxEvent {
-                                    event_type: event.type_,
+                                    event_type: event.r#type,
                                     attributes: event
                                         .attributes
                                         .into_iter()
@@ -566,7 +566,7 @@ async fn simulate_tx(
                         .events
                         .into_iter()
                         .map(|event| TxEvent {
-                            event_type: event.type_,
+                            event_type: event.r#type,
                             attributes: event
                                 .attributes
                                 .into_iter()
