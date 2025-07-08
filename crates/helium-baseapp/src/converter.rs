@@ -2,6 +2,19 @@
 
 use crate::{Attribute as EventAttribute, Event, TxResponse};
 
+/// Parameters for creating a TxResponse
+#[allow(clippy::too_many_arguments)]
+pub struct TxResponseParams {
+    pub code: u32,
+    pub log: String,
+    pub info: String,
+    pub data: Vec<u8>,
+    pub gas_wanted: i64,
+    pub gas_used: i64,
+    pub events: Vec<Event>,
+    pub codespace: String,
+}
+
 /// Convert events from internal module representation to proto Event type
 pub fn convert_module_events(events: Vec<crate::module_router::ModuleEvent>) -> Vec<Event> {
     events
@@ -22,6 +35,7 @@ pub fn convert_module_events(events: Vec<crate::module_router::ModuleEvent>) -> 
 }
 
 /// Create a TxResponse with the given parameters
+#[allow(clippy::too_many_arguments)]
 pub fn create_tx_response(
     code: u32,
     log: String,
