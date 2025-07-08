@@ -789,7 +789,11 @@ mod tests {
         // Without a valid tx_decoder module, invalid transactions will fail
         // The test transaction [1, 2, 3, 4] is not a valid encoded transaction
         assert_eq!(result.code, 1);
-        assert!(result.log.contains("no messages") || result.log.contains("decode failed"));
+        assert!(
+            result.log.contains("no messages")
+                || result.log.contains("decode failed")
+                || result.log.contains("ante handler")
+        );
     }
 
     #[tokio::test]

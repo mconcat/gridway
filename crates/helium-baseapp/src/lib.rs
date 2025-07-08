@@ -3,7 +3,6 @@
 //! This crate provides the core application interface and ABCI implementation
 //! for helium blockchain applications.
 
-// Note: ante module removed - transaction validation handled by WASI modules
 pub mod abi;
 pub mod ante;
 pub mod capabilities;
@@ -18,6 +17,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 // Import microkernel components
+use crate::ante::{AnteContext, WasiAnteHandler};
 use crate::capabilities::CapabilityManager;
 use crate::module_governance::ModuleGovernance;
 use crate::module_router::{ExecutionContext, ModuleRouter};
@@ -199,6 +199,8 @@ pub struct BaseApp {
     module_governance: Arc<ModuleGovernance>,
     /// Module paths for WASI modules
     module_paths: HashMap<String, String>,
+    /// Ante handler for transaction validation
+    ante_handler: Arc<std::sync::Mutex<WasiAnteHandler>>,
 }
 
 impl BaseApp {
@@ -246,6 +248,24 @@ impl BaseApp {
             "tx_decoder".to_string(),
             "modules/tx_decoder.wasm".to_string(),
         );
+        module_paths.insert(
+            "ante_handler".to_string(),
+            "modules/ante_handler.wasm".to_string(),
+        );
+
+        // Initialize ante handler
+        let mut ante_handler = WasiAnteHandler::new().map_err(|e| {
+            BaseAppError::InitChainFailed(format!("Failed to create ante handler: {e}"))
+        })?;
+
+        // Try to load the ante handler module
+        if let Some(ante_path) = module_paths.get("ante_handler") {
+            if let Err(e) = ante_handler.load_module("default", ante_path) {
+                log::warn!("Failed to load ante handler module from {ante_path}: {e}");
+            }
+        }
+
+        let ante_handler = Arc::new(std::sync::Mutex::new(ante_handler));
 
         Ok(Self {
             name,
@@ -256,6 +276,7 @@ impl BaseApp {
             capability_manager,
             module_governance,
             module_paths,
+            ante_handler,
         })
     }
 
@@ -602,35 +623,60 @@ impl BaseApp {
         // First decode the transaction using WASI TxDecoder module
         let decoded_tx = self.decode_transaction_wasi(tx_bytes)?;
 
-        // Then validate using ante handler WASI module (if available)
-        // For now, basic validation based on decoded transaction
-        if decoded_tx
-            .get("body")
-            .and_then(|b| b.get("messages"))
-            .and_then(|m| m.as_array())
-            .is_none_or(|a| a.is_empty())
-        {
-            return Ok(TxResponse {
-                code: 1,
-                log: "transaction contains no messages".to_string(),
-                gas_used: 0,
-                gas_wanted: 0,
-                events: vec![],
-            });
-        }
+        // Convert the decoded transaction to RawTx for ante handler
+        let raw_tx = self.convert_to_raw_tx(&decoded_tx)?;
 
-        Ok(TxResponse {
-            code: 0,
-            log: "transaction validated successfully".to_string(),
-            gas_used: 10000,
-            gas_wanted: decoded_tx
-                .get("auth_info")
-                .and_then(|a| a.get("fee"))
-                .and_then(|f| f.get("gas_limit"))
-                .and_then(|g| g.as_u64())
-                .unwrap_or(200000),
-            events: vec![],
-        })
+        // Create ante context for validation
+        let ctx = self
+            .context
+            .as_ref()
+            .map(|c| AnteContext {
+                block_height: c.block_height,
+                block_time: c.block_time,
+                chain_id: c.chain_id.clone(),
+                gas_limit: raw_tx.auth_info.fee.gas_limit,
+                min_gas_price: 1, // TODO: Get from config
+            })
+            .unwrap_or_else(|| AnteContext {
+                block_height: 0,
+                block_time: 0,
+                chain_id: "helium-1".to_string(),
+                gas_limit: raw_tx.auth_info.fee.gas_limit,
+                min_gas_price: 1,
+            });
+
+        // Execute ante handler for validation
+        let mut ante_handler = self.ante_handler.lock().unwrap();
+        match ante_handler.handle(&ctx, &raw_tx) {
+            Ok(response) => Ok(TxResponse {
+                code: response.code,
+                log: response.log,
+                gas_used: response.gas_used,
+                gas_wanted: response.gas_wanted,
+                events: response
+                    .events
+                    .into_iter()
+                    .map(|e| Event {
+                        event_type: e.event_type,
+                        attributes: e
+                            .attributes
+                            .into_iter()
+                            .map(|a| Attribute {
+                                key: a.key,
+                                value: a.value,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            }),
+            Err(e) => Ok(TxResponse {
+                code: 1,
+                log: format!("ante handler validation failed: {e}"),
+                gas_used: 0,
+                gas_wanted: ctx.gas_limit,
+                events: vec![],
+            }),
+        }
     }
 
     /// Deliver transaction
@@ -642,6 +688,54 @@ impl BaseApp {
         // Decode transaction using WASI TxDecoder module
         let decoded_tx = self.decode_transaction_wasi(tx_bytes)?;
 
+        // Convert to RawTx for ante handler
+        let raw_tx = self.convert_to_raw_tx(&decoded_tx)?;
+
+        // Create ante context
+        let ctx = self
+            .context
+            .as_ref()
+            .map(|c| AnteContext {
+                block_height: c.block_height,
+                block_time: c.block_time,
+                chain_id: c.chain_id.clone(),
+                gas_limit: raw_tx.auth_info.fee.gas_limit,
+                min_gas_price: 1, // TODO: Get from config
+            })
+            .expect("context should exist");
+
+        // Execute ante handler validation
+        let ante_response = {
+            let mut ante_handler = self.ante_handler.lock().unwrap();
+            ante_handler
+                .handle(&ctx, &raw_tx)
+                .map_err(|e| BaseAppError::TxFailed(format!("ante handler error: {e}")))?
+        };
+
+        if ante_response.code != 0 {
+            return Ok(TxResponse {
+                code: ante_response.code,
+                log: ante_response.log,
+                gas_used: ante_response.gas_used,
+                gas_wanted: ante_response.gas_wanted,
+                events: ante_response
+                    .events
+                    .into_iter()
+                    .map(|e| Event {
+                        event_type: e.event_type,
+                        attributes: e
+                            .attributes
+                            .into_iter()
+                            .map(|a| Attribute {
+                                key: a.key,
+                                value: a.value,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            });
+        }
+
         // Extract messages and route to appropriate modules
         let messages = decoded_tx
             .get("body")
@@ -649,8 +743,22 @@ impl BaseApp {
             .and_then(|m| m.as_array())
             .ok_or_else(|| BaseAppError::InvalidTx("no messages in transaction".to_string()))?;
 
-        let mut total_gas_used = 0u64;
-        let mut events = Vec::new();
+        let mut total_gas_used = ante_response.gas_used;
+        let mut events = ante_response
+            .events
+            .into_iter()
+            .map(|e| Event {
+                event_type: e.event_type,
+                attributes: e
+                    .attributes
+                    .into_iter()
+                    .map(|a| Attribute {
+                        key: a.key,
+                        value: a.value,
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
 
         for (idx, msg) in messages.iter().enumerate() {
             let type_url = msg
@@ -800,6 +908,161 @@ impl BaseApp {
                 }
             }))
         }
+    }
+
+    /// Convert decoded JSON transaction to RawTx
+    fn convert_to_raw_tx(&self, decoded_tx: &serde_json::Value) -> Result<helium_types::RawTx> {
+        use helium_types::{
+            tx::{ModeInfo, ModeInfoSingle},
+            AuthInfo, Fee, FeeAmount, SignerInfo, TxBody, TxMessage,
+        };
+
+        // Extract body
+        let body = decoded_tx.get("body").ok_or_else(|| {
+            BaseAppError::InvalidTx("missing body in decoded transaction".to_string())
+        })?;
+
+        let messages = body
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| BaseAppError::InvalidTx("missing messages in body".to_string()))?
+            .iter()
+            .map(|msg| {
+                Ok(TxMessage {
+                    type_url: msg
+                        .get("type_url")
+                        .and_then(|t| t.as_str())
+                        .ok_or_else(|| {
+                            BaseAppError::InvalidTx("message missing type_url".to_string())
+                        })?
+                        .to_string(),
+                    value: msg
+                        .get("value")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.as_bytes().to_vec())
+                        .unwrap_or_default(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let tx_body = TxBody {
+            messages,
+            memo: body
+                .get("memo")
+                .and_then(|m| m.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            timeout_height: body
+                .get("timeout_height")
+                .and_then(|h| h.as_u64())
+                .unwrap_or(0),
+        };
+
+        // Extract auth_info
+        let auth_info = decoded_tx.get("auth_info").ok_or_else(|| {
+            BaseAppError::InvalidTx("missing auth_info in decoded transaction".to_string())
+        })?;
+
+        let signer_infos = auth_info
+            .get("signer_infos")
+            .and_then(|s| s.as_array())
+            .unwrap_or(&vec![])
+            .iter()
+            .map(|signer| {
+                let public_key = signer
+                    .get("public_key")
+                    .and_then(|pk| pk.as_object())
+                    .map(|pk| TxMessage {
+                        type_url: pk
+                            .get("type_url")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        value: pk
+                            .get("value")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.as_bytes().to_vec())
+                            .unwrap_or_default(),
+                    });
+
+                Ok(SignerInfo {
+                    public_key,
+                    mode_info: ModeInfo {
+                        single: Some(ModeInfoSingle {
+                            mode: signer
+                                .get("mode_info")
+                                .and_then(|m| m.get("mode"))
+                                .and_then(|m| m.as_u64())
+                                .unwrap_or(1) as u32,
+                        }),
+                    },
+                    sequence: signer.get("sequence").and_then(|s| s.as_u64()).unwrap_or(0),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let fee = auth_info
+            .get("fee")
+            .ok_or_else(|| BaseAppError::InvalidTx("missing fee in auth_info".to_string()))?;
+
+        let amount = fee
+            .get("amount")
+            .and_then(|a| a.as_array())
+            .unwrap_or(&vec![])
+            .iter()
+            .map(|coin| FeeAmount {
+                denom: coin
+                    .get("denom")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("uhelium")
+                    .to_string(),
+                amount: coin
+                    .get("amount")
+                    .and_then(|a| a.as_str())
+                    .unwrap_or("0")
+                    .to_string(),
+            })
+            .collect();
+
+        let tx_auth_info = AuthInfo {
+            signer_infos,
+            fee: Fee {
+                amount,
+                gas_limit: fee
+                    .get("gas_limit")
+                    .and_then(|g| g.as_u64())
+                    .unwrap_or(200000),
+                payer: fee
+                    .get("payer")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                granter: fee
+                    .get("granter")
+                    .and_then(|g| g.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            },
+        };
+
+        // Extract signatures
+        let signatures = decoded_tx
+            .get("signatures")
+            .and_then(|s| s.as_array())
+            .unwrap_or(&vec![])
+            .iter()
+            .map(|sig| {
+                sig.as_str()
+                    .map(|s| s.as_bytes().to_vec())
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        Ok(helium_types::RawTx {
+            body: tx_body,
+            auth_info: tx_auth_info,
+            signatures,
+        })
     }
 
     /// Commit the current block
@@ -1152,11 +1415,14 @@ mod tests {
     fn test_check_tx() {
         let app = BaseApp::new("test-app".to_string()).unwrap();
 
-        // Transaction validation via WASI TxDecoder
+        // Transaction validation via WASI TxDecoder and ante handler
         let response = app.check_tx(b"dummy_tx").unwrap();
-        // Should fail because the transaction will decode to have no messages
+        // Should fail because ante handler module is not loaded
         assert_eq!(response.code, 1);
-        assert_eq!(response.log, "transaction contains no messages");
+        assert!(
+            response.log.contains("ante handler validation failed")
+                || response.log.contains("ante handler error")
+        );
     }
 
     #[test]
@@ -1167,13 +1433,12 @@ mod tests {
         let result = app.deliver_tx(b"tx");
         assert!(result.is_err());
 
-        // With context - transaction will be decoded and processed
+        // With context - transaction will be decoded but ante handler fails
         app.begin_block(1, 1234567890, "test-chain".to_string())
             .unwrap();
-        let response = app.deliver_tx(b"tx").unwrap();
-        assert_eq!(response.code, 0);
-        assert_eq!(response.log, "executed 0 messages"); // No messages in placeholder tx
-        assert_eq!(response.gas_used, 0); // No messages to execute
+        let result = app.deliver_tx(b"tx");
+        // Should fail because ante handler module is not loaded
+        assert!(result.is_err() || (result.is_ok() && result.unwrap().code != 0));
     }
 
     #[test]
