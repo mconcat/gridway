@@ -290,8 +290,8 @@ impl TxService {
                 }],
             }).collect(),
             info: String::new(),
-            gas_wanted: response.gas_wanted as i64,
-            gas_used: response.gas_used as i64,
+            gas_wanted: response.gas_wanted,
+            gas_used: response.gas_used,
             tx: None, // Would contain decoded transaction
             timestamp: chrono::Utc::now().to_rfc3339(),
             events: response.events.iter().map(|event| Event {

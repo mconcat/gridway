@@ -375,8 +375,8 @@ impl AbciService for AbciServer {
             data: vec![],
             log: result.log,
             info: String::new(),
-            gas_wanted: result.gas_wanted as i64,
-            gas_used: result.gas_used as i64,
+            gas_wanted: result.gas_wanted,
+            gas_used: result.gas_used,
             events: convert_events(result.events),
             codespace: String::new(),
         }))
