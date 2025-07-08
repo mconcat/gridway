@@ -151,8 +151,8 @@ pub struct GasInfo {
 impl From<ProtoGasInfo> for GasInfo {
     fn from(proto: ProtoGasInfo) -> Self {
         Self {
-            gas_wanted: proto.gas_wanted as u64,
-            gas_used: proto.gas_used as u64,
+            gas_wanted: proto.gas_wanted,
+            gas_used: proto.gas_used,
         }
     }
 }
@@ -171,7 +171,7 @@ impl From<ProtoTxResult> for Result_ {
             data: proto.data,
             log: proto.log,
             // ProtoTxResult contains CosmosEvent which needs conversion
-            events: proto.events.into_iter().map(|e| Event::from(e)).collect(),
+            events: proto.events.into_iter().map(Event::from).collect(),
         }
     }
 }
