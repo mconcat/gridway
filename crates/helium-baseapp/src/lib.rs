@@ -7,6 +7,7 @@
 pub mod abi;
 pub mod ante;
 pub mod capabilities;
+pub mod converter;
 pub mod module_governance;
 pub mod module_router;
 pub mod vfs;
@@ -584,33 +585,28 @@ impl BaseApp {
             .and_then(|m| m.as_array())
             .is_none_or(|a| a.is_empty())
         {
-            return Ok(TxResponse {
-                code: 1,
-                data: vec![],
-                log: "transaction contains no messages".to_string(),
-                info: String::new(),
-                gas_wanted: 0_i64,
-                gas_used: 0_i64,
-                events: vec![],
-                codespace: String::new(),
-            });
+            return Ok(converter::failed_tx_response(
+                1,
+                "transaction contains no messages".to_string(),
+                String::new(),
+                0,
+            ));
         }
 
-        Ok(TxResponse {
-            code: 0,
-            data: vec![],
-            log: "transaction validated successfully".to_string(),
-            info: String::new(),
-            gas_wanted: decoded_tx
-                .get("auth_info")
-                .and_then(|a| a.get("fee"))
-                .and_then(|f| f.get("gas_limit"))
-                .and_then(|g| g.as_u64())
-                .unwrap_or(200000) as i64,
-            gas_used: 10000_i64,
-            events: vec![],
-            codespace: String::new(),
-        })
+        let gas_wanted = decoded_tx
+            .get("auth_info")
+            .and_then(|a| a.get("fee"))
+            .and_then(|f| f.get("gas_limit"))
+            .and_then(|g| g.as_u64())
+            .unwrap_or(200000) as i64;
+
+        Ok(converter::success_tx_response(
+            "transaction validated successfully".to_string(),
+            vec![],
+            gas_wanted,
+            10000,  // TODO: Calculate actual gas used during check_tx
+            vec![], // TODO: CheckTx doesn't emit events in current implementation
+        ))
     }
 
     /// Deliver transaction
@@ -672,21 +668,20 @@ impl BaseApp {
             });
         }
 
-        Ok(TxResponse {
-            code: 0,
-            data: vec![],
-            log: format!("executed {} messages", messages.len()),
-            info: String::new(),
-            gas_wanted: decoded_tx
-                .get("auth_info")
-                .and_then(|a| a.get("fee"))
-                .and_then(|f| f.get("gas_limit"))
-                .and_then(|g| g.as_u64())
-                .unwrap_or(200000) as i64,
-            gas_used: total_gas_used as i64,
+        let gas_wanted = decoded_tx
+            .get("auth_info")
+            .and_then(|a| a.get("fee"))
+            .and_then(|f| f.get("gas_limit"))
+            .and_then(|g| g.as_u64())
+            .unwrap_or(200000) as i64;
+
+        Ok(converter::success_tx_response(
+            format!("executed {} messages", messages.len()),
+            vec![],
+            gas_wanted,
+            total_gas_used as i64,
             events,
-            codespace: String::new(),
-        })
+        ))
     }
 
     /// Extract module name from message type URL
@@ -833,16 +828,13 @@ impl BaseApp {
                 Ok(response) => responses.push(response),
                 Err(e) => {
                     // Transaction failed - create error response
-                    responses.push(TxResponse {
-                        code: 1,
-                        data: vec![],
-                        log: format!("Transaction {i} failed: {e}"),
-                        info: String::new(),
-                        gas_wanted: 0,
-                        gas_used: 0,
-                        events: vec![],
-                        codespace: String::new(),
-                    });
+                    // Failed transactions typically don't emit events
+                    responses.push(converter::failed_tx_response(
+                        1,
+                        format!("Transaction {i} failed: {e}"),
+                        String::new(),
+                        0,
+                    ));
                 }
             }
         }
@@ -896,16 +888,16 @@ impl BaseApp {
                             total_gas_used += 50000; // Base gas cost for storing code
                         }
                         Err(e) => {
-                            return Ok(TxResponse {
-                                code: 1,
-                                data: vec![],
-                                log: format!("store_code failed: {e}"),
-                                info: String::new(),
-                                gas_wanted: 100000_i64,
-                                gas_used: total_gas_used as i64,
+                            return Ok(converter::create_tx_response(
+                                1,
+                                format!("store_code failed: {e}"),
+                                String::new(),
+                                vec![],
+                                100000_i64,
+                                total_gas_used as i64,
                                 events,
-                                codespace: String::new(),
-                            });
+                                String::new(),
+                            ));
                         }
                     }
                 }
@@ -937,16 +929,16 @@ impl BaseApp {
                             total_gas_used += 100000; // Base gas cost for installing module
                         }
                         Err(e) => {
-                            return Ok(TxResponse {
-                                code: 1,
-                                data: vec![],
-                                log: format!("install_module failed: {e}"),
-                                info: String::new(),
-                                gas_wanted: 200000_i64,
-                                gas_used: total_gas_used as i64,
+                            return Ok(converter::create_tx_response(
+                                1,
+                                format!("install_module failed: {e}"),
+                                String::new(),
+                                vec![],
+                                200000_i64,
+                                total_gas_used as i64,
                                 events,
-                                codespace: String::new(),
-                            });
+                                String::new(),
+                            ));
                         }
                     }
                 }
@@ -978,16 +970,16 @@ impl BaseApp {
                             total_gas_used += 150000; // Base gas cost for upgrading module
                         }
                         Err(e) => {
-                            return Ok(TxResponse {
-                                code: 1,
-                                data: vec![],
-                                log: format!("upgrade_module failed: {e}"),
-                                info: String::new(),
-                                gas_wanted: 300000_i64,
-                                gas_used: total_gas_used as i64,
+                            return Ok(converter::create_tx_response(
+                                1,
+                                format!("upgrade_module failed: {e}"),
+                                String::new(),
+                                vec![],
+                                300000_i64,
+                                total_gas_used as i64,
                                 events,
-                                codespace: String::new(),
-                            });
+                                String::new(),
+                            ));
                         }
                     }
                 }
@@ -1008,30 +1000,27 @@ impl BaseApp {
 
                     // TODO: Create a proper SdkMsg implementation for unknown message types
                     // For now, return an error for unhandled message types
-                    return Ok(TxResponse {
-                        code: 1,
-                        data: vec![],
-                        log: format!("unhandled message type: {type_url}"),
-                        info: String::new(),
-                        gas_wanted: 100000_i64,
-                        gas_used: total_gas_used as i64,
+                    return Ok(converter::create_tx_response(
+                        1,
+                        format!("unhandled message type: {type_url}"),
+                        String::new(),
+                        vec![],
+                        100000_i64,
+                        total_gas_used as i64,
                         events,
-                        codespace: String::new(),
-                    });
+                        String::new(),
+                    ));
                 }
             }
         }
 
-        Ok(TxResponse {
-            code: 0,
-            data: vec![],
-            log: "transaction executed successfully".to_string(),
-            info: String::new(),
-            gas_wanted: (total_gas_used + 10000) as i64,
-            gas_used: total_gas_used as i64,
+        Ok(converter::success_tx_response(
+            "transaction executed successfully".to_string(),
+            vec![],
+            (total_gas_used + 10000) as i64,
+            total_gas_used as i64,
             events,
-            codespace: String::new(),
-        })
+        ))
     }
 
     /// Initialize chain from genesis
@@ -1101,16 +1090,15 @@ impl BaseApp {
         let gas_wanted = (estimated_gas as f64 * 1.2) as u64;
         let gas_used = (estimated_gas as f64 * 0.85) as u64; // Simulate 85% efficiency
 
-        Ok(TxResponse {
-            code: 0,
-            data: vec![],
-            log: "simulation successful".to_string(),
-            info: String::new(),
-            gas_wanted: gas_wanted as i64,
-            gas_used: gas_used as i64,
-            events: vec![],
-            codespace: String::new(),
-        })
+        // TODO: Simulation should ideally emit events that would occur during actual execution
+        // For now, return empty events as simulation doesn't execute state changes
+        Ok(converter::success_tx_response(
+            "simulation successful".to_string(),
+            vec![],
+            gas_wanted as i64,
+            gas_used as i64,
+            vec![], // Events would be populated during actual execution
+        ))
     }
 
     /// Helper methods for testing
