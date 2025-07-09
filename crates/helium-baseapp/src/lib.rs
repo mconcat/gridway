@@ -12,8 +12,12 @@ pub mod vfs;
 pub mod wasi_host;
 
 use helium_store::{KVStore, MemStore};
+use helium_telemetry::metrics::{
+    BLOCK_HEIGHT, TOTAL_TRANSACTIONS, observe_block_time, observe_transaction_time,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use thiserror::Error;
 
 // Import microkernel components
@@ -327,6 +331,9 @@ impl BaseApp {
 
     /// Begin block processing using WASI module
     pub fn begin_block(&mut self, height: u64, time: u64, chain_id: String) -> Result<()> {
+        // Update metrics
+        BLOCK_HEIGHT.set(height as i64);
+        
         // Set context for current block
         self.context = Some(Context::new(
             height,
@@ -696,6 +703,8 @@ impl BaseApp {
 
     /// Deliver transaction
     pub fn deliver_tx(&mut self, tx_bytes: &[u8]) -> Result<TxResponse> {
+        let tx_start = Instant::now();
+        
         if self.context.is_none() {
             return Err(BaseAppError::InvalidTx("no active context".to_string()));
         }
@@ -813,7 +822,7 @@ impl BaseApp {
             });
         }
 
-        Ok(TxResponse {
+        let response = TxResponse {
             code: 0,
             log: format!("executed {} messages", messages.len()),
             gas_used: total_gas_used,
@@ -824,7 +833,14 @@ impl BaseApp {
                 .and_then(|g| g.as_u64())
                 .unwrap_or(200000),
             events,
-        })
+        };
+        
+        // Record metrics for successful transactions
+        TOTAL_TRANSACTIONS.inc();
+        let tx_duration = tx_start.elapsed();
+        observe_transaction_time("deliver", tx_duration.as_secs_f64());
+        
+        Ok(response)
     }
 
     /// Extract module name from message type URL
@@ -1211,6 +1227,8 @@ impl BaseApp {
         time: u64,
         txs: Vec<Vec<u8>>,
     ) -> Result<Vec<TxResponse>> {
+        let block_start = Instant::now();
+        
         // Begin block processing
         self.begin_block(height, time, "helium-1".to_string())?;
 
@@ -1235,6 +1253,10 @@ impl BaseApp {
 
         // End block processing
         self.end_block()?;
+        
+        // Record block processing time
+        let block_duration = block_start.elapsed();
+        observe_block_time("normal", block_duration.as_secs_f64());
 
         Ok(responses)
     }

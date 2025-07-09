@@ -12,6 +12,7 @@ members = [
     "crates/helium-server",
     "crates/helium-client",
     "crates/helium-simapp",
+    "crates/helium-telemetry",
     "crates/wasi-modules/ante-handler",
     "crates/wasi-modules/begin-blocker",
     "crates/wasi-modules/end-blocker",
@@ -38,6 +39,7 @@ helium-baseapp = { path = "crates/helium-baseapp" }
 helium-server = { path = "crates/helium-server" }
 helium-client = { path = "crates/helium-client" }
 helium-simapp = { path = "crates/helium-simapp" }
+helium-telemetry = { path = "crates/helium-telemetry" }
 
 # External dependencies
 thiserror = "1.0"

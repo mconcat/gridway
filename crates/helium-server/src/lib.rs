@@ -6,6 +6,7 @@
 pub mod abci_server;
 pub mod config;
 pub mod grpc;
+pub mod integrated_server;
 pub mod rest;
 pub mod services;
 
