@@ -3,10 +3,13 @@
 //! This module provides a production-ready transaction service that integrates with
 //! the state manager and BaseApp for real transaction processing and simulation.
 
-use crate::grpc::{tx, Tx, TxResponse, GasInfo, Result_, Event, EventAttribute, ABCIMessageLog, StringEvent, StringAttribute};
+use crate::grpc::{
+    tx, ABCIMessageLog, Event, EventAttribute, GasInfo, Result_, StringAttribute, StringEvent, Tx,
+    TxResponse,
+};
 use helium_baseapp::{BaseApp, TxResponse as BaseAppTxResponse};
 use helium_store::{StateManager, StoreError};
-use helium_types::tx::{RawTx, TxDecoder, TxDecodeError};
+use helium_types::tx::{RawTx, TxDecodeError, TxDecoder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -139,7 +142,7 @@ impl TxService {
     /// Generate transaction hash from bytes
     fn generate_tx_hash(&self, tx_bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
-        
+
         let mut hasher = Sha256::new();
         hasher.update(tx_bytes);
         let result = hasher.finalize();
@@ -172,15 +175,16 @@ impl TxService {
             .map_err(TxServiceError::StoreError)?;
 
         // Commit changes
-        state_manager
-            .commit()
-            .map_err(TxServiceError::StoreError)?;
+        state_manager.commit().map_err(TxServiceError::StoreError)?;
 
         Ok(())
     }
 
     /// Get stored transaction by hash
-    async fn get_stored_transaction(&self, hash: &str) -> Result<Option<StoredTransaction>, TxServiceError> {
+    async fn get_stored_transaction(
+        &self,
+        hash: &str,
+    ) -> Result<Option<StoredTransaction>, TxServiceError> {
         let state_manager = self.state_manager.read().await;
         let store = state_manager
             .get_store("tx")
@@ -199,11 +203,15 @@ impl TxService {
     }
 
     /// Simulate transaction execution
-    async fn simulate_transaction(&self, tx_bytes: &[u8]) -> Result<(GasInfo, Result_), TxServiceError> {
+    async fn simulate_transaction(
+        &self,
+        tx_bytes: &[u8],
+    ) -> Result<(GasInfo, Result_), TxServiceError> {
         if tx_bytes.len() > self.config.max_tx_size {
-            return Err(TxServiceError::InvalidTransaction(
-                format!("transaction too large: {} bytes", tx_bytes.len())
-            ));
+            return Err(TxServiceError::InvalidTransaction(format!(
+                "transaction too large: {} bytes",
+                tx_bytes.len()
+            )));
         }
 
         // Decode transaction (simplified for now)
@@ -215,7 +223,7 @@ impl TxService {
 
         // Estimate gas based on transaction complexity
         let estimated_gas = self.estimate_gas(&raw_tx);
-        
+
         // For simulation, assume 75% of estimated gas is used
         let gas_used = (estimated_gas as f64 * 0.75) as u64;
 
@@ -227,23 +235,21 @@ impl TxService {
         let result = Result_ {
             data: vec![], // Would contain result data in real implementation
             log: "simulation successful".to_string(),
-            events: vec![
-                Event {
-                    type_: "message".to_string(),
-                    attributes: vec![
-                        EventAttribute {
-                            key: "action".to_string(),
-                            value: "/cosmos.bank.v1beta1.MsgSend".to_string(),
-                            index: true,
-                        },
-                        EventAttribute {
-                            key: "module".to_string(),
-                            value: "bank".to_string(),
-                            index: true,
-                        },
-                    ],
-                },
-            ],
+            events: vec![Event {
+                type_: "message".to_string(),
+                attributes: vec![
+                    EventAttribute {
+                        key: "action".to_string(),
+                        value: "/cosmos.bank.v1beta1.MsgSend".to_string(),
+                        index: true,
+                    },
+                    EventAttribute {
+                        key: "module".to_string(),
+                        value: "bank".to_string(),
+                        index: true,
+                    },
+                ],
+            }],
         };
 
         Ok((gas_info, result))
@@ -255,14 +261,17 @@ impl TxService {
         let base_gas = 21000; // Base transaction cost
         let size_gas = raw_tx.body.messages.len() as u64 * 10; // Per-message cost
         let signature_gas = raw_tx.signatures.len() as u64 * 1000; // Per-signature cost
-        
+
         base_gas + size_gas + signature_gas
     }
 
     /// Process transaction through BaseApp
-    async fn process_transaction(&self, tx_bytes: &[u8]) -> Result<BaseAppTxResponse, TxServiceError> {
+    async fn process_transaction(
+        &self,
+        tx_bytes: &[u8],
+    ) -> Result<BaseAppTxResponse, TxServiceError> {
         let mut base_app = self.base_app.write().await;
-        
+
         // Use BaseApp to process the transaction
         match base_app.check_tx(tx_bytes) {
             Ok(response) => Ok(response),
@@ -271,42 +280,66 @@ impl TxService {
     }
 
     /// Convert BaseApp response to gRPC response
-    fn convert_tx_response(&self, response: &BaseAppTxResponse, hash: String, height: i64) -> TxResponse {
+    fn convert_tx_response(
+        &self,
+        response: &BaseAppTxResponse,
+        hash: String,
+        height: i64,
+    ) -> TxResponse {
         TxResponse {
             height,
             txhash: hash,
             code: response.code,
             data: String::new(), // Would be base64 encoded data
             raw_log: response.log.clone(),
-            logs: response.events.iter().map(|event| ABCIMessageLog {
-                msg_index: 0, // Would be actual message index
-                log: String::new(),
-                events: vec![StringEvent {
-                    type_: event.event_type.clone(),
-                    attributes: event.attributes.iter().map(|attr| StringAttribute {
-                        key: attr.key.clone(),
-                        value: attr.value.clone(),
-                    }).collect(),
-                }],
-            }).collect(),
+            logs: response
+                .events
+                .iter()
+                .map(|event| ABCIMessageLog {
+                    msg_index: 0, // Would be actual message index
+                    log: String::new(),
+                    events: vec![StringEvent {
+                        type_: event.event_type.clone(),
+                        attributes: event
+                            .attributes
+                            .iter()
+                            .map(|attr| StringAttribute {
+                                key: attr.key.clone(),
+                                value: attr.value.clone(),
+                            })
+                            .collect(),
+                    }],
+                })
+                .collect(),
             info: String::new(),
             gas_wanted: response.gas_wanted as i64,
             gas_used: response.gas_used as i64,
             tx: None, // Would contain decoded transaction
             timestamp: chrono::Utc::now().to_rfc3339(),
-            events: response.events.iter().map(|event| Event {
-                type_: event.event_type.clone(),
-                attributes: event.attributes.iter().map(|attr| EventAttribute {
-                    key: attr.key.clone(),
-                    value: attr.value.clone(),
-                    index: true,
-                }).collect(),
-            }).collect(),
+            events: response
+                .events
+                .iter()
+                .map(|event| Event {
+                    type_: event.event_type.clone(),
+                    attributes: event
+                        .attributes
+                        .iter()
+                        .map(|attr| EventAttribute {
+                            key: attr.key.clone(),
+                            value: attr.value.clone(),
+                            index: true,
+                        })
+                        .collect(),
+                })
+                .collect(),
         }
     }
 
     /// Get transactions by height range
-    async fn get_transactions_by_height(&self, height: i64) -> Result<Vec<StoredTransaction>, TxServiceError> {
+    async fn get_transactions_by_height(
+        &self,
+        height: i64,
+    ) -> Result<Vec<StoredTransaction>, TxServiceError> {
         let state_manager = self.state_manager.read().await;
         let store = state_manager
             .get_store("tx")
@@ -390,8 +423,8 @@ impl tx::Service for TxService {
 
         // Convert stored transaction to response format
         let tx = Tx {
-            body: None, // Would be decoded transaction body
-            auth_info: None, // Would be decoded auth info
+            body: None,         // Would be decoded transaction body
+            auth_info: None,    // Would be decoded auth info
             signatures: vec![], // Would be decoded signatures
         };
 
@@ -465,11 +498,13 @@ impl tx::Service for TxService {
 
             if let Ok(stored_tx) = serde_json::from_slice::<StoredTransaction>(&value) {
                 // Simple event filtering (in real implementation would parse events properly)
-                let matches_events = req.events.is_empty() || 
-                    req.events.iter().any(|event_filter| {
-                        stored_tx.tx_response.events.iter().any(|event| {
-                            event_filter.contains(&event.type_)
-                        })
+                let matches_events = req.events.is_empty()
+                    || req.events.iter().any(|event_filter| {
+                        stored_tx
+                            .tx_response
+                            .events
+                            .iter()
+                            .any(|event| event_filter.contains(&event.type_))
                     });
 
                 if matches_events {
@@ -514,11 +549,11 @@ mod tests {
     #[tokio::test]
     async fn test_transaction_hash_generation() {
         let service = create_test_service().await;
-        
+
         let tx_bytes = vec![1, 2, 3, 4];
         let hash1 = service.generate_tx_hash(&tx_bytes);
         let hash2 = service.generate_tx_hash(&tx_bytes);
-        
+
         // Same input should produce same hash
         assert_eq!(hash1, hash2);
         assert!(!hash1.is_empty());
@@ -554,7 +589,11 @@ mod tests {
         service.store_transaction(&stored_tx).await.unwrap();
 
         // Retrieve transaction
-        let retrieved = service.get_stored_transaction("TEST123").await.unwrap().unwrap();
+        let retrieved = service
+            .get_stored_transaction("TEST123")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(retrieved.hash, stored_tx.hash);
         assert_eq!(retrieved.height, stored_tx.height);
     }
@@ -564,13 +603,13 @@ mod tests {
         let service = create_test_service().await;
 
         let raw_tx = RawTx {
-            body: vec![1; 100], // 100 bytes
+            body: vec![1; 100],            // 100 bytes
             signatures: vec![vec![1; 64]], // 1 signature
             auth_info: vec![],
         };
 
         let estimated_gas = service.estimate_gas(&raw_tx);
-        
+
         // Should be base (21000) + size (100*10) + signature (1*1000) = 23000
         assert_eq!(estimated_gas, 23000);
     }
@@ -586,10 +625,10 @@ mod tests {
 
         let response = service.simulate(request).await.unwrap();
         let sim_response = response.into_inner();
-        
+
         assert!(sim_response.gas_info.is_some());
         assert!(sim_response.result.is_some());
-        
+
         let gas_info = sim_response.gas_info.unwrap();
         assert!(gas_info.gas_wanted > 0);
         assert!(gas_info.gas_used > 0);

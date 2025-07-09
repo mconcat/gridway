@@ -3,7 +3,7 @@
 //! This module provides a production-ready auth service that integrates with
 //! the state manager for persistent account storage and authentication.
 
-use crate::grpc::{auth, BaseAccount, AuthParams};
+use crate::grpc::{auth, AuthParams, BaseAccount};
 use helium_baseapp::BaseApp;
 use helium_store::{StateManager, StoreError};
 use helium_types::address::AccAddress;
@@ -221,7 +221,10 @@ impl AuthService {
             .map_err(AuthServiceError::StoreError)?;
 
         store
-            .set(b"next_account_number".to_vec(), next_num.to_string().into_bytes())
+            .set(
+                b"next_account_number".to_vec(),
+                next_num.to_string().into_bytes(),
+            )
             .map_err(AuthServiceError::StoreError)?;
 
         state_manager
@@ -241,7 +244,8 @@ impl AuthService {
         match store.get(b"next_account_number") {
             Ok(Some(data)) => {
                 let num_str = String::from_utf8_lossy(&data);
-                let num = num_str.parse::<u64>()
+                let num = num_str
+                    .parse::<u64>()
                     .map_err(|_| AuthServiceError::InvalidAccountNumber(num_str.to_string()))?;
                 *self.next_account_number.write().await = num;
             }
@@ -321,7 +325,9 @@ impl AuthService {
 
     /// Increment account sequence (for transaction processing)
     pub async fn increment_sequence(&self, address: &str) -> Result<(), AuthServiceError> {
-        let mut account = self.get_account(address).await?
+        let mut account = self
+            .get_account(address)
+            .await?
             .ok_or_else(|| AuthServiceError::AccountNotFound(address.to_string()))?;
 
         account.sequence += 1;
@@ -331,8 +337,14 @@ impl AuthService {
     }
 
     /// Set account public key
-    pub async fn set_public_key(&self, address: &str, pub_key: Vec<u8>) -> Result<(), AuthServiceError> {
-        let mut account = self.get_account(address).await?
+    pub async fn set_public_key(
+        &self,
+        address: &str,
+        pub_key: Vec<u8>,
+    ) -> Result<(), AuthServiceError> {
+        let mut account = self
+            .get_account(address)
+            .await?
             .ok_or_else(|| AuthServiceError::AccountNotFound(address.to_string()))?;
 
         account.pub_key = Some(pub_key);
@@ -415,10 +427,7 @@ mod tests {
         let service = create_test_service().await;
 
         // Create an account
-        let account = service
-            .create_account("cosmos1test", None)
-            .await
-            .unwrap();
+        let account = service.create_account("cosmos1test", None).await.unwrap();
 
         assert_eq!(account.address, "cosmos1test");
         assert_eq!(account.account_number, 1);
@@ -455,7 +464,10 @@ mod tests {
 
         // Set public key
         let pub_key = vec![1, 2, 3, 4];
-        service.set_public_key("cosmos1test", pub_key.clone()).await.unwrap();
+        service
+            .set_public_key("cosmos1test", pub_key.clone())
+            .await
+            .unwrap();
 
         // Check public key was set
         let account = service.get_account("cosmos1test").await.unwrap().unwrap();

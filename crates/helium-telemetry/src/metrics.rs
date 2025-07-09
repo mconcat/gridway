@@ -62,7 +62,7 @@ lazy_static! {
         "connected_peers",
         "Number of currently connected peers"
     ).expect("Failed to create connected_peers metric");
-    
+
     /// Transaction size in bytes
     pub static ref TX_SIZE_BYTES: HistogramVec = HistogramVec::new(
         prometheus::HistogramOpts::new(
@@ -71,7 +71,7 @@ lazy_static! {
         ).buckets(vec![100.0, 500.0, 1000.0, 5000.0, 10000.0, 50000.0]),
         &["tx_type"]
     ).expect("Failed to create tx_size_bytes metric");
-    
+
     /// Gas used per transaction
     pub static ref TX_GAS_USED: HistogramVec = HistogramVec::new(
         prometheus::HistogramOpts::new(
@@ -80,7 +80,7 @@ lazy_static! {
         ).buckets(vec![10000.0, 50000.0, 100000.0, 200000.0, 500000.0, 1000000.0]),
         &["tx_type"]
     ).expect("Failed to create tx_gas_used metric");
-    
+
     /// Number of failed transactions
     pub static ref TX_FAILED: IntCounter = IntCounter::new(
         "tx_failed",

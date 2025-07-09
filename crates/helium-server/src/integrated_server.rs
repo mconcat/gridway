@@ -3,18 +3,18 @@
 //! This module provides an integrated server setup that uses production-ready
 //! service implementations with state store integration instead of mock services.
 
-use crate::grpc::{bank, auth, tx, GrpcServerBuilder};
+use crate::grpc::{auth, bank, tx, GrpcServerBuilder};
 use crate::services::{AuthService, BankService, TxService};
 use helium_baseapp::BaseApp;
-use helium_store::{StateManager, MemStore, KVStore};
+use helium_store::{KVStore, MemStore, StateManager};
 use helium_telemetry::{
-    metrics::{BLOCK_HEIGHT, CONNECTED_PEERS, MEMPOOL_SIZE, TOTAL_TRANSACTIONS},
     init as init_telemetry,
+    metrics::{BLOCK_HEIGHT, CONNECTED_PEERS, MEMPOOL_SIZE, TOTAL_TRANSACTIONS},
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::transport::Server;
-use tracing::{info, error};
+use tracing::{error, info};
 
 /// Integrated server configuration
 #[derive(Debug, Clone)]
@@ -57,19 +57,21 @@ impl IntegratedServer {
     /// Create a new integrated server
     pub fn new(config: IntegratedServerConfig) -> Self {
         let mut state_manager = StateManager::new_with_memstore();
-        
+
         // Register namespaces for different modules
-        state_manager.register_namespace("bank".to_string(), false)
+        state_manager
+            .register_namespace("bank".to_string(), false)
             .expect("Failed to register bank namespace");
-        state_manager.register_namespace("auth".to_string(), false)
+        state_manager
+            .register_namespace("auth".to_string(), false)
             .expect("Failed to register auth namespace");
-        state_manager.register_namespace("tx".to_string(), false)
+        state_manager
+            .register_namespace("tx".to_string(), false)
             .expect("Failed to register tx namespace");
-        
+
         let state_manager = Arc::new(RwLock::new(state_manager));
         let base_app = Arc::new(RwLock::new(
-            BaseApp::new("helium".to_string())
-                .expect("Failed to create BaseApp")
+            BaseApp::new("helium".to_string()).expect("Failed to create BaseApp"),
         ));
 
         Self {
@@ -83,7 +85,9 @@ impl IntegratedServer {
     }
 
     /// Initialize all services
-    pub async fn initialize_services(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn initialize_services(
+        &mut self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("Initializing integrated server services");
 
         // Initialize telemetry if enabled
@@ -99,7 +103,7 @@ impl IntegratedServer {
         ));
 
         let auth_service = Arc::new(AuthService::with_defaults(
-            self.state_manager.clone(), 
+            self.state_manager.clone(),
             self.base_app.clone(),
         ));
 
@@ -111,16 +115,22 @@ impl IntegratedServer {
         // Initialize with test data if configured
         if self.config.initialize_test_data {
             info!("Initializing services with test data");
-            
-            bank_service.initialize_for_testing().await
+
+            bank_service
+                .initialize_for_testing()
+                .await
                 .map_err(|e| format!("Failed to initialize bank service: {}", e))?;
-                
-            auth_service.initialize_for_testing().await
+
+            auth_service
+                .initialize_for_testing()
+                .await
                 .map_err(|e| format!("Failed to initialize auth service: {}", e))?;
-                
-            tx_service.initialize_for_testing().await
+
+            tx_service
+                .initialize_for_testing()
+                .await
                 .map_err(|e| format!("Failed to initialize tx service: {}", e))?;
-                
+
             info!("Test data initialization completed");
         }
 
@@ -137,18 +147,20 @@ impl IntegratedServer {
     async fn start_metrics_server(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if self.config.enable_metrics {
             let metrics_config = helium_telemetry::http::MetricsServerConfig {
-                bind_address: self.config.metrics_address.parse()
+                bind_address: self
+                    .config
+                    .metrics_address
+                    .parse()
                     .map_err(|e| format!("Invalid metrics address: {}", e))?,
                 metrics_path: "/metrics".to_string(),
                 enable_health_check: true,
-                global_labels: vec![
-                    ("chain_id".to_string(), self.config.chain_id.clone()),
-                ],
+                global_labels: vec![("chain_id".to_string(), self.config.chain_id.clone())],
             };
 
             let registry = helium_telemetry::registry();
-            let _metrics_handle = helium_telemetry::http::spawn_metrics_server(registry, metrics_config);
-            
+            let _metrics_handle =
+                helium_telemetry::http::spawn_metrics_server(registry, metrics_config);
+
             info!("Metrics server started on {}", self.config.metrics_address);
         }
         Ok(())
@@ -160,7 +172,10 @@ impl IntegratedServer {
             return Err("Services not initialized. Call initialize_services() first.".into());
         }
 
-        let addr: std::net::SocketAddr = self.config.address.parse()
+        let addr: std::net::SocketAddr = self
+            .config
+            .address
+            .parse()
             .map_err(|e| format!("Invalid server address {}: {}", self.config.address, e))?;
 
         info!("Starting integrated gRPC server on {}", addr);
@@ -170,7 +185,7 @@ impl IntegratedServer {
 
         // Clone service references for the server
         let bank_service = self.bank_service.as_ref().unwrap().clone();
-        let auth_service = self.auth_service.as_ref().unwrap().clone(); 
+        let auth_service = self.auth_service.as_ref().unwrap().clone();
         let tx_service = self.tx_service.as_ref().unwrap().clone();
 
         // Note: In a real gRPC implementation with generated proto code, we would:
@@ -198,19 +213,21 @@ impl IntegratedServer {
         info!("Bank service: ready with state store integration");
         info!("Auth service: ready with account management");
         info!("Tx service: ready with transaction processing");
-        
+
         // Simulate server running
         info!("Integrated gRPC server would be listening on {}", addr);
         info!("Services are configured and ready to handle requests");
-        
+
         // In a real deployment, this would be:
         // server.await?;
-        
+
         Ok(())
     }
 
     /// Get service statistics for monitoring
-    pub async fn get_service_stats(&self) -> Result<ServiceStats, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_service_stats(
+        &self,
+    ) -> Result<ServiceStats, Box<dyn std::error::Error + Send + Sync>> {
         let mut stats = ServiceStats::default();
 
         if let Some(bank_service) = &self.bank_service {
@@ -222,7 +239,7 @@ impl IntegratedServer {
                     balance_count += 1;
                 }
                 stats.bank_balance_count = balance_count;
-                
+
                 // Update metrics
                 if self.config.enable_metrics {
                     MEMPOOL_SIZE.set(0); // Example - would be actual mempool size
@@ -254,7 +271,7 @@ impl IntegratedServer {
                     tx_count += 1;
                 }
                 stats.tx_transaction_count = tx_count;
-                
+
                 // Update metrics
                 if self.config.enable_metrics {
                     TOTAL_TRANSACTIONS.inc_by(tx_count as u64);
@@ -270,11 +287,13 @@ impl IntegratedServer {
     /// Shutdown the server gracefully
     pub async fn shutdown(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("Shutting down integrated server");
-        
+
         // Commit any pending state changes
         let mut state_manager = self.state_manager.write().await;
-        state_manager.commit().map_err(|e| format!("Failed to commit final state: {}", e))?;
-        
+        state_manager
+            .commit()
+            .map_err(|e| format!("Failed to commit final state: {}", e))?;
+
         info!("Server shutdown completed successfully");
         Ok(())
     }
@@ -325,7 +344,7 @@ mod tests {
     async fn test_integrated_server_creation() {
         let config = IntegratedServerConfig::default();
         let server = IntegratedServer::new(config);
-        
+
         assert!(server.bank_service.is_none());
         assert!(server.auth_service.is_none());
         assert!(server.tx_service.is_none());
@@ -335,9 +354,9 @@ mod tests {
     async fn test_service_initialization() {
         let config = IntegratedServerConfig::default();
         let mut server = IntegratedServer::new(config);
-        
+
         server.initialize_services().await.unwrap();
-        
+
         assert!(server.bank_service.is_some());
         assert!(server.auth_service.is_some());
         assert!(server.tx_service.is_some());
@@ -347,10 +366,10 @@ mod tests {
     async fn test_service_stats() {
         let config = IntegratedServerConfig::default();
         let mut server = IntegratedServer::new(config);
-        
+
         server.initialize_services().await.unwrap();
         let stats = server.get_service_stats().await.unwrap();
-        
+
         // Should have test data initialized
         assert!(stats.bank_balance_count > 0);
         assert!(stats.auth_account_count > 0);
@@ -360,9 +379,12 @@ mod tests {
     async fn test_server_without_initialization() {
         let config = IntegratedServerConfig::default();
         let server = IntegratedServer::new(config);
-        
+
         let result = server.start().await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Services not initialized"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Services not initialized"));
     }
 }

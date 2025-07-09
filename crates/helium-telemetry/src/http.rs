@@ -6,7 +6,7 @@
 use axum::{
     extract::{Query, State},
     http::{header, StatusCode},
-    response::{IntoResponse, Response, Json},
+    response::{IntoResponse, Json, Response},
     routing::get,
     Router,
 };
@@ -77,7 +77,7 @@ impl MetricsServer {
     /// Start the metrics HTTP server
     pub async fn start(self) -> MetricResult<()> {
         let app = self.build_router();
-        
+
         let listener = TcpListener::bind(&self.config.bind_address)
             .await
             .map_err(|e| MetricError::HttpServerError(format!("Failed to bind: {}", e)))?;
@@ -120,7 +120,7 @@ async fn metrics_handler(
     Query(params): Query<MetricsQuery>,
 ) -> Result<Response, StatusCode> {
     let format = params.format.as_deref().unwrap_or("text");
-    
+
     match registry.encode_to_string() {
         Ok(metrics) => {
             match format {
@@ -179,7 +179,7 @@ mod tests {
         let registry = Arc::new(MetricsRegistry::new().unwrap());
         let config = MetricsServerConfig::default();
         let server = MetricsServer::new(config, registry);
-        
+
         let router = server.build_router();
         // Just verify we can build the router without panicking
         let _ = router;
@@ -188,13 +188,15 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_handler() {
         let registry = Arc::new(MetricsRegistry::new().unwrap());
-        let query = MetricsQuery { format: Some("prometheus".to_string()) };
+        let query = MetricsQuery {
+            format: Some("prometheus".to_string()),
+        };
         let response = metrics_handler(State(registry), Query(query)).await;
-        
+
         assert!(response.is_ok());
         let response = response.unwrap();
         let (parts, _body) = response.into_parts();
-        
+
         assert_eq!(parts.status, StatusCode::OK);
         assert!(parts.headers.get(header::CONTENT_TYPE).is_some());
     }
@@ -204,7 +206,7 @@ mod tests {
         let response = health_handler().await;
         let response = response.into_response();
         let (parts, _) = response.into_parts();
-        
+
         assert_eq!(parts.status, StatusCode::OK);
     }
 
@@ -216,13 +218,15 @@ mod tests {
         assert_eq!(config.bind_address.port(), 1317);
         assert!(config.global_labels.is_empty());
     }
-    
+
     #[tokio::test]
     async fn test_metrics_handler_text_format() {
         let registry = Arc::new(MetricsRegistry::new().unwrap());
-        let query = MetricsQuery { format: Some("text".to_string()) };
+        let query = MetricsQuery {
+            format: Some("text".to_string()),
+        };
         let response = metrics_handler(State(registry), Query(query)).await;
-        
+
         assert!(response.is_ok());
         // Text format returns JSON response
         let response = response.unwrap();

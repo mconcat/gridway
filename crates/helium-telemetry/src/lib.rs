@@ -9,8 +9,8 @@ pub mod registry;
 pub mod types;
 
 pub use metrics::{
-    BLOCK_HEIGHT, BLOCK_PROCESSING_TIME, MEMPOOL_SIZE, TOTAL_BLOCKS_PROCESSED,
-    TOTAL_TRANSACTIONS, TRANSACTION_PROCESSING_TIME, TX_FAILED, TX_GAS_USED, TX_SIZE_BYTES,
+    BLOCK_HEIGHT, BLOCK_PROCESSING_TIME, MEMPOOL_SIZE, TOTAL_BLOCKS_PROCESSED, TOTAL_TRANSACTIONS,
+    TRANSACTION_PROCESSING_TIME, TX_FAILED, TX_GAS_USED, TX_SIZE_BYTES,
 };
 pub use registry::MetricsRegistry;
 pub use types::{MetricError, MetricResult};
@@ -30,7 +30,7 @@ lazy_static! {
 pub fn init() -> MetricResult<()> {
     // Force lazy static initialization
     let _ = &*METRICS_REGISTRY;
-    
+
     tracing::info!("Telemetry subsystem initialized");
     Ok(())
 }

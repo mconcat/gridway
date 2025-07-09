@@ -3,9 +3,7 @@
 //! This module provides a thread-safe registry wrapper around Prometheus Registry
 //! that allows for dynamic registration of custom metrics at runtime.
 
-use prometheus::{
-    proto::MetricFamily, Encoder, Registry, TextEncoder,
-};
+use prometheus::{proto::MetricFamily, Encoder, Registry, TextEncoder};
 use std::sync::{Arc, RwLock};
 
 use crate::{
@@ -25,10 +23,10 @@ impl MetricsRegistry {
     /// Create a new metrics registry with core metrics pre-registered
     pub fn new() -> MetricResult<Self> {
         let registry = Arc::new(Registry::new());
-        
+
         // Register core blockchain metrics
         register_core_metrics(&registry)?;
-        
+
         Ok(Self {
             registry,
             custom_metrics: Arc::new(RwLock::new(Vec::new())),
@@ -56,17 +54,21 @@ impl MetricsRegistry {
         self.registry
             .register(collector)
             .map_err(|e| MetricError::RegistrationFailed(e.to_string()))?;
-        
+
         Ok(())
     }
 
     /// Register a custom metric and track its name
-    pub fn register_metric(&self, name: String, collector: Box<dyn prometheus::core::Collector>) -> MetricResult<()> {
+    pub fn register_metric(
+        &self,
+        name: String,
+        collector: Box<dyn prometheus::core::Collector>,
+    ) -> MetricResult<()> {
         self.register_collector(collector)?;
-        
+
         let mut metrics = self.custom_metrics.write().unwrap();
         metrics.push(name);
-        
+
         Ok(())
     }
 
@@ -85,14 +87,13 @@ impl MetricsRegistry {
     pub fn encode_to_string(&self) -> MetricResult<String> {
         let encoder = TextEncoder::new();
         let metric_families = self.gather();
-        
+
         let mut buffer = Vec::new();
         encoder
             .encode(&metric_families, &mut buffer)
             .map_err(|e| MetricError::EncodingFailed(e.to_string()))?;
-        
-        String::from_utf8(buffer)
-            .map_err(|e| MetricError::EncodingFailed(e.to_string()))
+
+        String::from_utf8(buffer).map_err(|e| MetricError::EncodingFailed(e.to_string()))
     }
 
     /// Unregister all metrics (useful for testing)
@@ -131,22 +132,21 @@ mod tests {
     #[test]
     fn test_custom_metric_registration() {
         let registry = MetricsRegistry::new().unwrap();
-        
+
         let counter = Counter::new("test_counter", "A test counter").unwrap();
-        let result = registry.register_metric(
-            "test_counter".to_string(),
-            Box::new(counter),
-        );
-        
+        let result = registry.register_metric("test_counter".to_string(), Box::new(counter));
+
         assert!(result.is_ok());
-        assert!(registry.metric_names().contains(&"test_counter".to_string()));
+        assert!(registry
+            .metric_names()
+            .contains(&"test_counter".to_string()));
     }
 
     #[test]
     fn test_gather_metrics() {
         let registry = MetricsRegistry::new().unwrap();
         let metrics = registry.gather();
-        
+
         // Should have core metrics registered
         assert!(!metrics.is_empty());
     }
@@ -155,7 +155,7 @@ mod tests {
     fn test_encode_metrics() {
         let registry = MetricsRegistry::new().unwrap();
         let encoded = registry.encode_to_string();
-        
+
         assert!(encoded.is_ok());
         let output = encoded.unwrap();
         assert!(output.contains("consensus_height"));
@@ -165,13 +165,13 @@ mod tests {
     #[test]
     fn test_duplicate_registration_fails() {
         let registry = MetricsRegistry::new().unwrap();
-        
+
         let gauge1 = Gauge::new("duplicate_metric", "First gauge").unwrap();
         let gauge2 = Gauge::new("duplicate_metric", "Second gauge").unwrap();
-        
+
         let result1 = registry.register_collector(Box::new(gauge1));
         assert!(result1.is_ok());
-        
+
         let result2 = registry.register_collector(Box::new(gauge2));
         assert!(result2.is_err());
     }
