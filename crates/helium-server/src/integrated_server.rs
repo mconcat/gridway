@@ -3,18 +3,16 @@
 //! This module provides an integrated server setup that uses production-ready
 //! service implementations with state store integration instead of mock services.
 
-use crate::grpc::{auth, bank, tx, GrpcServerBuilder};
 use crate::services::{AuthService, BankService, TxService};
 use helium_baseapp::BaseApp;
-use helium_store::{KVStore, MemStore, StateManager};
+use helium_store::{KVStore, StateManager};
 use helium_telemetry::{
     init as init_telemetry,
     metrics::{BLOCK_HEIGHT, CONNECTED_PEERS, MEMPOOL_SIZE, TOTAL_TRANSACTIONS},
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tonic::transport::Server;
-use tracing::{error, info};
+use tracing::info;
 
 /// Integrated server configuration
 #[derive(Debug, Clone)]
@@ -119,17 +117,17 @@ impl IntegratedServer {
             bank_service
                 .initialize_for_testing()
                 .await
-                .map_err(|e| format!("Failed to initialize bank service: {}", e))?;
+                .map_err(|e| format!("Failed to initialize bank service: {e}"))?;
 
             auth_service
                 .initialize_for_testing()
                 .await
-                .map_err(|e| format!("Failed to initialize auth service: {}", e))?;
+                .map_err(|e| format!("Failed to initialize auth service: {e}"))?;
 
             tx_service
                 .initialize_for_testing()
                 .await
-                .map_err(|e| format!("Failed to initialize tx service: {}", e))?;
+                .map_err(|e| format!("Failed to initialize tx service: {e}"))?;
 
             info!("Test data initialization completed");
         }
@@ -151,7 +149,7 @@ impl IntegratedServer {
                     .config
                     .metrics_address
                     .parse()
-                    .map_err(|e| format!("Invalid metrics address: {}", e))?,
+                    .map_err(|e| format!("Invalid metrics address: {e}"))?,
                 metrics_path: "/metrics".to_string(),
                 enable_health_check: true,
                 global_labels: vec![("chain_id".to_string(), self.config.chain_id.clone())],
@@ -184,9 +182,9 @@ impl IntegratedServer {
         self.start_metrics_server().await?;
 
         // Clone service references for the server
-        let bank_service = self.bank_service.as_ref().unwrap().clone();
-        let auth_service = self.auth_service.as_ref().unwrap().clone();
-        let tx_service = self.tx_service.as_ref().unwrap().clone();
+        let _bank_service = self.bank_service.as_ref().unwrap().clone();
+        let _auth_service = self.auth_service.as_ref().unwrap().clone();
+        let _tx_service = self.tx_service.as_ref().unwrap().clone();
 
         // Note: In a real gRPC implementation with generated proto code, we would:
         // 1. Generate service definitions from .proto files using tonic-build
@@ -233,7 +231,7 @@ impl IntegratedServer {
         if let Some(bank_service) = &self.bank_service {
             // Count bank store entries
             let state_manager = self.state_manager.read().await;
-            if let Ok(store) = state_manager.get_namespace_store("bank") {
+            if let Ok(store) = state_manager.get_store("bank") {
                 let mut balance_count = 0;
                 for (key, _) in store.prefix_iterator(b"balance_") {
                     balance_count += 1;
@@ -250,9 +248,11 @@ impl IntegratedServer {
         if let Some(auth_service) = &self.auth_service {
             // Count auth store entries
             let state_manager = self.state_manager.read().await;
-            if let Ok(store) = state_manager.get_namespace_store("auth") {
+            if let Ok(store) = state_manager.get_store("auth") {
+                let account_count = 0;
                 let mut account_count = 0;
-                for (key, _) in store.prefix_iterator(b"account_") {
+                let prefix = b"account_";
+                for (key, _) in store.prefix_iterator(prefix) {
                     let key_str = String::from_utf8_lossy(&key);
                     if key_str.starts_with("account_") && !key_str.contains("next_account_number") {
                         account_count += 1;
@@ -265,7 +265,7 @@ impl IntegratedServer {
         if let Some(tx_service) = &self.tx_service {
             // Count tx store entries
             let state_manager = self.state_manager.read().await;
-            if let Ok(store) = state_manager.get_namespace_store("tx") {
+            if let Ok(store) = state_manager.get_store("tx") {
                 let mut tx_count = 0;
                 for (key, _) in store.prefix_iterator(b"tx_hash_") {
                     tx_count += 1;
@@ -292,7 +292,7 @@ impl IntegratedServer {
         let mut state_manager = self.state_manager.write().await;
         state_manager
             .commit()
-            .map_err(|e| format!("Failed to commit final state: {}", e))?;
+            .map_err(|e| format!("Failed to commit final state: {e}"))?;
 
         info!("Server shutdown completed successfully");
         Ok(())
@@ -310,13 +310,15 @@ pub struct ServiceStats {
 /// Example of how to create and run the integrated server
 pub async fn run_integrated_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing
-    helium_log::init();
+    tracing_subscriber::fmt::init();
 
     // Create server configuration
     let config = IntegratedServerConfig {
         address: "127.0.0.1:9090".to_string(),
         initialize_test_data: true,
         chain_id: "helium-testnet".to_string(),
+        enable_metrics: true,
+        metrics_address: "127.0.0.1:1317".to_string(),
     };
 
     // Create and initialize server

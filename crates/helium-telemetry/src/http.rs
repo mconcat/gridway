@@ -80,7 +80,7 @@ impl MetricsServer {
 
         let listener = TcpListener::bind(&self.config.bind_address)
             .await
-            .map_err(|e| MetricError::HttpServerError(format!("Failed to bind: {}", e)))?;
+            .map_err(|e| MetricError::HttpServerError(format!("Failed to bind: {e}")))?;
 
         tracing::info!(
             address = %self.config.bind_address,

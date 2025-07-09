@@ -8,10 +8,9 @@ use crate::grpc::{
     TxResponse,
 };
 use helium_baseapp::{BaseApp, TxResponse as BaseAppTxResponse};
-use helium_store::{StateManager, StoreError};
+use helium_store::{KVStore, StateManager, StoreError};
 use helium_types::tx::{RawTx, TxDecodeError, TxDecoder};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
@@ -165,13 +164,13 @@ impl TxService {
         let data = serde_json::to_vec(stored_tx)
             .map_err(|e| TxServiceError::SerializationError(e.to_string()))?;
         store
-            .set(hash_key.into_bytes(), data.clone())
+            .set(&hash_key.into_bytes(), &data)
             .map_err(TxServiceError::StoreError)?;
 
         // Store by height and index for block queries
         let height_key = format!("tx_height_{}_{}", stored_tx.height, stored_tx.index);
         store
-            .set(height_key.into_bytes(), stored_tx.hash.as_bytes().to_vec())
+            .set(&height_key.into_bytes(), stored_tx.hash.as_bytes())
             .map_err(TxServiceError::StoreError)?;
 
         // Commit changes
@@ -190,7 +189,7 @@ impl TxService {
             .get_store("tx")
             .map_err(TxServiceError::StoreError)?;
 
-        let hash_key = format!("tx_hash_{}", hash);
+        let hash_key = format!("tx_hash_{hash}");
         match store.get(hash_key.as_bytes()) {
             Ok(Some(data)) => {
                 let stored_tx: StoredTransaction = serde_json::from_slice(&data)
@@ -270,7 +269,7 @@ impl TxService {
         &self,
         tx_bytes: &[u8],
     ) -> Result<BaseAppTxResponse, TxServiceError> {
-        let mut base_app = self.base_app.write().await;
+        let base_app = self.base_app.write().await;
 
         // Use BaseApp to process the transaction
         match base_app.check_tx(tx_bytes) {
@@ -346,7 +345,7 @@ impl TxService {
             .map_err(TxServiceError::StoreError)?;
 
         let mut transactions = Vec::new();
-        let height_prefix = format!("tx_height_{}_", height);
+        let height_prefix = format!("tx_height_{height}_");
 
         for (key, value) in store.prefix_iterator(height_prefix.as_bytes()) {
             let hash = String::from_utf8_lossy(&value).to_string();
@@ -465,7 +464,7 @@ impl tx::Service for TxService {
 
         if let Err(e) = self.store_transaction(&stored_tx).await {
             // Log error but don't fail the broadcast
-            eprintln!("Failed to store transaction: {}", e);
+            eprintln!("Failed to store transaction: {e}");
         }
 
         Ok(Response::new(tx::BroadcastTxResponse {
@@ -535,13 +534,12 @@ mod tests {
     use helium_store::MemStore;
 
     async fn create_test_service() -> TxService {
-        // Create a simple in-memory store directly
-        let store = Box::new(MemStore::new());
-
-        let mut state_manager = StateManager::new();
-        state_manager.mount_store("tx".to_string(), store);
+        let mut state_manager = StateManager::new_with_memstore();
+        state_manager
+            .register_namespace("tx".to_string(), false)
+            .unwrap();
         let state_manager = Arc::new(RwLock::new(state_manager));
-        let base_app = Arc::new(RwLock::new(BaseApp::new("test-app".to_string())));
+        let base_app = Arc::new(RwLock::new(BaseApp::new("test-app".to_string()).unwrap()));
 
         TxService::with_defaults(state_manager, base_app)
     }
@@ -603,24 +601,55 @@ mod tests {
         let service = create_test_service().await;
 
         let raw_tx = RawTx {
-            body: vec![1; 100],            // 100 bytes
+            body: helium_types::tx::TxBody {
+                messages: vec![],
+                memo: String::new(),
+                timeout_height: 0,
+            },
+            auth_info: helium_types::tx::AuthInfo {
+                signer_infos: vec![],
+                fee: helium_types::tx::Fee {
+                    amount: vec![],
+                    gas_limit: 0,
+                    payer: String::new(),
+                    granter: String::new(),
+                },
+            },
             signatures: vec![vec![1; 64]], // 1 signature
-            auth_info: vec![],
         };
 
         let estimated_gas = service.estimate_gas(&raw_tx);
 
-        // Should be base (21000) + size (100*10) + signature (1*1000) = 23000
-        assert_eq!(estimated_gas, 23000);
+        // Should be base (21000) + messages (0*10) + signature (1*1000) = 22000
+        assert_eq!(estimated_gas, 22000);
     }
 
     #[tokio::test]
     async fn test_tx_service_trait() {
         let service = create_test_service().await;
 
+        // Create a valid JSON transaction for testing
+        let test_tx = r#"{
+            "body": {
+                "messages": [],
+                "memo": "",
+                "timeout_height": 0
+            },
+            "auth_info": {
+                "signer_infos": [],
+                "fee": {
+                    "amount": [],
+                    "gas_limit": 200000,
+                    "payer": "",
+                    "granter": ""
+                }
+            },
+            "signatures": []
+        }"#;
+
         // Test simulation
         let request = Request::new(tx::SimulateRequest {
-            tx_bytes: vec![1, 2, 3, 4],
+            tx_bytes: test_tx.as_bytes().to_vec(),
         });
 
         let response = service.simulate(request).await.unwrap();

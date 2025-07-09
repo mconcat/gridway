@@ -1721,9 +1721,9 @@ mod tests {
         let response = app
             .check_tx_with_mode(b"dummy_tx", ExecMode::ReCheck)
             .unwrap();
-        // Should fail because the transaction will decode to have no messages
+        // Should fail because the ante handler module is not loaded
         assert_eq!(response.code, 1);
-        assert_eq!(response.log, "transaction contains no messages");
+        assert_eq!(response.log, "ante handler validation failed: Ante handler module not found: Module not loaded: default");
     }
 
     #[test]
