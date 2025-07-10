@@ -39,7 +39,7 @@ jobs:
     
     - name: Install cargo-component
       run: |
-        cargo install cargo-component --version 0.18.0
+        cargo install cargo-component --locked
     
     - name: Build WASM modules
       run: |

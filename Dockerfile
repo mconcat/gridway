@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.82-slim AS builder
+FROM rust:1.88-slim AS builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install cargo-component for WASI module building
-RUN cargo install cargo-component --version 0.18.0
+# Install cargo-component
+RUN cargo install cargo-component --locked
 
 # Add wasm32-wasip1 target
 RUN rustup target add wasm32-wasip1
