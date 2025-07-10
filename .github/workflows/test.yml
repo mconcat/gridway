@@ -43,8 +43,18 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-target-test-
     
+    - name: Install cargo-component
+      run: |
+        cargo install cargo-component --version 0.18.0
+    
+    - name: Add wasm32-wasip1 target
+      run: rustup target add wasm32-wasip1
+    
+    - name: Build WASI modules
+      run: ./scripts/build-wasi-modules.sh
+    
     - name: Run tests
-      run: cargo test --all
+      run: cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
     
     - name: Run tests with verbose output
       if: failure()

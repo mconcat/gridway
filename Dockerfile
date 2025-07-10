@@ -1,28 +1,31 @@
 # Build stage
-FROM rust:1.75-slim AS builder
+FROM rust:1.82-slim AS builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     protobuf-compiler \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-component for WASI module building
+RUN cargo install cargo-component --version 0.18.0
+
+# Add wasm32-wasip1 target
+RUN rustup target add wasm32-wasip1
 
 # Create app directory
 WORKDIR /usr/src/helium
 
 # Copy workspace files
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
+COPY . ./
 
-# Build the application
+# Build the application (excluding WASI modules)
 RUN cargo build --release --bin helium-server
 
-# Build WASI modules
-RUN cargo build --release -p ante-handler --target wasm32-wasi
-RUN cargo build --release -p begin-blocker --target wasm32-wasi
-RUN cargo build --release -p end-blocker --target wasm32-wasi
-RUN cargo build --release -p tx-decoder --target wasm32-wasi
+# Build WASI modules using cargo-component
+RUN ./scripts/build-wasi-modules.sh
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -42,7 +45,7 @@ COPY --from=builder /usr/src/helium/target/release/helium-server /usr/local/bin/
 
 # Copy WASI modules
 RUN mkdir -p /usr/local/lib/helium/wasi-modules
-COPY --from=builder /usr/src/helium/target/wasm32-wasi/release/*.wasm /usr/local/lib/helium/wasi-modules/
+COPY --from=builder /usr/src/helium/modules/*.wasm /usr/local/lib/helium/wasi-modules/
 
 # Create data directory
 RUN mkdir -p /helium && chown helium:helium /helium
