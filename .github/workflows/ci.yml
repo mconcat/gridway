@@ -64,9 +64,12 @@ jobs:
           toolchain: ${{ matrix.rust }}
       
       - name: Install protoc
-        uses: arduino/setup-protoc@v2
-        with:
-          version: "25.x"
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            sudo apt-get update && sudo apt-get install -y protobuf-compiler
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            brew install protobuf
+          fi
       
       - name: Cache cargo dependencies
         uses: actions/cache@v3
@@ -104,9 +107,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       
       - name: Install protoc
-        uses: arduino/setup-protoc@v2
-        with:
-          version: "25.x"
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            sudo apt-get update && sudo apt-get install -y protobuf-compiler
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            brew install protobuf
+          fi
       
       - name: Cache cargo dependencies
         uses: actions/cache@v3
@@ -144,9 +150,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       
       - name: Install protoc
-        uses: arduino/setup-protoc@v2
-        with:
-          version: "25.x"
+        run: |
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
