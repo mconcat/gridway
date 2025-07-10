@@ -40,6 +40,11 @@ for module_info in "${MODULES[@]}"; do
     # Build the module as a component
     cargo component build --release
     
+    # Format the generated bindings to match stable rustfmt
+    if [ -f "src/bindings.rs" ]; then
+        rustfmt src/bindings.rs || true
+    fi
+    
     # Copy the built component
     WASM_FILE="$PROJECT_ROOT/target/wasm32-wasip1/release/${crate_name}.wasm"
     LIB_WASM_FILE="$PROJECT_ROOT/target/wasm32-wasip1/release/lib${crate_name}.wasm"
