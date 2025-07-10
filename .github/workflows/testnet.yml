@@ -155,7 +155,7 @@ jobs:
       
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: testnet-logs-${{ github.event.inputs.network_type }}-${{ github.run_id }}
           path: testnet-logs/
