@@ -33,11 +33,20 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       
+      - name: Install cargo-component
+        run: cargo install cargo-component --locked
+      
+      - name: Add wasm32-wasip1 target
+        run: rustup target add wasm32-wasip1
+      
+      - name: Build WASI modules
+        run: ./scripts/build-wasi-modules.sh
+      
       - name: Check formatting
         run: cargo fmt --all -- --check
       
       - name: Run clippy
-        run: cargo clippy --all --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --all-features -- -D warnings
 
   build:
     name: Build
@@ -70,13 +79,17 @@ jobs:
             target/
           key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       
-      - name: Build all crates
-        run: cargo build --all --release
+      - name: Install cargo-component
+        run: cargo install cargo-component --locked
+      
+      - name: Add wasm32-wasip1 target
+        run: rustup target add wasm32-wasip1
       
       - name: Build WASI modules
-        run: |
-          rustup target add wasm32-wasip1
-          ./scripts/build-wasi-modules.sh
+        run: ./scripts/build-wasi-modules.sh
+      
+      - name: Build all crates
+        run: cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --release
 
   test:
     name: Test
@@ -106,16 +119,20 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
       
+      - name: Install cargo-component
+        run: cargo install cargo-component --locked
+      
+      - name: Add wasm32-wasip1 target
+        run: rustup target add wasm32-wasip1
+      
       - name: Build WASI modules
-        run: |
-          rustup target add wasm32-wasip1
-          ./scripts/build-wasi-modules.sh
+        run: ./scripts/build-wasi-modules.sh
       
       - name: Run tests
-        run: cargo test --all --verbose
+        run: cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --verbose
       
       - name: Run tests with all features
-        run: cargo test --all --all-features --verbose
+        run: cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --all-features --verbose
 
   coverage:
     name: Code Coverage
@@ -134,13 +151,17 @@ jobs:
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
       
+      - name: Install cargo-component
+        run: cargo install cargo-component --locked
+      
+      - name: Add wasm32-wasip1 target
+        run: rustup target add wasm32-wasip1
+      
       - name: Build WASI modules
-        run: |
-          rustup target add wasm32-wasip1
-          ./scripts/build-wasi-modules.sh
+        run: ./scripts/build-wasi-modules.sh
       
       - name: Run coverage
-        run: cargo tarpaulin --all --out Xml
+        run: cargo tarpaulin --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --out Xml
       
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3

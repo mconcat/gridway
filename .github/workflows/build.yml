@@ -46,10 +46,20 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-target-${{ matrix.mode }}-
     
+    - name: Install cargo-component
+      run: |
+        cargo install cargo-component --locked
+    
+    - name: Add wasm32-wasip1 target
+      run: rustup target add wasm32-wasip1
+    
+    - name: Build WASI modules
+      run: ./scripts/build-wasi-modules.sh
+    
     - name: Build (debug)
       if: matrix.mode == 'debug'
-      run: cargo build --all
+      run: cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
     
     - name: Build (release)
       if: matrix.mode == 'release'
-      run: cargo build --all --release
+      run: cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --release

@@ -37,8 +37,18 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-registry-
     
+    - name: Install cargo-component
+      run: |
+        cargo install cargo-component --locked
+    
+    - name: Add wasm32-wasip1 target
+      run: rustup target add wasm32-wasip1
+    
+    - name: Build WASI modules (generates bindings)
+      run: ./scripts/build-wasi-modules.sh
+    
     - name: Check formatting
       run: cargo fmt --all -- --check
     
     - name: Run clippy
-      run: cargo clippy --all -- -D warnings
+      run: cargo clippy --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder -- -D warnings
