@@ -34,7 +34,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       
       - name: Install cargo-component
-        run: cargo install cargo-component --locked
+        run: |
+          if ! command -v cargo-component &> /dev/null; then
+            cargo install cargo-component --locked
+          fi
       
       - name: Add wasm32-wasip1 target
         run: rustup target add wasm32-wasip1
@@ -79,7 +82,10 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       
       - name: Install cargo-component
-        run: cargo install cargo-component --locked
+        run: |
+          if ! command -v cargo-component &> /dev/null; then
+            cargo install cargo-component --locked
+          fi
       
       - name: Add wasm32-wasip1 target
         run: rustup target add wasm32-wasip1
@@ -118,7 +124,10 @@ jobs:
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
       
       - name: Install cargo-component
-        run: cargo install cargo-component --locked
+        run: |
+          if ! command -v cargo-component &> /dev/null; then
+            cargo install cargo-component --locked
+          fi
       
       - name: Add wasm32-wasip1 target
         run: rustup target add wasm32-wasip1
@@ -149,7 +158,10 @@ jobs:
         run: cargo install cargo-tarpaulin
       
       - name: Install cargo-component
-        run: cargo install cargo-component --locked
+        run: |
+          if ! command -v cargo-component &> /dev/null; then
+            cargo install cargo-component --locked
+          fi
       
       - name: Add wasm32-wasip1 target
         run: rustup target add wasm32-wasip1

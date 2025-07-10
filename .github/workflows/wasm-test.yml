@@ -44,7 +44,9 @@ jobs:
     
     - name: Install cargo-component
       run: |
-        cargo install cargo-component --locked
+        if ! command -v cargo-component &> /dev/null; then
+          cargo install cargo-component --locked
+        fi
     
     - name: Build WASM modules
       run: |
