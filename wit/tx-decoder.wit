@@ -1,0 +1,33 @@
+package helium:framework@0.1.0;
+
+/// Transaction decoder interface
+interface tx-decoder {
+    /// Decode request
+    record decode-request {
+        /// Raw transaction bytes (could be base64 or hex encoded)
+        tx-bytes: string,
+        /// Encoding format: "raw", "base64", or "hex"
+        encoding: string,
+        /// Whether to validate the transaction structure
+        validate: bool,
+    }
+
+    /// Decode response
+    record decode-response {
+        /// Whether decoding succeeded
+        success: bool,
+        /// Decoded transaction as JSON string
+        decoded-tx: option<string>,
+        /// Error message if failed
+        error: option<string>,
+        /// Any warnings during decoding
+        warnings: list<string>,
+    }
+
+    /// Decode a transaction
+    decode-tx: func(request: decode-request) -> decode-response;
+}
+
+world tx-decoder-world {
+    export tx-decoder;
+}

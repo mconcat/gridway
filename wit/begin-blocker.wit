@@ -1,0 +1,51 @@
+package helium:framework@0.1.0;
+
+/// Begin blocker interface for block initialization
+interface begin-blocker {
+    /// Begin block request
+    record begin-block-request {
+        /// Current block height
+        height: u64,
+        /// Block timestamp (Unix seconds)
+        time: u64,
+        /// Chain identifier
+        chain-id: string,
+        /// Byzantine validators evidence
+        byzantine-validators: list<evidence>,
+    }
+
+    /// Evidence of byzantine behavior
+    record evidence {
+        /// Validator address
+        validator-address: list<u8>,
+        /// Type of evidence
+        evidence-type: string,
+        /// Height at which the evidence occurred
+        height: u64,
+    }
+
+    /// Begin block response
+    record begin-block-response {
+        /// Whether begin block succeeded
+        success: bool,
+        /// Events emitted during begin block
+        events: list<event>,
+        /// Error message if failed
+        error: option<string>,
+    }
+
+    /// Event emitted during processing
+    record event {
+        /// Event type
+        event-type: string,
+        /// Event attributes as JSON string
+        attributes: string,
+    }
+
+    /// Called at the beginning of each block
+    begin-block: func(request: begin-block-request) -> begin-block-response;
+}
+
+world begin-blocker-world {
+    export begin-blocker;
+}

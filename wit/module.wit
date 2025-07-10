@@ -1,0 +1,84 @@
+package helium:framework@0.1.0;
+
+/// Generic module interface for application modules (bank, staking, etc.)
+interface module {
+    /// Message to be handled by the module
+    record message {
+        /// Message type URL (e.g., "/cosmos.bank.v1beta1.MsgSend")
+        type-url: string,
+        /// Message data as JSON
+        data: string,
+        /// Sender of the message
+        sender: string,
+    }
+
+    /// Module execution context
+    record module-context {
+        /// Current block height
+        block-height: u64,
+        /// Block timestamp
+        block-time: u64,
+        /// Chain ID
+        chain-id: string,
+        /// Whether this is a simulation
+        simulate: bool,
+    }
+
+    /// Response from module execution
+    record module-response {
+        /// Whether execution succeeded
+        success: bool,
+        /// Result data as JSON
+        data: option<string>,
+        /// Events emitted
+        events: list<event>,
+        /// Error message if failed
+        error: option<string>,
+        /// Gas consumed
+        gas-used: u64,
+    }
+
+    /// Event emitted during execution
+    record event {
+        /// Event type
+        event-type: string,
+        /// Event attributes as JSON string
+        attributes: string,
+    }
+
+    /// Handle a message
+    handle: func(context: module-context, msg: message) -> module-response;
+
+    /// Query module state
+    query: func(path: string, data: list<u8>) -> result<list<u8>, string>;
+}
+
+/// KVStore resource for blockchain state access
+interface kvstore {
+    /// Resource handle for a KVStore
+    resource store {
+        /// Get a value by key
+        get: func(key: list<u8>) -> option<list<u8>>;
+        
+        /// Set a key-value pair
+        set: func(key: list<u8>, value: list<u8>);
+        
+        /// Delete a key
+        delete: func(key: list<u8>);
+        
+        /// Check if a key exists
+        has: func(key: list<u8>) -> bool;
+        
+        /// Iterate over a range of keys
+        /// Returns list of (key, value) pairs
+        range: func(start: option<list<u8>>, end: option<list<u8>>, limit: u32) -> list<tuple<list<u8>, list<u8>>>;
+    }
+
+    /// Open a store by name
+    open-store: func(name: string) -> result<store, string>;
+}
+
+world module-world {
+    import kvstore;
+    export module;
+}

@@ -1,0 +1,39 @@
+package helium:framework@0.1.0;
+
+/// End blocker interface for block finalization
+interface end-blocker {
+    /// End block request
+    record end-block-request {
+        /// Current block height
+        height: u64,
+        /// Chain identifier
+        chain-id: string,
+    }
+
+    /// End block response
+    record end-block-response {
+        /// Whether end block succeeded
+        success: bool,
+        /// Events emitted during end block
+        events: list<event>,
+        /// Validator updates (as JSON for now)
+        validator-updates: list<string>,
+        /// Error message if failed
+        error: option<string>,
+    }
+
+    /// Event emitted during processing
+    record event {
+        /// Event type
+        event-type: string,
+        /// Event attributes as JSON string
+        attributes: string,
+    }
+
+    /// Called at the end of each block
+    end-block: func(request: end-block-request) -> end-block-response;
+}
+
+world end-blocker-world {
+    export end-blocker;
+}
