@@ -247,11 +247,7 @@ impl KVStoreResourceBindings {
     }
 
     /// Mount a KVStore for component access with a prefix
-    pub fn mount_store_with_prefix(
-        &self,
-        name: String,
-        prefix: String,
-    ) -> Result<(), String> {
+    pub fn mount_store_with_prefix(&self, name: String, prefix: String) -> Result<(), String> {
         self.host.register_component_prefix(name, prefix)
     }
 }

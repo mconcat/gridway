@@ -10,7 +10,9 @@ use signature::Verifier;
 // Include generated bindings
 mod bindings;
 
-use bindings::exports::helium::framework::ante_handler::{AnteResponse, Event, EventAttribute, Guest, TxContext};
+use bindings::exports::helium::framework::ante_handler::{
+    AnteResponse, Event, EventAttribute, Guest, TxContext,
+};
 
 /// Error types for ante handler operations
 #[derive(Debug)]
@@ -273,7 +275,7 @@ fn validate_fees(min_gas_price: u64, tx: &Transaction) -> Result<(), AnteError> 
     if total_fee < required_fee {
         return Err(AnteError {
             error_type: "InsufficientFees".to_string(),
-            message: format!("got {}, required {}", total_fee, required_fee),
+            message: format!("got {total_fee}, required {required_fee}"),
         });
     }
 
@@ -414,12 +416,12 @@ fn verify_secp256k1_signature(
 
     let verifying_key = VerifyingKey::from_sec1_bytes(public_key).map_err(|e| AnteError {
         error_type: "InvalidSignature".to_string(),
-        message: format!("invalid secp256k1 public key: {}", e),
+        message: format!("invalid secp256k1 public key: {e}"),
     })?;
 
     let signature = Signature::from_bytes(signature.into()).map_err(|e| AnteError {
         error_type: "InvalidSignature".to_string(),
-        message: format!("invalid secp256k1 signature: {}", e),
+        message: format!("invalid secp256k1 signature: {e}"),
     })?;
 
     verifying_key
@@ -445,7 +447,7 @@ fn verify_ed25519_signature(
     })?)
     .map_err(|e| AnteError {
         error_type: "InvalidSignature".to_string(),
-        message: format!("invalid ed25519 public key: {}", e),
+        message: format!("invalid ed25519 public key: {e}"),
     })?;
 
     let signature = Signature::from_bytes(signature.try_into().map_err(|_| AnteError {

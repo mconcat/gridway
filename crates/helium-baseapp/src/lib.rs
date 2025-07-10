@@ -1039,9 +1039,7 @@ impl BaseApp {
             }
         } else {
             // Component file not found - return placeholder decoded tx
-            log::warn!(
-                "TxDecoder component not found at {module_path}, using placeholder"
-            );
+            log::warn!("TxDecoder component not found at {module_path}, using placeholder");
             Ok(serde_json::json!({
                 "body": {
                     "messages": [],
@@ -1634,8 +1632,8 @@ impl BaseApp {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
     use super::*;
+    use std::sync::Mutex;
 
     #[test]
     fn test_minimal_wasi_module() {

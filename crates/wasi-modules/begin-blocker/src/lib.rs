@@ -62,7 +62,7 @@ impl Guest for Component {
                 return BeginBlockResponse {
                     success: false,
                     events: vec![],
-                    error: Some(format!("Failed to open kvstore: {}", e)),
+                    error: Some(format!("Failed to open kvstore: {e}")),
                 }
             }
         };
@@ -86,13 +86,12 @@ impl Guest for Component {
     }
 }
 
-fn process_block_header(
-    request: &BeginBlockRequest,
-    store: &kvstore::Store,
-) -> Vec<Event> {
+fn process_block_header(request: &BeginBlockRequest, store: &kvstore::Store) -> Vec<Event> {
     // Get proposer address from KVStore
-    let proposer_address = store.get(b"proposer_address").unwrap_or_else(|| vec![]);
-    
+    let proposer_address = store
+        .get(b"proposer_address")
+        .unwrap_or_else(std::vec::Vec::new);
+
     // Emit new block event
     vec![Event {
         event_type: "new_block".to_string(),
@@ -232,7 +231,7 @@ fn process_epoch_transitions(height: u64) -> Vec<Event> {
     let mut events = vec![];
 
     // Check for daily epoch (every 86400 blocks assuming 1s blocks)
-    if height % 86400 == 0 {
+    if height.is_multiple_of(86400) {
         events.push(Event {
             event_type: "epoch_transition".to_string(),
             attributes: vec![
@@ -249,7 +248,7 @@ fn process_epoch_transitions(height: u64) -> Vec<Event> {
     }
 
     // Check for weekly epoch
-    if height % (86400 * 7) == 0 {
+    if height.is_multiple_of(86400 * 7) {
         events.push(Event {
             event_type: "epoch_transition".to_string(),
             attributes: vec![

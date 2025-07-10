@@ -7,12 +7,12 @@ use crate::component_bindings::ante_handler::AnteHandlerWorld;
 use crate::component_bindings::tx_decoder::TxDecoderWorld;
 use crate::component_bindings::SimpleKVStoreManager;
 use crate::kvstore_resource::KVStoreResourceHost;
+use hex;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::{debug, error, info};
-use hex;
 use wasmtime::component::*;
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
@@ -118,8 +118,13 @@ impl kvstore::HostStore for ComponentState {
         key: Vec<u8>,
     ) -> Option<Vec<u8>> {
         // Convert kvstore::Store to KVStoreResource
-        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
-        match self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+        let kvstore_resource = wasmtime::component::Resource::<
+            crate::kvstore_resource::KVStoreResource,
+        >::new_own(store_handle.rep());
+        match self
+            .kvstore_host
+            .get_resource(&mut self.table, kvstore_resource)
+        {
             Ok(store) => store.get(&key).unwrap_or(None),
             Err(_) => None,
         }
@@ -131,8 +136,13 @@ impl kvstore::HostStore for ComponentState {
         key: Vec<u8>,
         value: Vec<u8>,
     ) {
-        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
-        if let Ok(store) = self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+        let kvstore_resource = wasmtime::component::Resource::<
+            crate::kvstore_resource::KVStoreResource,
+        >::new_own(store_handle.rep());
+        if let Ok(store) = self
+            .kvstore_host
+            .get_resource(&mut self.table, kvstore_resource)
+        {
             let _ = store.set(&key, &value);
         }
     }
@@ -142,8 +152,13 @@ impl kvstore::HostStore for ComponentState {
         store_handle: wasmtime::component::Resource<kvstore::Store>,
         key: Vec<u8>,
     ) {
-        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
-        if let Ok(store) = self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+        let kvstore_resource = wasmtime::component::Resource::<
+            crate::kvstore_resource::KVStoreResource,
+        >::new_own(store_handle.rep());
+        if let Ok(store) = self
+            .kvstore_host
+            .get_resource(&mut self.table, kvstore_resource)
+        {
             let _ = store.delete(&key);
         }
     }
@@ -153,8 +168,13 @@ impl kvstore::HostStore for ComponentState {
         store_handle: wasmtime::component::Resource<kvstore::Store>,
         key: Vec<u8>,
     ) -> bool {
-        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
-        match self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+        let kvstore_resource = wasmtime::component::Resource::<
+            crate::kvstore_resource::KVStoreResource,
+        >::new_own(store_handle.rep());
+        match self
+            .kvstore_host
+            .get_resource(&mut self.table, kvstore_resource)
+        {
             Ok(store) => store.has(&key).unwrap_or(false),
             Err(_) => false,
         }
@@ -167,8 +187,13 @@ impl kvstore::HostStore for ComponentState {
         end: Option<Vec<u8>>,
         limit: u32,
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
-        match self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+        let kvstore_resource = wasmtime::component::Resource::<
+            crate::kvstore_resource::KVStoreResource,
+        >::new_own(store_handle.rep());
+        match self
+            .kvstore_host
+            .get_resource(&mut self.table, kvstore_resource)
+        {
             Ok(store) => store
                 .range(start.as_deref(), end.as_deref(), limit)
                 .unwrap_or_default(),
@@ -176,7 +201,10 @@ impl kvstore::HostStore for ComponentState {
         }
     }
 
-    fn drop(&mut self, _rep: wasmtime::component::Resource<kvstore::Store>) -> wasmtime::Result<()> {
+    fn drop(
+        &mut self,
+        _rep: wasmtime::component::Resource<kvstore::Store>,
+    ) -> wasmtime::Result<()> {
         // Resource cleanup is handled by the resource table
         Ok(())
     }
@@ -191,7 +219,8 @@ impl kvstore::Host for ComponentState {
         match self.kvstore_host.open_store(&mut self.table, &name) {
             Ok(resource) => {
                 // Convert KVStoreResource to kvstore::Store
-                let store_resource = wasmtime::component::Resource::<kvstore::Store>::new_own(resource.rep());
+                let store_resource =
+                    wasmtime::component::Resource::<kvstore::Store>::new_own(resource.rep());
                 Ok(store_resource)
             }
             Err(e) => Err(e),
@@ -225,7 +254,10 @@ impl ComponentHost {
     }
 
     /// Create a new component host with custom configuration and a base store
-    pub fn with_config_and_store(mut config: Config, base_store: Arc<Mutex<dyn helium_store::KVStore>>) -> Result<Self> {
+    pub fn with_config_and_store(
+        mut config: Config,
+        base_store: Arc<Mutex<dyn helium_store::KVStore>>,
+    ) -> Result<Self> {
         // Ensure component model is enabled
         config.wasm_component_model(true);
 
@@ -241,16 +273,20 @@ impl ComponentHost {
         info!("Component host initialized with secure configuration");
 
         let kvstore_host = KVStoreResourceHost::new(base_store);
-        
+
         // Register default component prefixes
         // These can be overridden by calling register_component_prefix
-        kvstore_host.register_component_prefix("ante-handler".to_string(), "/ante/".to_string())
+        kvstore_host
+            .register_component_prefix("ante-handler".to_string(), "/ante/".to_string())
             .map_err(ComponentHostError::ResourceError)?;
-        kvstore_host.register_component_prefix("begin-blocker".to_string(), "/begin/".to_string())
+        kvstore_host
+            .register_component_prefix("begin-blocker".to_string(), "/begin/".to_string())
             .map_err(ComponentHostError::ResourceError)?;
-        kvstore_host.register_component_prefix("end-blocker".to_string(), "/end/".to_string())
+        kvstore_host
+            .register_component_prefix("end-blocker".to_string(), "/end/".to_string())
             .map_err(ComponentHostError::ResourceError)?;
-        kvstore_host.register_component_prefix("tx-decoder".to_string(), "/decoder/".to_string())
+        kvstore_host
+            .register_component_prefix("tx-decoder".to_string(), "/decoder/".to_string())
             .map_err(ComponentHostError::ResourceError)?;
 
         Ok(Self {
@@ -346,7 +382,7 @@ impl ComponentHost {
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
-        
+
         // Add kvstore interface
         self.add_kvstore_to_linker(&mut linker)?;
 
@@ -382,12 +418,15 @@ impl ComponentHost {
             .events
             .iter()
             .map(|event| {
-                let attributes: Vec<serde_json::Value> = event.attributes
+                let attributes: Vec<serde_json::Value> = event
+                    .attributes
                     .iter()
-                    .map(|attr| serde_json::json!({
-                        "key": attr.key,
-                        "value": attr.value
-                    }))
+                    .map(|attr| {
+                        serde_json::json!({
+                            "key": attr.key,
+                            "value": attr.value
+                        })
+                    })
                     .collect();
                 serde_json::json!({
                     "event_type": event.event_type,
@@ -471,7 +510,7 @@ impl ComponentHost {
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
-        
+
         // Add kvstore interface
         self.add_kvstore_to_linker(&mut linker)?;
 
@@ -543,7 +582,7 @@ impl ComponentHost {
                 component_name: "begin-blocker".to_string(),
                 kvstore_manager: self.kvstore_manager.clone(),
                 kvstore_host: self.kvstore_host.clone(),
-                },
+            },
         );
 
         // Set fuel for gas limiting
@@ -557,7 +596,7 @@ impl ComponentHost {
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
-        
+
         // Add kvstore interface
         self.add_kvstore_to_linker(&mut linker)?;
 
@@ -600,12 +639,15 @@ impl ComponentHost {
             .events
             .iter()
             .map(|event| {
-                let attributes: Vec<serde_json::Value> = event.attributes
+                let attributes: Vec<serde_json::Value> = event
+                    .attributes
                     .iter()
-                    .map(|attr| serde_json::json!({
-                        "key": attr.key,
-                        "value": attr.value
-                    }))
+                    .map(|attr| {
+                        serde_json::json!({
+                            "key": attr.key,
+                            "value": attr.value
+                        })
+                    })
                     .collect();
                 serde_json::json!({
                     "event_type": event.event_type,
@@ -662,7 +704,7 @@ impl ComponentHost {
                 component_name: "end-blocker".to_string(),
                 kvstore_manager: self.kvstore_manager.clone(),
                 kvstore_host: self.kvstore_host.clone(),
-                },
+            },
         );
 
         // Set fuel for gas limiting
@@ -676,7 +718,7 @@ impl ComponentHost {
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
-        
+
         // Add kvstore interface
         self.add_kvstore_to_linker(&mut linker)?;
 
@@ -708,12 +750,15 @@ impl ComponentHost {
             .events
             .iter()
             .map(|event| {
-                let attributes: Vec<serde_json::Value> = event.attributes
+                let attributes: Vec<serde_json::Value> = event
+                    .attributes
                     .iter()
-                    .map(|attr| serde_json::json!({
-                        "key": attr.key,
-                        "value": attr.value
-                    }))
+                    .map(|attr| {
+                        serde_json::json!({
+                            "key": attr.key,
+                            "value": attr.value
+                        })
+                    })
                     .collect();
                 serde_json::json!({
                     "event_type": event.event_type,
@@ -721,7 +766,8 @@ impl ComponentHost {
                 })
             })
             .collect();
-        let validator_updates_data: Vec<serde_json::Value> = response.validator_updates
+        let validator_updates_data: Vec<serde_json::Value> = response
+            .validator_updates
             .iter()
             .map(|update| {
                 serde_json::json!({
@@ -777,8 +823,11 @@ impl ComponentHost {
     /// Add kvstore interface to the component linker
     fn add_kvstore_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
         // Use the generated kvstore bindings
-        kvstore::add_to_linker(linker, |state| state)
-            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore interface: {e}")))?;
+        kvstore::add_to_linker(linker, |state| state).map_err(|e| {
+            ComponentHostError::ComponentInstantiation(format!(
+                "Failed to add kvstore interface: {e}"
+            ))
+        })?;
         info!("KVStore interface added to linker");
         Ok(())
     }

@@ -9,7 +9,8 @@
 mod bindings;
 
 use bindings::exports::helium::framework::end_blocker::{
-    EndBlockRequest, EndBlockResponse, Event, EventAttribute, ValidatorUpdate, ValidatorPubKey, Guest,
+    EndBlockRequest, EndBlockResponse, Event, EventAttribute, Guest, ValidatorPubKey,
+    ValidatorUpdate,
 };
 use bindings::helium::framework::kvstore;
 
@@ -45,18 +46,20 @@ impl Guest for Component {
                     success: false,
                     events: vec![],
                     validator_updates: vec![],
-                    error: Some(format!("Failed to open kvstore: {}", e)),
+                    error: Some(format!("Failed to open kvstore: {e}")),
                 }
             }
         };
-        
+
         // Read state from KVStore
         let inflation_rate = read_f64_from_store(&store, b"inflation_rate").unwrap_or(0.05);
         let last_reward_height = read_u64_from_store(&store, b"last_reward_height").unwrap_or(0);
         let total_power = read_i64_from_store(&store, b"total_power").unwrap_or(0);
-        let proposer_address = store.get(b"proposer_address").unwrap_or_else(|| vec![]);
+        let proposer_address = store
+            .get(b"proposer_address")
+            .unwrap_or_else(std::vec::Vec::new);
 
-        let mut validator_updates = vec![];
+        let validator_updates = vec![];
         let mut events = vec![];
 
         // Constants
@@ -69,11 +72,7 @@ impl Guest for Component {
         // In a real implementation, these would be stored as serialized data in KVStore
 
         // Process reward distribution
-        if should_distribute_rewards(
-            request.height,
-            last_reward_height,
-            REWARD_FREQUENCY,
-        ) {
+        if should_distribute_rewards(request.height, last_reward_height, REWARD_FREQUENCY) {
             events.extend(trigger_reward_distribution(
                 request.height,
                 inflation_rate,
@@ -84,15 +83,12 @@ impl Guest for Component {
             store.set(b"last_reward_height", &request.height.to_le_bytes());
         }
 
-        // Process governance proposals  
+        // Process governance proposals
         // For now, we'll skip active proposals as they require complex serialization
         // In a real implementation, these would be stored as serialized data in KVStore
 
         // Process inflation adjustments
-        events.extend(process_inflation_adjustment(
-            request.height,
-            inflation_rate,
-        ));
+        events.extend(process_inflation_adjustment(request.height, inflation_rate));
 
         // Emit block completion event
         events.push(Event {
@@ -311,8 +307,10 @@ fn evaluate_proposal(
     quorum_threshold: f64,
     pass_threshold: f64,
 ) -> (bool, String) {
-    let total_votes =
-        proposal.yes_votes + proposal.no_votes + proposal.abstain_votes + proposal.no_with_veto_votes;
+    let total_votes = proposal.yes_votes
+        + proposal.no_votes
+        + proposal.abstain_votes
+        + proposal.no_with_veto_votes;
 
     if total_votes == 0 {
         return (false, "no votes cast".to_string());
@@ -347,7 +345,7 @@ fn process_inflation_adjustment(height: u64, current_rate: f64) -> Vec<Event> {
     let mut events = vec![];
 
     // Check if it's time for inflation adjustment (e.g., daily)
-    if height % 86400 == 0 {
+    if height.is_multiple_of(86400) {
         // In a real implementation, this would calculate new inflation based on bonding ratio
         let new_rate = current_rate; // Simplified - keep same rate
 

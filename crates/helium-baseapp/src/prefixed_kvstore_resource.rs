@@ -97,8 +97,10 @@ impl PrefixedKVStore {
             .map_err(|e| format!("Failed to lock store: {e}"))?;
 
         // Construct the full range with prefix
-        let full_start = start.map(|s| self.make_key(s)).unwrap_or_else(|| self.prefix.clone());
-        
+        let full_start = start
+            .map(|s| self.make_key(s))
+            .unwrap_or_else(|| self.prefix.clone());
+
         // For the end key, we need to be careful to stay within our prefix
         let full_end = if let Some(e) = end {
             Some(self.make_key(e))
@@ -122,7 +124,7 @@ impl PrefixedKVStore {
         // Use prefix iterator to ensure we only get keys with our prefix
         for (key, value) in store.prefix_iterator(&self.prefix) {
             // Apply start/end bounds if specified
-            if &key < &full_start {
+            if key < full_start {
                 continue;
             }
             if let Some(e) = &full_end {
@@ -178,7 +180,7 @@ mod tests {
     #[test]
     fn test_prefix_isolation() {
         let base_store = Arc::new(Mutex::new(MemStore::new()));
-        
+
         // Create two prefixed stores
         let ante_store = PrefixedKVStore::new_from_str("/ante/", base_store.clone());
         let bank_store = PrefixedKVStore::new_from_str("/bank/", base_store.clone());
@@ -224,15 +226,18 @@ mod tests {
     fn test_sub_prefix() {
         let base_store = Arc::new(Mutex::new(MemStore::new()));
         let ante_store = PrefixedKVStore::new_from_str("/ante/", base_store.clone());
-        
+
         // Create sub-prefixed store
         let accounts_store = ante_store.sub_prefix("accounts/");
-        
+
         // Set value in sub-prefixed store
         accounts_store.set(b"user1", b"data").unwrap();
-        
+
         // Verify the full key path
         let base = base_store.lock().unwrap();
-        assert_eq!(base.get(b"/ante/accounts/user1").unwrap(), Some(b"data".to_vec()));
+        assert_eq!(
+            base.get(b"/ante/accounts/user1").unwrap(),
+            Some(b"data".to_vec())
+        );
     }
 }

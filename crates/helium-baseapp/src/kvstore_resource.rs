@@ -82,7 +82,11 @@ impl KVStoreResourceHost {
 
     /// Register a component with its allowed prefix
     /// For example: ("ante-handler", "/ante/")
-    pub fn register_component_prefix(&self, component_name: String, prefix: String) -> Result<(), String> {
+    pub fn register_component_prefix(
+        &self,
+        component_name: String,
+        prefix: String,
+    ) -> Result<(), String> {
         let mut prefixes = self
             .component_prefixes
             .lock()
@@ -108,11 +112,7 @@ impl KVStoreResourceHost {
             .ok_or_else(|| format!("No prefix registered for component '{name}'"))?
             .clone();
 
-        let resource = KVStoreResource::new(
-            name.to_string(),
-            &prefix,
-            self.base_store.clone(),
-        );
+        let resource = KVStoreResource::new(name.to_string(), &prefix, self.base_store.clone());
 
         table
             .push(resource)
@@ -142,4 +142,3 @@ impl KVStoreResourceHost {
         Ok(())
     }
 }
-
