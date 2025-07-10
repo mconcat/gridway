@@ -49,25 +49,9 @@ jobs:
     
     - name: Check formatting
       run: |
-        # Get all workspace members and check formatting, skipping WASI modules
-        WASI_MODULES=("ante-handler" "begin-blocker" "end-blocker" "tx-decoder")
-        
-        # Get all package names from workspace
-        PACKAGES=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.source == null) | .name')
-        
-        for pkg in $PACKAGES; do
-          # Skip if it's a WASI module
-          if [[ " ${WASI_MODULES[@]} " =~ " ${pkg} " ]]; then
-            echo "Skipping formatting check for WASI module: $pkg"
-            # Check only the lib.rs file for WASI modules
-            if [ -f "crates/wasi-modules/$pkg/src/lib.rs" ]; then
-              rustfmt --check "crates/wasi-modules/$pkg/src/lib.rs"
-            fi
-          else
-            echo "Checking formatting for: $pkg"
-            cargo fmt -p $pkg -- --check
-          fi
-        done
+        # Run cargo fmt on all packages
+        # The bindings.rs files already have #[rustfmt::skip] at the top
+        cargo fmt --all -- --check
     
     - name: Run clippy
       run: cargo clippy --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder -- -D warnings
