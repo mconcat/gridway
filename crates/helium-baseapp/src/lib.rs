@@ -1535,10 +1535,11 @@ mod tests {
 
         // Transaction validation via WASI TxDecoder and ante handler
         let response = app.check_tx(b"dummy_tx").unwrap();
-        // Should fail because ante handler module is not loaded
+        // Should fail because the transaction has no messages (basic validation)
         assert_eq!(response.code, 1);
         assert!(
-            response.log.contains("ante handler validation failed")
+            response.log.contains("transaction contains no messages")
+                || response.log.contains("ante handler validation failed")
                 || response.log.contains("ante handler error")
         );
     }

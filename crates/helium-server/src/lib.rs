@@ -3,6 +3,8 @@
 //! This crate provides HTTP/RPC server implementations and utilities
 //! for helium blockchain applications.
 
+#![recursion_limit = "256"]
+
 pub mod abci_server;
 pub mod api_router;
 pub mod config;

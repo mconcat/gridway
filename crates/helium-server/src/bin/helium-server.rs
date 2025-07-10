@@ -5,15 +5,10 @@
 use clap::{Parser, Subcommand};
 use helium_baseapp::BaseApp;
 use helium_server::{
-    abci_server::AbciServer, 
-    api_router::create_api_router,
-    config::AbciConfig, 
-    health::HealthState
+    abci_server::AbciServer, api_router::create_api_router, config::AbciConfig, health::HealthState,
 };
 use std::path::PathBuf;
-use std::sync::Arc;
 use tracing::{error, info};
-use axum;
 
 #[derive(Parser)]
 #[command(name = "helium")]
@@ -41,11 +36,11 @@ enum Commands {
         /// ABCI listen address
         #[arg(long, default_value = "tcp://0.0.0.0:26658")]
         abci_address: String,
-        
+
         /// gRPC listen address
         #[arg(long, default_value = "0.0.0.0:9090")]
         grpc_address: String,
-        
+
         /// Chain ID
         #[arg(long)]
         chain_id: Option<String>,
@@ -69,18 +64,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Init { chain_id } => {
             info!("Initializing Helium node with chain ID: {}", chain_id);
-            
+
             // Create home directory
             std::fs::create_dir_all(&cli.home)?;
-            
+
             // Create config directory
             let config_dir = cli.home.join("config");
             std::fs::create_dir_all(&config_dir)?;
-            
+
             // Create data directory
             let data_dir = cli.home.join("data");
             std::fs::create_dir_all(&data_dir)?;
-            
+
             // Write configuration file
             let config = AbciConfig {
                 listen_address: "tcp://0.0.0.0:26658".to_string(),
@@ -91,16 +86,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 retain_blocks: 0,
                 chain_id: chain_id.clone(),
             };
-            
+
             let config_path = config_dir.join("config.toml");
             let config_toml = toml::to_string_pretty(&config)?;
             std::fs::write(config_path, config_toml)?;
-            
+
             info!("Node initialized successfully at {}", cli.home.display());
         }
-        Commands::Start { abci_address, grpc_address, chain_id } => {
+        Commands::Start {
+            abci_address,
+            grpc_address,
+            chain_id,
+        } => {
             info!("Starting Helium node");
-            
+
             // Load configuration
             let config_path = cli.home.join("config/config.toml");
             let config = if config_path.exists() {
@@ -117,27 +116,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     chain_id: chain_id.unwrap_or_else(|| "helium-testnet".to_string()),
                 }
             };
-            
+
             info!("Chain ID: {}", config.chain_id);
             info!("ABCI address: {}", config.listen_address);
             if let Some(ref grpc) = config.grpc_address {
                 info!("gRPC address: {}", grpc);
             }
-            
+
             // Create BaseApp
             let app = BaseApp::new(config.chain_id.clone())?;
-            
-            // Create and start ABCI server
-            let server = AbciServer::with_config(app, config.chain_id.clone(), config.clone());
-            
+            let app_arc = std::sync::Arc::new(tokio::sync::RwLock::new(app));
+
             // Create health state
             let health_state = HealthState::new(config.chain_id.clone());
             health_state.set_connected(true).await;
-            
+
             // Create shutdown channel
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-            let (shutdown_tx2, mut shutdown_rx2) = tokio::sync::oneshot::channel();
-            
+            let (shutdown_tx2, shutdown_rx2) = tokio::sync::oneshot::channel();
+
             // Start REST API server on standard Cosmos SDK port
             let rest_addr = "0.0.0.0:1317";
             let health_state_clone = health_state.clone();
@@ -147,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let listener = tokio::net::TcpListener::bind(rest_addr)
                     .await
                     .expect("Failed to bind REST API endpoint");
-                
+
                 axum::serve(listener, app)
                     .with_graceful_shutdown(async move {
                         let _ = shutdown_rx2.await;
@@ -155,21 +152,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await
                     .expect("REST API server failed");
             });
-            
+
             // Handle shutdown signals
             tokio::spawn(async move {
-                tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
+                tokio::signal::ctrl_c()
+                    .await
+                    .expect("Failed to listen for ctrl+c");
                 info!("Received shutdown signal");
                 let _ = shutdown_tx.send(());
                 let _ = shutdown_tx2.send(());
             });
-            
+
             // Start ABCI server
-            if let Err(e) = AbciServer::start_abci_server(
-                server.app.clone(),
-                &config,
-                shutdown_rx,
-            ).await {
+            if let Err(e) = AbciServer::start_abci_server(app_arc, &config, shutdown_rx).await {
                 error!("ABCI server error: {}", e);
                 return Err(e.into());
             }

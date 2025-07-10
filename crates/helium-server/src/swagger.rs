@@ -1,7 +1,6 @@
 //! Swagger/OpenAPI endpoint for Cosmos SDK compatibility
 
 use axum::{
-    extract::State,
     http::StatusCode,
     response::{Html, Json},
     routing::get,

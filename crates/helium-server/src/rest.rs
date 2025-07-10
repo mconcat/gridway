@@ -191,10 +191,9 @@ async fn get_balance(
 
     // Add block height to gRPC metadata if provided
     if let Some(height) = block_height {
-        request.metadata_mut().insert(
-            "x-cosmos-block-height",
-            height.to_string().parse().unwrap(),
-        );
+        request
+            .metadata_mut()
+            .insert("x-cosmos-block-height", height.to_string().parse().unwrap());
     }
 
     match state.bank_service.as_ref().balance(request).await {
@@ -264,10 +263,9 @@ async fn get_all_balances(
 
     // Add block height to gRPC metadata if provided
     if let Some(height) = block_height {
-        request.metadata_mut().insert(
-            "x-cosmos-block-height",
-            height.to_string().parse().unwrap(),
-        );
+        request
+            .metadata_mut()
+            .insert("x-cosmos-block-height", height.to_string().parse().unwrap());
     }
 
     match state.bank_service.as_ref().all_balances(request).await {

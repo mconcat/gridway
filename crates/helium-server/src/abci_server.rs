@@ -933,47 +933,28 @@ async fn handle_abci_connection_with_retry(
     peer_addr: std::net::SocketAddr,
     retry_config: RetryConfig,
 ) -> Result<()> {
-    let mut backoff_ms = retry_config.initial_backoff_ms;
-    let mut retry_count = 0;
+    let backoff_ms = retry_config.initial_backoff_ms;
+    let retry_count = 0;
 
-    loop {
-        match handle_abci_connection_inner(server.clone(), stream.try_clone().unwrap(), peer_addr).await {
-            Ok(()) => {
-                info!("ABCI connection from {} completed successfully", peer_addr);
-                return Ok(());
-            }
-            Err(e) => {
-                retry_count += 1;
-                
-                if retry_count > retry_config.max_retries {
-                    error!("Max retries exceeded for ABCI connection from {}: {}", peer_addr, e);
-                    return Err(e);
-                }
-                
-                error!(
-                    "ABCI connection error from {} (retry {}/{}): {}",
-                    peer_addr, retry_count, retry_config.max_retries, e
-                );
-                
-                // Calculate next backoff with jitter
-                let jitter = rand::random::<f64>() * 0.1 * backoff_ms as f64;
-                let sleep_duration = std::time::Duration::from_millis(
-                    (backoff_ms as f64 + jitter) as u64
-                );
-                
+    // Since we can't clone the stream, we handle it once
+    // Retry logic should be implemented at the connection acceptance level
+    match handle_abci_connection_inner(server, stream, peer_addr).await {
+        Ok(()) => {
+            info!("ABCI connection from {} completed successfully", peer_addr);
+            Ok(())
+        }
+        Err(e) => {
+            error!("ABCI connection error from {}: {}", peer_addr, e);
+
+            // Log retry information for debugging
+            if retry_count < retry_config.max_retries {
                 info!(
-                    "Retrying ABCI connection in {:?} (attempt {}/{})",
-                    sleep_duration, retry_count + 1, retry_config.max_retries
-                );
-                
-                tokio::time::sleep(sleep_duration).await;
-                
-                // Update backoff with exponential increase
-                backoff_ms = std::cmp::min(
-                    (backoff_ms as f64 * retry_config.multiplier) as u64,
-                    retry_config.max_backoff_ms,
+                    "Connection failed. In a production setup, CometBFT would retry with backoff: {}ms",
+                    backoff_ms
                 );
             }
+
+            Err(e)
         }
     }
 }
@@ -981,17 +962,15 @@ async fn handle_abci_connection_with_retry(
 /// Inner ABCI connection handler
 async fn handle_abci_connection_inner(
     _server: AbciServer,
-    mut stream: tokio::net::TcpStream,
+    stream: tokio::net::TcpStream,
     peer_addr: std::net::SocketAddr,
 ) -> Result<()> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    
     info!("New ABCI connection from {}", peer_addr);
 
     // Set TCP keepalive and nodelay for better connection stability
-    stream.set_nodelay(true).map_err(|e| {
-        AbciError::ServerError(format!("Failed to set TCP nodelay: {}", e))
-    })?;
+    stream
+        .set_nodelay(true)
+        .map_err(|e| AbciError::ServerError(format!("Failed to set TCP nodelay: {e}")))?;
 
     // TODO: Implement actual ABCI wire protocol handling
     // This would involve:
