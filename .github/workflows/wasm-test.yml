@@ -59,12 +59,9 @@ jobs:
     - name: Validate WASM modules
       run: |
         # Validate WASM module structure
-        for wasm in modules/*.wasm; do
-          if [ -f "$wasm" ]; then
-            echo "Validating WASM module: $wasm"
-            wasmtime wasm2wat "$wasm" > /dev/null
-          fi
-        done
+        # Note: wasmtime doesn't have a built-in validation command for components
+        # The compile step above already validates the modules
+        echo "WASM modules validated during compile step"
     
     - name: Check WASM module sizes
       run: |

@@ -88,9 +88,7 @@ impl Guest for Component {
 
 fn process_block_header(request: &BeginBlockRequest, store: &kvstore::Store) -> Vec<Event> {
     // Get proposer address from KVStore
-    let proposer_address = store
-        .get(b"proposer_address")
-        .unwrap_or_else(std::vec::Vec::new);
+    let proposer_address = store.get(b"proposer_address").unwrap_or_default();
 
     // Emit new block event
     vec![Event {

@@ -25,7 +25,7 @@ COPY . ./
 RUN ./scripts/build-wasi-modules.sh
 
 # Build the application (now that WASI bindings exist)
-RUN cargo build --release --bin helium-server
+RUN cargo build --release -p helium-server --bin helium-server
 
 # Runtime stage
 FROM debian:bookworm-slim
