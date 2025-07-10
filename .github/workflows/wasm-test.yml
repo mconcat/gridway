@@ -22,6 +22,11 @@ jobs:
       with:
         targets: wasm32-wasip1
     
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y protobuf-compiler
+    
     - name: Install wasmtime
       run: |
         curl https://wasmtime.dev/install.sh -sSf | bash
