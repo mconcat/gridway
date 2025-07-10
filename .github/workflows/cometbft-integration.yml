@@ -1,0 +1,324 @@
+name: CometBFT Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'crates/helium-server/**'
+      - 'crates/helium-baseapp/**'
+      - 'docker-compose*.yml'
+      - 'Dockerfile'
+      - 'scripts/*.sh'
+      - '.github/workflows/cometbft-integration.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'crates/helium-server/**'
+      - 'crates/helium-baseapp/**'
+      - 'docker-compose*.yml'
+      - 'Dockerfile'
+      - 'scripts/*.sh'
+
+env:
+  CARGO_TERM_COLOR: always
+  CHAIN_ID: helium-testnet-ci
+
+jobs:
+  integration-single-node:
+    name: Single Node Integration Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      
+      - name: Build Helium Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: helium:test
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+      
+      - name: Create test environment
+        run: |
+          cp .env.example .env
+          echo "CHAIN_ID=${{ env.CHAIN_ID }}" >> .env
+      
+      - name: Initialize testnet
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/init-testnet.sh
+      
+      - name: Start services
+        run: |
+          docker-compose up -d
+          echo "Waiting for services to be ready..."
+          sleep 10
+      
+      - name: Check service health
+        run: |
+          # Check Helium health
+          for i in {1..30}; do
+            if curl -f http://localhost:8080/health 2>/dev/null; then
+              echo "Helium health check passed"
+              break
+            fi
+            echo "Waiting for Helium to be healthy... ($i/30)"
+            sleep 2
+          done
+          
+          # Check CometBFT status
+          for i in {1..30}; do
+            if curl -f http://localhost:26657/status 2>/dev/null; then
+              echo "CometBFT status check passed"
+              break
+            fi
+            echo "Waiting for CometBFT to be ready... ($i/30)"
+            sleep 2
+          done
+      
+      - name: Verify integration
+        run: |
+          # Check if blocks are being produced
+          HEIGHT_1=$(curl -s http://localhost:26657/status | jq -r '.result.sync_info.latest_block_height')
+          echo "Initial block height: $HEIGHT_1"
+          
+          sleep 5
+          
+          HEIGHT_2=$(curl -s http://localhost:26657/status | jq -r '.result.sync_info.latest_block_height')
+          echo "Block height after 5 seconds: $HEIGHT_2"
+          
+          if [ "$HEIGHT_2" -le "$HEIGHT_1" ]; then
+            echo "ERROR: Blocks are not being produced!"
+            docker-compose logs
+            exit 1
+          fi
+          
+          echo "✓ Blocks are being produced successfully"
+      
+      - name: Test ABCI endpoints
+        run: |
+          # Test health endpoint
+          curl -f http://localhost:8080/health | jq .
+          
+          # Test ready endpoint
+          curl -f http://localhost:8080/ready | jq .
+          
+          # Test CometBFT RPC
+          curl -f http://localhost:26657/abci_info | jq .
+      
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Docker Compose Status ==="
+          docker-compose ps
+          echo "=== Helium Logs ==="
+          docker-compose logs helium
+          echo "=== CometBFT Logs ==="
+          docker-compose logs cometbft
+      
+      - name: Stop services
+        if: always()
+        run: docker-compose down -v
+
+  integration-multi-node:
+    name: Multi Node Integration Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Helium Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: helium:test
+      
+      - name: Create test environment
+        run: |
+          cp .env.example .env
+          echo "CHAIN_ID=${{ env.CHAIN_ID }}" >> .env
+      
+      - name: Initialize multi-node testnet
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/init-multi-testnet.sh
+      
+      - name: Start multi-node services
+        run: |
+          docker-compose -f docker-compose.multi.yml up -d
+          echo "Waiting for all nodes to be ready..."
+          sleep 20
+      
+      - name: Check all nodes health
+        run: |
+          # Check health for all 4 nodes
+          for node in 0 1 2 3; do
+            port=$((8080 + $node))
+            echo "Checking health for node $node on port $port..."
+            
+            for i in {1..30}; do
+              if curl -f http://localhost:$port/health 2>/dev/null; then
+                echo "✓ Node $node health check passed"
+                break
+              fi
+              echo "  Waiting for node $node to be healthy... ($i/30)"
+              sleep 2
+            done
+          done
+      
+      - name: Verify consensus
+        run: |
+          # Check if all nodes are at the same height
+          echo "Checking consensus across all nodes..."
+          
+          HEIGHTS=""
+          for node in 0 1 2 3; do
+            port=$((26657 + $node * 10))
+            HEIGHT=$(curl -s http://localhost:$port/status | jq -r '.result.sync_info.latest_block_height')
+            echo "Node $node height: $HEIGHT"
+            HEIGHTS="$HEIGHTS $HEIGHT"
+          done
+          
+          # Wait for more blocks
+          sleep 10
+          
+          echo "Checking if all nodes are progressing..."
+          for node in 0 1 2 3; do
+            port=$((26657 + $node * 10))
+            NEW_HEIGHT=$(curl -s http://localhost:$port/status | jq -r '.result.sync_info.latest_block_height')
+            echo "Node $node new height: $NEW_HEIGHT"
+          done
+      
+      - name: Test peer connectivity
+        run: |
+          # Check that nodes have peers
+          for node in 0 1 2 3; do
+            port=$((26657 + $node * 10))
+            PEERS=$(curl -s http://localhost:$port/net_info | jq -r '.result.n_peers')
+            echo "Node $node has $PEERS peers"
+            
+            if [ "$PEERS" -lt 1 ]; then
+              echo "ERROR: Node $node has no peers!"
+              exit 1
+            fi
+          done
+      
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Docker Compose Status ==="
+          docker-compose -f docker-compose.multi.yml ps
+          
+          for node in 0 1 2 3; do
+            echo "=== Node $node Logs ==="
+            docker-compose -f docker-compose.multi.yml logs helium-$node cometbft-$node | tail -100
+          done
+      
+      - name: Stop services
+        if: always()
+        run: docker-compose -f docker-compose.multi.yml down -v
+
+  connection-resilience:
+    name: Connection Resilience Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Helium Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: helium:test
+      
+      - name: Create test environment
+        run: |
+          cp .env.example .env
+          chmod +x scripts/*.sh
+          ./scripts/init-testnet.sh
+      
+      - name: Start services
+        run: |
+          docker-compose up -d
+          sleep 10
+      
+      - name: Test connection recovery
+        run: |
+          # Get initial block height
+          HEIGHT_1=$(curl -s http://localhost:26657/status | jq -r '.result.sync_info.latest_block_height')
+          echo "Initial height: $HEIGHT_1"
+          
+          # Stop Helium service
+          echo "Stopping Helium service..."
+          docker-compose stop helium
+          sleep 5
+          
+          # Restart Helium service
+          echo "Restarting Helium service..."
+          docker-compose start helium
+          sleep 10
+          
+          # Check if connection recovered and blocks are being produced
+          HEIGHT_2=$(curl -s http://localhost:26657/status | jq -r '.result.sync_info.latest_block_height')
+          echo "Height after recovery: $HEIGHT_2"
+          
+          if [ "$HEIGHT_2" -le "$HEIGHT_1" ]; then
+            echo "ERROR: Connection did not recover properly!"
+            docker-compose logs
+            exit 1
+          fi
+          
+          echo "✓ Connection recovered successfully"
+      
+      - name: Test health check during disruption
+        run: |
+          # Check health endpoint behavior
+          curl -f http://localhost:8080/health | jq .
+          
+          # Simulate network partition
+          docker-compose exec -T helium nc -l -p 26658 &
+          NC_PID=$!
+          sleep 2
+          
+          # Health should still respond
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "✓ Health endpoint responsive during disruption"
+          else
+            echo "ERROR: Health endpoint not responding!"
+            exit 1
+          fi
+          
+          kill $NC_PID 2>/dev/null || true
+      
+      - name: Stop services
+        if: always()
+        run: docker-compose down -v

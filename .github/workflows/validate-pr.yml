@@ -1,0 +1,187 @@
+name: Validate PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-files:
+    name: Check Required Files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check CometBFT integration files exist
+        run: |
+          echo "Checking required files..."
+          
+          # Docker files
+          [ -f "docker-compose.yml" ] || { echo "❌ docker-compose.yml missing"; exit 1; }
+          [ -f "docker-compose.multi.yml" ] || { echo "❌ docker-compose.multi.yml missing"; exit 1; }
+          [ -f "Dockerfile" ] || { echo "❌ Dockerfile missing"; exit 1; }
+          [ -f ".env.example" ] || { echo "❌ .env.example missing"; exit 1; }
+          
+          # Scripts
+          [ -f "scripts/init-testnet.sh" ] || { echo "❌ init-testnet.sh missing"; exit 1; }
+          [ -f "scripts/reset-testnet.sh" ] || { echo "❌ reset-testnet.sh missing"; exit 1; }
+          [ -f "scripts/start-testnet.sh" ] || { echo "❌ start-testnet.sh missing"; exit 1; }
+          [ -f "scripts/init-multi-testnet.sh" ] || { echo "❌ init-multi-testnet.sh missing"; exit 1; }
+          
+          # Documentation
+          [ -f "docs/cometbft-integration.md" ] || { echo "❌ cometbft-integration.md missing"; exit 1; }
+          [ -f "README-COMETBFT.md" ] || { echo "❌ README-COMETBFT.md missing"; exit 1; }
+          
+          echo "✅ All required files present"
+      
+      - name: Validate script permissions
+        run: |
+          echo "Checking script permissions..."
+          
+          for script in scripts/*.sh; do
+            if [ -f "$script" ]; then
+              if [ ! -x "$script" ]; then
+                echo "❌ $script is not executable"
+                exit 1
+              fi
+            fi
+          done
+          
+          echo "✅ All scripts are executable"
+      
+      - name: Check for sensitive data
+        run: |
+          echo "Checking for sensitive data..."
+          
+          # Check for hardcoded secrets
+          if grep -r "password\s*=\s*[\"'][^\"']*[\"']" --include="*.yml" --include="*.yaml" --include="*.toml" --include="*.sh" .; then
+            echo "❌ Found hardcoded passwords"
+            exit 1
+          fi
+          
+          if grep -r "token\s*=\s*[\"'][^\"']*[\"']" --include="*.yml" --include="*.yaml" --include="*.toml" --include="*.sh" .; then
+            echo "❌ Found hardcoded tokens"
+            exit 1
+          fi
+          
+          # Check .env.example doesn't contain real values
+          if grep -E "=(eyJ|sk_|pk_|ghp_)" .env.example 2>/dev/null; then
+            echo "❌ .env.example contains what looks like real credentials"
+            exit 1
+          fi
+          
+          echo "✅ No sensitive data found"
+
+  validate-integration:
+    name: Validate Integration Features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check health endpoint implementation
+        run: |
+          echo "Checking health endpoint implementation..."
+          
+          # Check health module exists
+          [ -f "crates/helium-server/src/health.rs" ] || { echo "❌ health.rs missing"; exit 1; }
+          
+          # Check health endpoints are defined
+          grep -q "health_handler" crates/helium-server/src/health.rs || { echo "❌ health_handler not found"; exit 1; }
+          grep -q "ready_handler" crates/helium-server/src/health.rs || { echo "❌ ready_handler not found"; exit 1; }
+          
+          echo "✅ Health endpoints implemented"
+      
+      - name: Check ABCI server features
+        run: |
+          echo "Checking ABCI server features..."
+          
+          # Check for retry configuration
+          grep -q "RetryConfig" crates/helium-server/src/abci_server.rs || { echo "❌ RetryConfig not found"; exit 1; }
+          grep -q "exponential_backoff" crates/helium-server/src/abci_server.rs || grep -q "multiplier" crates/helium-server/src/abci_server.rs || { echo "❌ Exponential backoff not implemented"; exit 1; }
+          
+          echo "✅ ABCI server has required features"
+      
+      - name: Validate Docker configurations
+        run: |
+          echo "Validating Docker configurations..."
+          
+          # Check single-node config
+          docker-compose -f docker-compose.yml config > /dev/null || { echo "❌ docker-compose.yml invalid"; exit 1; }
+          
+          # Check multi-node config
+          docker-compose -f docker-compose.multi.yml config > /dev/null || { echo "❌ docker-compose.multi.yml invalid"; exit 1; }
+          
+          # Check health checks are configured
+          docker-compose -f docker-compose.yml config | grep -q "healthcheck" || { echo "❌ No healthcheck in docker-compose.yml"; exit 1; }
+          
+          echo "✅ Docker configurations valid"
+
+  test-scripts:
+    name: Test Shell Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      
+      - name: Run shellcheck
+        run: |
+          echo "Running shellcheck on all scripts..."
+          
+          for script in scripts/*.sh; do
+            echo "Checking $script..."
+            shellcheck -e SC2086,SC2034 "$script" || exit 1
+          done
+          
+          echo "✅ All scripts pass shellcheck"
+      
+      - name: Test script syntax
+        run: |
+          echo "Testing script syntax..."
+          
+          for script in scripts/*.sh; do
+            echo "Testing $script..."
+            bash -n "$script" || { echo "❌ Syntax error in $script"; exit 1; }
+          done
+          
+          echo "✅ All scripts have valid syntax"
+
+  summary:
+    name: PR Validation Summary
+    needs: [check-files, validate-integration, test-scripts]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "## PR Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.check-files.result }}" == "success" ]; then
+            echo "✅ Required files check: **Passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Required files check: **Failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.validate-integration.result }}" == "success" ]; then
+            echo "✅ Integration features check: **Passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Integration features check: **Failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.test-scripts.result }}" == "success" ]; then
+            echo "✅ Shell scripts check: **Passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Shell scripts check: **Failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### CometBFT Integration Features" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Docker Compose configurations" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Health check endpoints" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Connection resilience" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Multi-node support" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Shell scripts" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Documentation" >> $GITHUB_STEP_SUMMARY

@@ -902,13 +902,96 @@ mod tests {
     }
 }
 
-/// Handle ABCI connection - placeholder for TCP connection handling
-async fn handle_abci_connection(
+/// Connection retry configuration
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    /// Initial backoff duration in milliseconds
+    pub initial_backoff_ms: u64,
+    /// Maximum backoff duration in milliseconds
+    pub max_backoff_ms: u64,
+    /// Backoff multiplier
+    pub multiplier: f64,
+    /// Maximum number of retries
+    pub max_retries: u32,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            initial_backoff_ms: 100,
+            max_backoff_ms: 30000,
+            multiplier: 2.0,
+            max_retries: 10,
+        }
+    }
+}
+
+/// Handle ABCI connection with retry logic
+async fn handle_abci_connection_with_retry(
+    server: AbciServer,
+    stream: tokio::net::TcpStream,
+    peer_addr: std::net::SocketAddr,
+    retry_config: RetryConfig,
+) -> Result<()> {
+    let mut backoff_ms = retry_config.initial_backoff_ms;
+    let mut retry_count = 0;
+
+    loop {
+        match handle_abci_connection_inner(server.clone(), stream.try_clone().unwrap(), peer_addr).await {
+            Ok(()) => {
+                info!("ABCI connection from {} completed successfully", peer_addr);
+                return Ok(());
+            }
+            Err(e) => {
+                retry_count += 1;
+                
+                if retry_count > retry_config.max_retries {
+                    error!("Max retries exceeded for ABCI connection from {}: {}", peer_addr, e);
+                    return Err(e);
+                }
+                
+                error!(
+                    "ABCI connection error from {} (retry {}/{}): {}",
+                    peer_addr, retry_count, retry_config.max_retries, e
+                );
+                
+                // Calculate next backoff with jitter
+                let jitter = rand::random::<f64>() * 0.1 * backoff_ms as f64;
+                let sleep_duration = std::time::Duration::from_millis(
+                    (backoff_ms as f64 + jitter) as u64
+                );
+                
+                info!(
+                    "Retrying ABCI connection in {:?} (attempt {}/{})",
+                    sleep_duration, retry_count + 1, retry_config.max_retries
+                );
+                
+                tokio::time::sleep(sleep_duration).await;
+                
+                // Update backoff with exponential increase
+                backoff_ms = std::cmp::min(
+                    (backoff_ms as f64 * retry_config.multiplier) as u64,
+                    retry_config.max_backoff_ms,
+                );
+            }
+        }
+    }
+}
+
+/// Inner ABCI connection handler
+async fn handle_abci_connection_inner(
     _server: AbciServer,
-    _stream: tokio::net::TcpStream,
+    mut stream: tokio::net::TcpStream,
     peer_addr: std::net::SocketAddr,
 ) -> Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    
     info!("New ABCI connection from {}", peer_addr);
+
+    // Set TCP keepalive and nodelay for better connection stability
+    stream.set_nodelay(true).map_err(|e| {
+        AbciError::ServerError(format!("Failed to set TCP nodelay: {}", e))
+    })?;
 
     // TODO: Implement actual ABCI wire protocol handling
     // This would involve:
@@ -918,6 +1001,23 @@ async fn handle_abci_connection(
     // 4. Encoding and sending responses
 
     // For now, we're using gRPC via tonic, so this is a placeholder
+    // In a real implementation, we would:
+    // - Read message length (4 bytes, big endian)
+    // - Read message bytes
+    // - Decode protobuf message
+    // - Route to appropriate handler
+    // - Encode response
+    // - Write response length and bytes
 
     Ok(())
+}
+
+/// Handle ABCI connection - wrapper with retry logic
+async fn handle_abci_connection(
+    server: AbciServer,
+    stream: tokio::net::TcpStream,
+    peer_addr: std::net::SocketAddr,
+) -> Result<()> {
+    let retry_config = RetryConfig::default();
+    handle_abci_connection_with_retry(server, stream, peer_addr, retry_config).await
 }

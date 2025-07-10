@@ -4,10 +4,13 @@
 //! for helium blockchain applications.
 
 pub mod abci_server;
+pub mod api_router;
 pub mod config;
 pub mod grpc;
+pub mod health;
 pub mod rest;
 pub mod services;
+pub mod swagger;
 
 use axum::{
     extract::State,

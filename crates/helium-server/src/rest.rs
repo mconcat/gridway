@@ -5,7 +5,7 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Json,
     routing::{get, post},
     Router,
@@ -166,17 +166,36 @@ pub struct PageResponse {
 /// Get balance for a specific denom
 async fn get_balance(
     Path((address, denom)): Path<(String, String)>,
+    headers: HeaderMap,
     State(state): State<Arc<RestGatewayState>>,
 ) -> Result<Json<BalanceResponse>, (StatusCode, Json<ErrorResponse>)> {
     if state.config.enable_logging {
         debug!("REST: Getting balance for {} denom {}", address, denom);
     }
 
+    // Check for x-cosmos-block-height header
+    let block_height = headers
+        .get("x-cosmos-block-height")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.parse::<i64>().ok());
+
+    if let Some(height) = block_height {
+        debug!("REST: Using historical height {}", height);
+    }
+
     // Call the gRPC bank service
-    let request = Request::new(bank::QueryBalanceRequest {
+    let mut request = Request::new(bank::QueryBalanceRequest {
         address: address.clone(),
         denom: denom.clone(),
     });
+
+    // Add block height to gRPC metadata if provided
+    if let Some(height) = block_height {
+        request.metadata_mut().insert(
+            "x-cosmos-block-height",
+            height.to_string().parse().unwrap(),
+        );
+    }
 
     match state.bank_service.as_ref().balance(request).await {
         Ok(response) => {
@@ -211,10 +230,21 @@ async fn get_balance(
 async fn get_all_balances(
     Path(address): Path<String>,
     Query(pagination): Query<PaginationParams>,
+    headers: HeaderMap,
     State(state): State<Arc<RestGatewayState>>,
 ) -> Result<Json<AllBalancesResponse>, (StatusCode, Json<ErrorResponse>)> {
     if state.config.enable_logging {
         debug!("REST: Getting all balances for {}", address);
+    }
+
+    // Check for x-cosmos-block-height header
+    let block_height = headers
+        .get("x-cosmos-block-height")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.parse::<i64>().ok());
+
+    if let Some(height) = block_height {
+        debug!("REST: Using historical height {}", height);
     }
 
     // Convert REST pagination to gRPC pagination
@@ -227,10 +257,18 @@ async fn get_all_balances(
     });
 
     // Call the gRPC bank service
-    let request = Request::new(bank::QueryAllBalancesRequest {
+    let mut request = Request::new(bank::QueryAllBalancesRequest {
         address: address.clone(),
         pagination: grpc_pagination,
     });
+
+    // Add block height to gRPC metadata if provided
+    if let Some(height) = block_height {
+        request.metadata_mut().insert(
+            "x-cosmos-block-height",
+            height.to_string().parse().unwrap(),
+        );
+    }
 
     match state.bank_service.as_ref().all_balances(request).await {
         Ok(response) => {

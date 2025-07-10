@@ -22,3 +22,24 @@ worktrees/
 
 # Old references
 cosmos-sdk/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Testnet data
+testnet/
+testnet_backup_*/
+
+# Docker volumes
+.docker/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
