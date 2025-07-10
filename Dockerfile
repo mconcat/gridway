@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     protobuf-compiler \
     curl \
+    build-essential \
+    clang \
+    libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-component

@@ -1,0 +1,6 @@
+# Rustfmt configuration
+
+# Exclude generated bindings files
+ignore = [
+    "crates/wasi-modules/*/src/bindings.rs",
+]
