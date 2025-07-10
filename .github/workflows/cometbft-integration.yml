@@ -69,7 +69,7 @@ jobs:
       
       - name: Start services
         run: |
-          docker-compose up -d
+          docker compose up -d
           echo "Waiting for services to be ready..."
           sleep 10
       
@@ -108,7 +108,7 @@ jobs:
           
           if [ "$HEIGHT_2" -le "$HEIGHT_1" ]; then
             echo "ERROR: Blocks are not being produced!"
-            docker-compose logs
+            docker compose logs
             exit 1
           fi
           
@@ -129,15 +129,15 @@ jobs:
         if: failure()
         run: |
           echo "=== Docker Compose Status ==="
-          docker-compose ps
+          docker compose ps
           echo "=== Helium Logs ==="
-          docker-compose logs helium
+          docker compose logs helium
           echo "=== CometBFT Logs ==="
-          docker-compose logs cometbft
+          docker compose logs cometbft
       
       - name: Stop services
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
 
   integration-multi-node:
     name: Multi Node Integration Test
@@ -169,7 +169,7 @@ jobs:
       
       - name: Start multi-node services
         run: |
-          docker-compose -f docker-compose.multi.yml up -d
+          docker compose -f docker-compose.multi.yml up -d
           echo "Waiting for all nodes to be ready..."
           sleep 20
       
@@ -231,16 +231,16 @@ jobs:
         if: failure()
         run: |
           echo "=== Docker Compose Status ==="
-          docker-compose -f docker-compose.multi.yml ps
+          docker compose -f docker-compose.multi.yml ps
           
           for node in 0 1 2 3; do
             echo "=== Node $node Logs ==="
-            docker-compose -f docker-compose.multi.yml logs helium-$node cometbft-$node | tail -100
+            docker compose -f docker-compose.multi.yml logs helium-$node cometbft-$node | tail -100
           done
       
       - name: Stop services
         if: always()
-        run: docker-compose -f docker-compose.multi.yml down -v
+        run: docker compose -f docker-compose.multi.yml down -v
 
   connection-resilience:
     name: Connection Resilience Test
@@ -268,7 +268,7 @@ jobs:
       
       - name: Start services
         run: |
-          docker-compose up -d
+          docker compose up -d
           sleep 10
       
       - name: Test connection recovery
@@ -293,7 +293,7 @@ jobs:
           
           if [ "$HEIGHT_2" -le "$HEIGHT_1" ]; then
             echo "ERROR: Connection did not recover properly!"
-            docker-compose logs
+            docker compose logs
             exit 1
           fi
           
@@ -321,4 +321,4 @@ jobs:
       
       - name: Stop services
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v

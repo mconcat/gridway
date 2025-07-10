@@ -140,4 +140,4 @@ for i in $(seq 0 $((NUM_NODES-1))); do
 done
 echo ""
 echo "To start the multi-node testnet, run:"
-echo "  docker-compose -f docker-compose.multi.yml up"
+echo "  docker compose -f docker-compose.multi.yml up"

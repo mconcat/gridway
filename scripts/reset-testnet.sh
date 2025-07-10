@@ -19,7 +19,7 @@ echo "Resetting testnet..."
 
 # Stop any running containers
 echo "Stopping any running containers..."
-docker-compose down 2>/dev/null || true
+docker compose down 2>/dev/null || true
 
 # Check if testnet directory exists
 if [ ! -d "${TESTNET_DIR}" ]; then

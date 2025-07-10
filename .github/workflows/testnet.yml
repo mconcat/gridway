@@ -64,9 +64,9 @@ jobs:
       - name: Start testnet
         run: |
           if [[ "${{ github.event.inputs.network_type }}" == "single" ]]; then
-            docker-compose up -d
+            docker compose up -d
           else
-            docker-compose -f docker-compose.multi.yml up -d
+            docker compose -f docker compose.multi.yml up -d
           fi
           
           echo "Waiting for services to start..."
@@ -92,7 +92,7 @@ jobs:
               
               if [[ "$HEIGHT" == "ERROR" ]] || [[ "$HEALTH" == "ERROR" ]]; then
                 echo "ERROR: Node is not responding!"
-                docker-compose logs --tail=50
+                docker compose logs --tail=50
                 exit 1
               fi
             else
@@ -142,14 +142,14 @@ jobs:
           mkdir -p testnet-logs
           
           if [[ "${{ github.event.inputs.network_type }}" == "single" ]]; then
-            docker-compose logs > testnet-logs/all-services.log
-            docker-compose logs helium > testnet-logs/helium.log
-            docker-compose logs cometbft > testnet-logs/cometbft.log
+            docker compose logs > testnet-logs/all-services.log
+            docker compose logs helium > testnet-logs/helium.log
+            docker compose logs cometbft > testnet-logs/cometbft.log
           else
-            docker-compose -f docker-compose.multi.yml logs > testnet-logs/all-services.log
+            docker compose -f docker compose.multi.yml logs > testnet-logs/all-services.log
             for i in 0 1 2 3; do
-              docker-compose -f docker-compose.multi.yml logs helium-$i > testnet-logs/helium-$i.log
-              docker-compose -f docker-compose.multi.yml logs cometbft-$i > testnet-logs/cometbft-$i.log
+              docker compose -f docker compose.multi.yml logs helium-$i > testnet-logs/helium-$i.log
+              docker compose -f docker compose.multi.yml logs cometbft-$i > testnet-logs/cometbft-$i.log
             done
           fi
       
@@ -165,9 +165,9 @@ jobs:
         if: always()
         run: |
           if [[ "${{ github.event.inputs.network_type }}" == "single" ]]; then
-            docker-compose down -v
+            docker compose down -v
           else
-            docker-compose -f docker-compose.multi.yml down -v
+            docker compose -f docker compose.multi.yml down -v
           fi
           rm -rf testnet/
 
@@ -185,7 +185,7 @@ jobs:
           cp .env.example .env
           chmod +x scripts/*.sh
           ./scripts/init-testnet.sh
-          docker-compose up -d
+          docker compose up -d
           sleep 30
       
       - name: Run performance tests
@@ -230,4 +230,4 @@ jobs:
       
       - name: Cleanup
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v

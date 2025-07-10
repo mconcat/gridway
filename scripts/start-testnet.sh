@@ -71,14 +71,14 @@ check_services() {
 show_logs() {
     echo ""
     echo "Showing logs (press Ctrl+C to stop)..."
-    docker-compose logs -f
+    docker compose logs -f
 }
 
 # Function to handle shutdown
 cleanup() {
     echo ""
     echo "Shutting down testnet..."
-    docker-compose down
+    docker compose down
     exit 0
 }
 
@@ -99,7 +99,7 @@ fi
 
 # Start services
 echo "Starting Docker Compose services..."
-docker-compose up -d
+docker compose up -d
 
 # Wait for services to be ready
 if check_services; then
@@ -115,8 +115,8 @@ if check_services; then
     echo ""
     echo "Useful commands:"
     echo "  Check status:     curl http://localhost:26657/status"
-    echo "  View logs:        docker-compose logs -f"
-    echo "  Stop testnet:     docker-compose down"
+    echo "  View logs:        docker compose logs -f"
+    echo "  Stop testnet:     docker compose down"
     echo "  Reset testnet:    ./scripts/reset-testnet.sh"
     echo ""
     
@@ -127,16 +127,16 @@ if check_services; then
         show_logs
     else
         echo "Testnet is running in the background."
-        echo "Use 'docker-compose logs -f' to view logs."
+        echo "Use 'docker compose logs -f' to view logs."
     fi
 else
     echo ""
     echo "✗ Failed to start testnet properly"
     echo ""
     echo "Checking container status..."
-    docker-compose ps
+    docker compose ps
     echo ""
     echo "Recent logs:"
-    docker-compose logs --tail=50
+    docker compose logs --tail=50
     exit 1
 fi

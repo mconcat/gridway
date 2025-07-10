@@ -27,8 +27,8 @@ cp .env.example .env
 
 ```
 .
-├── docker-compose.yml          # Single-node Docker configuration
-├── docker-compose.multi.yml    # Multi-node Docker configuration
+├── docker compose.yml          # Single-node Docker configuration
+├── docker compose.multi.yml    # Multi-node Docker configuration
 ├── Dockerfile                  # Helium application image
 ├── .env.example               # Environment variables template
 ├── scripts/
@@ -62,7 +62,7 @@ cp .env.example .env
 
 ### View Logs
 ```bash
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ### Check Status
@@ -81,7 +81,7 @@ curl http://localhost:1317/health
 
 ### Stop Services
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ## 🌐 Multi-Node Testnet
@@ -93,15 +93,15 @@ For a 4-node validator network:
 ./scripts/init-multi-testnet.sh
 
 # Start all nodes
-docker-compose -f docker-compose.multi.yml up
+docker compose -f docker compose.multi.yml up
 ```
 
 ## 🔍 Troubleshooting
 
 ### Connection Issues
-- Verify Helium is running: `docker-compose ps`
+- Verify Helium is running: `docker compose ps`
 - Check ABCI port: `nc -zv localhost 26658`
-- Review logs: `docker-compose logs helium`
+- Review logs: `docker compose logs helium`
 
 ### Build Issues
 - Ensure Docker is running

@@ -128,19 +128,19 @@ chain_id = "helium-testnet"
 
 ```bash
 # All services
-docker-compose logs -f
+docker compose logs -f
 
 # Just CometBFT
-docker-compose logs -f cometbft
+docker compose logs -f cometbft
 
 # Just Helium
-docker-compose logs -f helium
+docker compose logs -f helium
 ```
 
 ### Stop Services
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ### Reset Testnet
@@ -156,7 +156,7 @@ To reset blockchain data while preserving configuration:
 To remove everything including configuration:
 
 ```bash
-docker-compose down -v
+docker compose down -v
 rm -rf testnet/
 ```
 
@@ -166,7 +166,7 @@ rm -rf testnet/
 
 ```bash
 # Build Docker image
-docker-compose build
+docker compose build
 
 # Build locally
 cargo build --release
@@ -186,9 +186,9 @@ cargo build --release
 
 If CometBFT cannot connect to Helium:
 
-1. Check Helium is running: `docker-compose ps`
+1. Check Helium is running: `docker compose ps`
 2. Verify ABCI port: `nc -zv localhost 26658`
-3. Check logs: `docker-compose logs helium`
+3. Check logs: `docker compose logs helium`
 
 ### Consensus Issues
 
@@ -213,7 +213,7 @@ For a 4-node testnet, use the multi-node configuration:
 ./scripts/init-multi-testnet.sh
 
 # Start multi-node testnet
-docker-compose -f docker-compose.multi.yml up
+docker compose -f docker compose.multi.yml up
 ```
 
 ## Security Considerations
