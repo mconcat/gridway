@@ -16,6 +16,7 @@ members = [
     "crates/wasi-modules/begin-blocker",
     "crates/wasi-modules/end-blocker",
     "crates/wasi-modules/tx-decoder",
+    "crates/wasi-modules/test-minimal",
 ]
 
 [workspace.package]
@@ -89,6 +90,7 @@ authors = ["mconcat"]
 description = "Minimal Rust implementation of helium BaseApp"
 license = "AGPL-3.0"
 repository = "https://github.com/mconcat/helium"
+build = "build.rs"
 
 [dependencies]
 # Use workspace dependencies

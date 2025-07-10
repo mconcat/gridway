@@ -133,29 +133,6 @@ impl WasiAnteHandler {
             ctx.chain_id
         );
 
-        // If no modules are loaded, perform basic validation
-        if self.module_cache.is_empty() {
-            // Basic validation: check if transaction has messages
-            if tx.body.messages.is_empty() {
-                return Ok(TxResponse {
-                    code: 1,
-                    log: "transaction contains no messages".to_string(),
-                    gas_used: 0,
-                    gas_wanted: ctx.gas_limit,
-                    events: vec![],
-                });
-            }
-
-            // Basic validation passed
-            return Ok(TxResponse {
-                code: 0,
-                log: "basic validation passed".to_string(),
-                gas_used: 10000, // Basic gas consumption
-                gas_wanted: ctx.gas_limit,
-                events: vec![],
-            });
-        }
-
         // Prepare input for WASI module - the module expects (context, transaction)
         let input = serde_json::to_string(&(ctx, tx))
             .map_err(|e| AnteError::SerializationError(e.to_string()))?;

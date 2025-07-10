@@ -808,7 +808,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "prost 0.12.6",
- "prost-types 0.12.6",
+ "prost-types",
  "serde",
  "serde_bytes",
  "serde_json",
@@ -832,7 +832,7 @@ dependencies = [
  "num-derive 0.4.2",
  "num-traits",
  "prost 0.12.6",
- "prost-types 0.12.6",
+ "prost-types",
  "serde",
  "serde_bytes",
  "subtle-encoding",
@@ -1788,7 +1788,7 @@ dependencies = [
  "bytes",
  "lazy_static",
  "prost 0.12.6",
- "prost-types 0.12.6",
+ "prost-types",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1883,7 +1883,7 @@ dependencies = [
  "helium-types",
  "hex",
  "prost 0.12.6",
- "prost-types 0.12.6",
+ "prost-types",
  "rand",
  "serde",
  "serde_json",
@@ -3136,7 +3136,7 @@ dependencies = [
  "petgraph",
  "prettyplease",
  "prost 0.12.6",
- "prost-types 0.12.6",
+ "prost-types",
  "regex",
  "syn 2.0.104",
  "tempfile",
@@ -3175,15 +3175,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9091c90b0a32608e984ff2fa4091273cbdd755d54935c51d520887f4a1dbd5b0"
 dependencies = [
  "prost 0.12.6",
-]
-
-[[package]]
-name = "prost-types"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
-dependencies = [
- "prost 0.13.5",
 ]
 
 [[package]]
@@ -4032,6 +4023,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-minimal"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4441,11 +4440,7 @@ name = "tx-decoder"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "env_logger",
  "hex",
- "log",
- "prost 0.13.5",
- "prost-types 0.13.5",
  "serde",
  "serde_json",
  "sha2 0.10.9",

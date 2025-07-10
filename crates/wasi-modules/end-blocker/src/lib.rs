@@ -125,11 +125,7 @@ impl WasiEndBlockHandler {
 
     /// Main entry point for end block handling
     pub fn handle(&self, req: &EndBlockRequest, state: &ModuleState) -> EndBlockResponse {
-        log::info!(
-            "WASI EndBlock: Processing block {} on chain {}",
-            req.height,
-            req.chain_id
-        );
+        // WASI EndBlock: Processing block
 
         let mut validator_updates = vec![];
         let mut events = vec![];
@@ -185,18 +181,11 @@ impl WasiEndBlockHandler {
         let mut final_updates = vec![];
 
         for update in pending_updates {
-            log::info!(
-                "Processing validator update: {:?} with power {}",
-                hex::encode(&update.pub_key.value),
-                update.power
-            );
+            // Processing validator update
 
             // Validate update
             if update.power < 0 {
-                log::warn!(
-                    "Invalid negative power {power} for validator",
-                    power = update.power
-                );
+                // Invalid negative power for validator
                 continue;
             }
 
@@ -426,14 +415,14 @@ impl WasiEndBlockHandler {
 #[no_mangle]
 pub extern "C" fn end_block() -> i32 {
     // Initialize logging
-    env_logger::init();
+    // env_logger::init(); // Skip logging initialization in WASI environment
 
     let handler = WasiEndBlockHandler::new();
 
     // Read input from stdin
     let mut input = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut input) {
-        log::error!("Failed to read input: {e}");
+        // Failed to read input
         return 1;
     }
 
@@ -441,7 +430,7 @@ pub extern "C" fn end_block() -> i32 {
     let (request, state): (EndBlockRequest, ModuleState) = match serde_json::from_str(&input) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("Failed to parse input JSON: {e}");
+            // Failed to parse input JSON
             return 1;
         }
     };
@@ -453,12 +442,12 @@ pub extern "C" fn end_block() -> i32 {
     match serde_json::to_string(&response) {
         Ok(output) => {
             if let Err(e) = io::stdout().write_all(output.as_bytes()) {
-                log::error!("Failed to write output: {e}");
+                // Failed to write output
                 return 1;
             }
         }
         Err(e) => {
-            log::error!("Failed to serialize response: {e}");
+            // Failed to serialize response
             return 1;
         }
     }

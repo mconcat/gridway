@@ -119,11 +119,7 @@ impl WasiBeginBlockHandler {
 
     /// Main entry point for begin block handling
     pub fn handle(&mut self, req: &BeginBlockRequest) -> BeginBlockResponse {
-        log::info!(
-            "WASI BeginBlock: Processing block {} on chain {}",
-            req.header.height,
-            req.header.chain_id
-        );
+        // WASI BeginBlock: Processing block
 
         let mut events = Vec::new();
 
@@ -188,11 +184,7 @@ impl WasiBeginBlockHandler {
                     > (1.0 - self.min_signed_per_window)
                 {
                     missed_validators.push(hex::encode(&validator_addr));
-                    log::warn!(
-                        "Validator {} missed {missed_count} blocks in window of {}",
-                        hex::encode(&validator_addr),
-                        self.slash_window
-                    );
+                    // Validator missed blocks in window
                 }
             } else {
                 // Reset missed blocks counter on successful sign
@@ -253,12 +245,7 @@ impl WasiBeginBlockHandler {
         let mut events = vec![];
 
         for evidence in evidence_list {
-            log::warn!(
-                "Processing evidence: {} for validator {} at height {}",
-                evidence.evidence_type,
-                hex::encode(&evidence.validator.address),
-                evidence.height
-            );
+            // Processing evidence for validator
 
             events.push(Event {
                 event_type: "evidence_submitted".to_string(),
@@ -334,7 +321,7 @@ impl WasiBeginBlockHandler {
         // In a real implementation, we would track block heights
         // and clean up records older than slash_window
         if current_height.is_multiple_of(1000) {
-            log::info!("Cleaning up old missed block records at height {current_height}");
+            // Cleaning up old missed block records
             // Simplified: just clear if too many entries
             if self.missed_blocks.len() > 1000 {
                 self.missed_blocks.clear();
@@ -348,14 +335,14 @@ impl WasiBeginBlockHandler {
 #[no_mangle]
 pub extern "C" fn begin_block() -> i32 {
     // Initialize logging
-    env_logger::init();
+    // env_logger::init(); // Skip logging initialization in WASI environment
 
     let mut handler = WasiBeginBlockHandler::new();
 
     // Read input from stdin (begin block request)
     let mut input = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut input) {
-        log::error!("Failed to read input: {e}");
+        // Failed to read input
         return 1;
     }
 
@@ -363,7 +350,7 @@ pub extern "C" fn begin_block() -> i32 {
     let request: BeginBlockRequest = match serde_json::from_str(&input) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("Failed to parse input JSON: {e}");
+            // Failed to parse input JSON
             return 1;
         }
     };
@@ -378,12 +365,12 @@ pub extern "C" fn begin_block() -> i32 {
     match serde_json::to_string(&response) {
         Ok(output) => {
             if let Err(e) = io::stdout().write_all(output.as_bytes()) {
-                log::error!("Failed to write output: {e}");
+                // Failed to write output
                 return 1;
             }
         }
         Err(e) => {
-            log::error!("Failed to serialize response: {e}");
+            // Failed to serialize response
             return 1;
         }
     }

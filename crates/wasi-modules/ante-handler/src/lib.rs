@@ -153,10 +153,7 @@ impl WasiAnteHandler {
 
     /// Main entry point for ante handler validation
     pub fn handle(&mut self, ctx: &TxContext, tx: &Transaction) -> AnteResponse {
-        log::info!(
-            "WASI Ante Handler: Processing transaction for chain {}",
-            ctx.chain_id
-        );
+        // WASI Ante Handler: Processing transaction for chain
 
         match self.validate_transaction(ctx, tx) {
             Ok(events) => AnteResponse {
@@ -449,12 +446,7 @@ impl WasiAnteHandler {
             }
 
             // In a real implementation, this would increment the sequence in the account store
-            log::info!(
-                "Incrementing sequence for account {} from {} to {}",
-                account.address,
-                account.sequence,
-                account.sequence + 1
-            );
+            // Incrementing sequence for account
         }
 
         Ok(())
@@ -473,15 +465,15 @@ struct SignDoc {
 /// This function is called by the WASI host to process transactions
 #[no_mangle]
 pub extern "C" fn ante_handle() -> i32 {
-    // Initialize logging
-    env_logger::init();
+    // Skip logging initialization in WASI environment
+    // env_logger::init();
 
     let mut handler = WasiAnteHandler::new();
 
     // Read input from stdin (transaction context and data)
     let mut input = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut input) {
-        log::error!("Failed to read input: {e}");
+        // Failed to read input
         return 1;
     }
 
@@ -489,7 +481,7 @@ pub extern "C" fn ante_handle() -> i32 {
     let (ctx, tx): (TxContext, Transaction) = match serde_json::from_str(&input) {
         Ok(data) => data,
         Err(e) => {
-            log::error!("Failed to parse input JSON: {e}");
+            // Failed to parse input JSON
             return 1;
         }
     };
@@ -501,12 +493,12 @@ pub extern "C" fn ante_handle() -> i32 {
     match serde_json::to_string(&response) {
         Ok(output) => {
             if let Err(e) = io::stdout().write_all(output.as_bytes()) {
-                log::error!("Failed to write output: {e}");
+                // Failed to write output
                 return 1;
             }
         }
         Err(e) => {
-            log::error!("Failed to serialize response: {e}");
+            // Failed to serialize response
             return 1;
         }
     }

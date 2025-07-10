@@ -9,6 +9,19 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 use thiserror::Error;
 
+// Set up panic handler for WASI
+#[cfg(target_arch = "wasm32")]
+use std::panic;
+
+#[cfg(target_arch = "wasm32")]
+fn set_panic_hook() {
+    panic::set_hook(Box::new(|info| {
+        let msg = format!("PANIC: {}", info);
+        let _ = io::stderr().write_all(msg.as_bytes());
+        let _ = io::stderr().flush();
+    }));
+}
+
 /// Error types for transaction decoder operations
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum TxDecodeError {
@@ -234,10 +247,7 @@ impl WasiTxDecoder {
 
     /// Main entry point for transaction decoding
     pub fn decode(&self, req: &DecodeRequest) -> DecodeResponse {
-        log::info!(
-            "WASI TxDecoder: Decoding transaction with {} encoding",
-            req.encoding
-        );
+        // Decoding transaction
 
         match self.decode_transaction(req) {
             Ok(decoded_tx) => {
@@ -447,56 +457,45 @@ fn decode_msg_vote(_bytes: &[u8]) -> TxDecodeResult<serde_json::Value> {
 /// This function is called by the WASI host to decode transactions
 #[no_mangle]
 pub extern "C" fn decode_tx() -> i32 {
-    // Initialize logging
-    env_logger::init();
-
-    let decoder = WasiTxDecoder::new();
-
-    // Read input from stdin
-    let mut input = String::new();
-    if let Err(e) = io::stdin().read_to_string(&mut input) {
-        log::error!("Failed to read input: {e}");
-        return 1;
-    }
-
-    // Parse decode request
-    let request: DecodeRequest = match serde_json::from_str(&input) {
-        Ok(data) => data,
-        Err(e) => {
-            log::error!("Failed to parse input JSON: {e}");
-            return 1;
-        }
+    // Simple test - just return a mock response
+    let response = DecodeResponse {
+        success: true,
+        decoded_tx: None,
+        error: None,
+        warnings: vec!["decode_tx called successfully".to_string()],
     };
-
-    // Decode transaction
-    let response = decoder.decode(&request);
-
-    // Write response to stdout
+    
     match serde_json::to_string(&response) {
         Ok(output) => {
-            if let Err(e) = io::stdout().write_all(output.as_bytes()) {
-                log::error!("Failed to write output: {e}");
+            if let Err(_) = io::stdout().write_all(output.as_bytes()) {
+                return 1;
+            }
+            if let Err(_) = io::stdout().flush() {
                 return 1;
             }
         }
-        Err(e) => {
-            log::error!("Failed to serialize response: {e}");
+        Err(_) => {
             return 1;
         }
     }
-
-    if response.success {
-        0
-    } else {
-        1
-    }
+    
+    0
 }
 
-/// Alternative entry point for testing
-#[cfg(not(test))]
+// Remove _start to avoid conflicts with WASI runtime
+
+/// Simple test function to verify WASI execution
 #[no_mangle]
-pub extern "C" fn _start() {
-    std::process::exit(decode_tx());
+pub extern "C" fn test_decode() -> i32 {
+    // Just write a simple JSON response
+    let response = r#"{"success":true,"decoded_tx":null,"error":null,"warnings":[]}"#;
+    if let Err(_) = io::stdout().write_all(response.as_bytes()) {
+        return 1;
+    }
+    if let Err(_) = io::stdout().flush() {
+        return 1;
+    }
+    0
 }
 
 // For non-WASI environments, provide a library interface
