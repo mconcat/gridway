@@ -4,16 +4,19 @@
 mod tests {
     use crate::component_host::{ComponentHost, ComponentInfo, ComponentType};
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_component_host_creation() {
-        let host = ComponentHost::new().unwrap();
+        let base_store = Arc::new(Mutex::new(helium_store::MemStore::new()));
+        let host = ComponentHost::new(base_store).unwrap();
         // Basic test that host can be created
     }
 
     #[test]
     fn test_tx_decoder_component() {
-        let host = ComponentHost::new().unwrap();
+        let base_store = Arc::new(Mutex::new(helium_store::MemStore::new()));
+        let host = ComponentHost::new(base_store).unwrap();
 
         // Load the tx-decoder component if it exists
         let component_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

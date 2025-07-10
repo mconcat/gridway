@@ -55,5 +55,6 @@ interface ante-handler {
 }
 
 world ante-handler-world {
+    import kvstore;
     export ante-handler;
 }

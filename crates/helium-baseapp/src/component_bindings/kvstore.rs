@@ -15,8 +15,11 @@ pub struct KVStoreResourceBindings {
 
 impl KVStoreResourceBindings {
     pub fn new() -> Self {
+        // Create a dummy MemStore for the legacy implementation
+        // This will be replaced with proper implementation
+        let dummy_store = std::sync::Arc::new(std::sync::Mutex::new(helium_store::MemStore::new()));
         Self {
-            host: KVStoreResourceHost::new(),
+            host: KVStoreResourceHost::new(dummy_store),
         }
     }
 
@@ -243,13 +246,13 @@ impl KVStoreResourceBindings {
         Ok(())
     }
 
-    /// Mount a KVStore for component access
-    pub fn mount_store(
+    /// Mount a KVStore for component access with a prefix
+    pub fn mount_store_with_prefix(
         &self,
         name: String,
-        store: std::sync::Arc<std::sync::Mutex<dyn helium_store::KVStore>>,
+        prefix: String,
     ) -> Result<(), String> {
-        self.host.mount_store(name, store)
+        self.host.register_component_prefix(name, prefix)
     }
 }
 

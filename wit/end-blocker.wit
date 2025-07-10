@@ -58,7 +58,6 @@ interface end-blocker {
 
 world end-blocker-world {
     import kvstore;
-    import module-state;
     export end-blocker;
 }
 

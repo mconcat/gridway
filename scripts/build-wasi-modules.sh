@@ -37,19 +37,19 @@ for module_info in "${MODULES[@]}"; do
     
     cd "$PROJECT_ROOT/crates/wasi-modules/$module_name"
     
-    # Build the module
-    cargo build --target wasm32-wasip1 --release
+    # Build the module as a component
+    cargo component build --release
     
-    # Copy the built module
+    # Copy the built component
     WASM_FILE="$PROJECT_ROOT/target/wasm32-wasip1/release/${crate_name}.wasm"
     LIB_WASM_FILE="$PROJECT_ROOT/target/wasm32-wasip1/release/lib${crate_name}.wasm"
     
     if [ -f "$WASM_FILE" ]; then
-        cp "$WASM_FILE" "$MODULES_DIR/${output_name}.wasm"
-        echo "✓ Copied $module_name to $MODULES_DIR/${output_name}.wasm"
+        cp "$WASM_FILE" "$MODULES_DIR/${output_name}_component.wasm"
+        echo "✓ Copied $module_name to $MODULES_DIR/${output_name}_component.wasm"
     elif [ -f "$LIB_WASM_FILE" ]; then
-        cp "$LIB_WASM_FILE" "$MODULES_DIR/${output_name}.wasm"
-        echo "✓ Copied $module_name to $MODULES_DIR/${output_name}.wasm"
+        cp "$LIB_WASM_FILE" "$MODULES_DIR/${output_name}_component.wasm"
+        echo "✓ Copied $module_name to $MODULES_DIR/${output_name}_component.wasm"
     else
         echo "✗ Warning: Could not find compiled WASM file for $module_name"
     fi

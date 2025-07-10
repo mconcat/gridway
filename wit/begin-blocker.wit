@@ -54,7 +54,6 @@ interface begin-blocker {
 
 world begin-blocker-world {
     import kvstore;
-    import module-state;
     export begin-blocker;
 }
 

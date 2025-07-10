@@ -20,5 +20,5 @@ crate-type = ["cdylib"]
 
 [package.metadata.component]
 package = "helium:framework"
-target = { path = "../../../wit/module.wit", world = "begin-blocker-world" }
+target = { path = "../../../wit", world = "begin-blocker-world" }
 

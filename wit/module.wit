@@ -59,45 +59,6 @@ interface module {
     query: func(path: string, data: list<u8>) -> result<list<u8>, string>;
 }
 
-/// Module state resource for accessing blockchain module state
-interface module-state {
-    /// Validator update data
-    record validator-update-data {
-        pub-key-type: string,
-        pub-key-value: list<u8>,
-        power: s64,
-    }
-
-    /// Governance proposal
-    record proposal {
-        id: u64,
-        voting-end-time: u64,
-        yes-votes: u64,
-        no-votes: u64,
-        abstain-votes: u64,
-        no-with-veto-votes: u64,
-    }
-
-    /// Module state data
-    record state-data {
-        /// Pending validator updates
-        pending-validator-updates: list<validator-update-data>,
-        /// Active governance proposals
-        active-proposals: list<proposal>,
-        /// Current inflation rate
-        inflation-rate: f64,
-        /// Last reward distribution height
-        last-reward-height: u64,
-        /// Total voting power
-        total-power: s64,
-        /// Block proposer address
-        proposer-address: list<u8>,
-    }
-
-    /// Get current module state
-    get-state: func() -> state-data;
-}
-
 /// KVStore resource for blockchain state access
 interface kvstore {
     /// Resource handle for a KVStore

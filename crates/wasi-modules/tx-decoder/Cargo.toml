@@ -22,5 +22,5 @@ crate-type = ["cdylib"]
 
 [package.metadata.component]
 package = "helium:framework"
-target = { path = "../../../wit/tx-decoder.wit", world = "tx-decoder-world" }
+target = { path = "../../../wit", world = "tx-decoder-world" }
 

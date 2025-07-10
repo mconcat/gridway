@@ -29,5 +29,6 @@ interface tx-decoder {
 }
 
 world tx-decoder-world {
+    import kvstore;
     export tx-decoder;
 }

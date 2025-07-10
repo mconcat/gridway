@@ -5,7 +5,8 @@
 
 use crate::component_bindings::ante_handler::AnteHandlerWorld;
 use crate::component_bindings::tx_decoder::TxDecoderWorld;
-use crate::component_bindings::{SimpleKVStoreManager, ModuleStateManager};
+use crate::component_bindings::SimpleKVStoreManager;
+use crate::kvstore_resource::KVStoreResourceHost;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -94,7 +95,7 @@ struct ComponentState {
     wasi: WasiCtx,
     component_name: String,
     kvstore_manager: SimpleKVStoreManager,
-    module_state_manager: ModuleStateManager,
+    kvstore_host: KVStoreResourceHost,
 }
 
 impl WasiView for ComponentState {
@@ -107,9 +108,94 @@ impl WasiView for ComponentState {
     }
 }
 
-impl crate::component_bindings::module_state::Host for ComponentState {
-    fn get_state(&mut self) -> crate::component_bindings::StateData {
-        self.module_state_manager.get_state().unwrap_or_default()
+// Import the generated kvstore bindings
+use crate::component_bindings::ante_handler::helium::framework::kvstore;
+
+impl kvstore::HostStore for ComponentState {
+    fn get(
+        &mut self,
+        store_handle: wasmtime::component::Resource<kvstore::Store>,
+        key: Vec<u8>,
+    ) -> Option<Vec<u8>> {
+        // Convert kvstore::Store to KVStoreResource
+        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
+        match self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+            Ok(store) => store.get(&key).unwrap_or(None),
+            Err(_) => None,
+        }
+    }
+
+    fn set(
+        &mut self,
+        store_handle: wasmtime::component::Resource<kvstore::Store>,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    ) {
+        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
+        if let Ok(store) = self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+            let _ = store.set(&key, &value);
+        }
+    }
+
+    fn delete(
+        &mut self,
+        store_handle: wasmtime::component::Resource<kvstore::Store>,
+        key: Vec<u8>,
+    ) {
+        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
+        if let Ok(store) = self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+            let _ = store.delete(&key);
+        }
+    }
+
+    fn has(
+        &mut self,
+        store_handle: wasmtime::component::Resource<kvstore::Store>,
+        key: Vec<u8>,
+    ) -> bool {
+        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
+        match self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+            Ok(store) => store.has(&key).unwrap_or(false),
+            Err(_) => false,
+        }
+    }
+
+    fn range(
+        &mut self,
+        store_handle: wasmtime::component::Resource<kvstore::Store>,
+        start: Option<Vec<u8>>,
+        end: Option<Vec<u8>>,
+        limit: u32,
+    ) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let kvstore_resource = wasmtime::component::Resource::<crate::kvstore_resource::KVStoreResource>::new_own(store_handle.rep());
+        match self.kvstore_host.get_resource(&mut self.table, kvstore_resource) {
+            Ok(store) => store
+                .range(start.as_deref(), end.as_deref(), limit)
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn drop(&mut self, _rep: wasmtime::component::Resource<kvstore::Store>) -> wasmtime::Result<()> {
+        // Resource cleanup is handled by the resource table
+        Ok(())
+    }
+}
+
+impl kvstore::Host for ComponentState {
+    fn open_store(
+        &mut self,
+        name: String,
+    ) -> std::result::Result<wasmtime::component::Resource<kvstore::Store>, String> {
+        // Map the KVStoreResource to kvstore::Store resource
+        match self.kvstore_host.open_store(&mut self.table, &name) {
+            Ok(resource) => {
+                // Convert KVStoreResource to kvstore::Store
+                let store_resource = wasmtime::component::Resource::<kvstore::Store>::new_own(resource.rep());
+                Ok(store_resource)
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -123,23 +209,23 @@ pub struct ComponentHost {
     component_info: Arc<Mutex<HashMap<String, ComponentInfo>>>,
     /// Default gas limit
     default_gas_limit: u64,
-    /// KVStore manager
+    /// KVStore manager (legacy)
     kvstore_manager: SimpleKVStoreManager,
-    /// Module state manager
-    module_state_manager: ModuleStateManager,
+    /// KVStore resource host for prefix-based access
+    kvstore_host: KVStoreResourceHost,
 }
 
 impl ComponentHost {
-    /// Create a new component host with default configuration
-    pub fn new() -> Result<Self> {
+    /// Create a new component host with default configuration and a base store
+    pub fn new(base_store: Arc<Mutex<dyn helium_store::KVStore>>) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true);
         config.async_support(false);
-        Self::with_config(config)
+        Self::with_config_and_store(config, base_store)
     }
 
-    /// Create a new component host with custom configuration
-    pub fn with_config(mut config: Config) -> Result<Self> {
+    /// Create a new component host with custom configuration and a base store
+    pub fn with_config_and_store(mut config: Config, base_store: Arc<Mutex<dyn helium_store::KVStore>>) -> Result<Self> {
         // Ensure component model is enabled
         config.wasm_component_model(true);
 
@@ -154,13 +240,26 @@ impl ComponentHost {
 
         info!("Component host initialized with secure configuration");
 
+        let kvstore_host = KVStoreResourceHost::new(base_store);
+        
+        // Register default component prefixes
+        // These can be overridden by calling register_component_prefix
+        kvstore_host.register_component_prefix("ante-handler".to_string(), "/ante/".to_string())
+            .map_err(ComponentHostError::ResourceError)?;
+        kvstore_host.register_component_prefix("begin-blocker".to_string(), "/begin/".to_string())
+            .map_err(ComponentHostError::ResourceError)?;
+        kvstore_host.register_component_prefix("end-blocker".to_string(), "/end/".to_string())
+            .map_err(ComponentHostError::ResourceError)?;
+        kvstore_host.register_component_prefix("tx-decoder".to_string(), "/decoder/".to_string())
+            .map_err(ComponentHostError::ResourceError)?;
+
         Ok(Self {
             engine,
             components: Arc::new(Mutex::new(HashMap::new())),
             component_info: Arc::new(Mutex::new(HashMap::new())),
             default_gas_limit: 10_000_000, // 10 million units
             kvstore_manager: SimpleKVStoreManager::new(),
-            module_state_manager: ModuleStateManager::new(),
+            kvstore_host,
         })
     }
 
@@ -223,7 +322,7 @@ impl ComponentHost {
             wasi,
             component_name: component_name.to_string(),
             kvstore_manager: SimpleKVStoreManager::new(),
-            module_state_manager: self.module_state_manager.clone(),
+            kvstore_host: self.kvstore_host.clone(),
         };
 
         let mut store = Store::new(&self.engine, state);
@@ -247,7 +346,9 @@ impl ComponentHost {
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
-        self.add_module_state_to_linker(&mut linker)?;
+        
+        // Add kvstore interface
+        self.add_kvstore_to_linker(&mut linker)?;
 
         // Instantiate the component with bindings
         let bindings = AnteHandlerWorld::instantiate(&mut store, &component, &linker)
@@ -346,7 +447,7 @@ impl ComponentHost {
             wasi,
             component_name: component_name.to_string(),
             kvstore_manager: SimpleKVStoreManager::new(),
-            module_state_manager: self.module_state_manager.clone(),
+            kvstore_host: self.kvstore_host.clone(),
         };
 
         let mut store = Store::new(&self.engine, state);
@@ -370,7 +471,9 @@ impl ComponentHost {
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
-        self.add_module_state_to_linker(&mut linker)?;
+        
+        // Add kvstore interface
+        self.add_kvstore_to_linker(&mut linker)?;
 
         // Instantiate the component with bindings
         let bindings = TxDecoderWorld::instantiate(&mut store, &component, &linker)
@@ -439,8 +542,8 @@ impl ComponentHost {
                 wasi: WasiCtxBuilder::new().inherit_stdio().build(),
                 component_name: "begin-blocker".to_string(),
                 kvstore_manager: self.kvstore_manager.clone(),
-                module_state_manager: self.module_state_manager.clone(),
-            },
+                kvstore_host: self.kvstore_host.clone(),
+                },
         );
 
         // Set fuel for gas limiting
@@ -454,7 +557,9 @@ impl ComponentHost {
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
-        self.add_module_state_to_linker(&mut linker)?;
+        
+        // Add kvstore interface
+        self.add_kvstore_to_linker(&mut linker)?;
 
         // Instantiate the component with bindings
         let bindings = crate::component_bindings::begin_blocker::BeginBlockerWorld::instantiate(
@@ -556,8 +661,8 @@ impl ComponentHost {
                 wasi: WasiCtxBuilder::new().inherit_stdio().build(),
                 component_name: "end-blocker".to_string(),
                 kvstore_manager: self.kvstore_manager.clone(),
-                module_state_manager: self.module_state_manager.clone(),
-            },
+                kvstore_host: self.kvstore_host.clone(),
+                },
         );
 
         // Set fuel for gas limiting
@@ -571,7 +676,9 @@ impl ComponentHost {
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
-        self.add_module_state_to_linker(&mut linker)?;
+        
+        // Add kvstore interface
+        self.add_kvstore_to_linker(&mut linker)?;
 
         // Instantiate the component with bindings
         let bindings = crate::component_bindings::end_blocker::EndBlockerWorld::instantiate(
@@ -649,7 +756,7 @@ impl ComponentHost {
         })
     }
 
-    /// Mount a KVStore for component access
+    /// Mount a KVStore for component access (legacy)
     pub fn mount_kvstore(
         &self,
         name: String,
@@ -660,11 +767,19 @@ impl ComponentHost {
             .map_err(ComponentHostError::ResourceError)
     }
 
-    /// Add module-state interface to the component linker
-    fn add_module_state_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
-        crate::component_bindings::module_state::add_to_linker(linker, |state| state)
-            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add module-state interface: {e}")))?;
-        info!("Module-state interface added to linker");
+    /// Register a component with its allowed KVStore prefix
+    pub fn register_component_prefix(&self, component_name: &str, prefix: &str) -> Result<()> {
+        self.kvstore_host
+            .register_component_prefix(component_name.to_string(), prefix.to_string())
+            .map_err(ComponentHostError::ResourceError)
+    }
+
+    /// Add kvstore interface to the component linker
+    fn add_kvstore_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
+        // Use the generated kvstore bindings
+        kvstore::add_to_linker(linker, |state| state)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore interface: {e}")))?;
+        info!("KVStore interface added to linker");
         Ok(())
     }
 
@@ -683,7 +798,8 @@ mod tests {
 
     #[test]
     fn test_component_host_creation() {
-        let host = ComponentHost::new().unwrap();
+        let base_store = Arc::new(Mutex::new(helium_store::MemStore::new()));
+        let host = ComponentHost::new(base_store).unwrap();
         assert!(host.components.lock().unwrap().is_empty());
     }
 }

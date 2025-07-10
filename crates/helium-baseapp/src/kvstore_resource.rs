@@ -3,6 +3,7 @@
 //! This module provides the WASI resource implementation for KVStore access,
 //! allowing WASI components to interact with blockchain state through resource handles.
 
+use crate::prefixed_kvstore_resource::PrefixedKVStore;
 use helium_store::KVStore;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -11,123 +12,107 @@ use wasmtime_wasi::ResourceTable;
 
 /// KVStore resource data that will be stored in the ResourceTable
 pub struct KVStoreResource {
-    /// Name of the store
+    /// Name of the store (for debugging/logging)
     pub name: String,
-    /// Actual KVStore implementation
-    pub store: Arc<Mutex<dyn KVStore>>,
+    /// Prefixed KVStore implementation that enforces access control
+    pub store: PrefixedKVStore,
 }
 
 impl KVStoreResource {
-    pub fn new(name: String, store: Arc<Mutex<dyn KVStore>>) -> Self {
+    /// Create a new KVStore resource with a specific prefix
+    pub fn new(name: String, prefix: &str, store: Arc<Mutex<dyn KVStore>>) -> Self {
+        Self {
+            name,
+            store: PrefixedKVStore::new_from_str(prefix, store),
+        }
+    }
+
+    /// Create from an existing PrefixedKVStore
+    pub fn from_prefixed(name: String, store: PrefixedKVStore) -> Self {
         Self { name, store }
     }
 
-    /// Get a value by key
+    /// Get a value by key (automatically prefixed)
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
-        let store = self
-            .store
-            .lock()
-            .map_err(|e| format!("Failed to lock store: {e}"))?;
-        store.get(key).map_err(|e| e.to_string())
+        self.store.get(key)
     }
 
-    /// Set a key-value pair
+    /// Set a key-value pair (automatically prefixed)
     pub fn set(&self, key: &[u8], value: &[u8]) -> Result<(), String> {
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|e| format!("Failed to lock store: {e}"))?;
-        store.set(key, value).map_err(|e| e.to_string())
+        self.store.set(key, value)
     }
 
-    /// Delete a key
+    /// Delete a key (automatically prefixed)
     pub fn delete(&self, key: &[u8]) -> Result<(), String> {
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|e| format!("Failed to lock store: {e}"))?;
-        store.delete(key).map_err(|e| e.to_string())
+        self.store.delete(key)
     }
 
-    /// Check if a key exists
+    /// Check if a key exists (automatically prefixed)
     pub fn has(&self, key: &[u8]) -> Result<bool, String> {
-        let store = self
-            .store
-            .lock()
-            .map_err(|e| format!("Failed to lock store: {e}"))?;
-        store.has(key).map_err(|e| e.to_string())
+        self.store.has(key)
     }
 
-    /// Iterate over a range of keys using prefix iteration (simplified)
+    /// Iterate over a range of keys within the prefix
     pub fn range(
         &self,
         start: Option<&[u8]>,
-        _end: Option<&[u8]>,
+        end: Option<&[u8]>,
         limit: u32,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
-        let store = self
-            .store
-            .lock()
-            .map_err(|e| format!("Failed to lock store: {e}"))?;
-
-        // For simplicity, use prefix_iterator with the start key as prefix
-        // In a full implementation, this would need proper range support
-        let prefix = start.unwrap_or(&[]);
-        let mut results = Vec::new();
-        let mut count = 0;
-
-        for (key, value) in store.prefix_iterator(prefix) {
-            if count >= limit {
-                break;
-            }
-            results.push((key, value));
-            count += 1;
-        }
-
-        Ok(results)
+        self.store.range(start, end, limit)
     }
 }
 
 /// KVStore resource host implementation
+#[derive(Clone)]
 pub struct KVStoreResourceHost {
-    /// Available stores by name
-    stores: Arc<Mutex<HashMap<String, Arc<Mutex<dyn KVStore>>>>>,
+    /// Base KVStore implementation (usually the global merkle store)
+    base_store: Arc<Mutex<dyn KVStore>>,
+    /// Map of component names to their allowed prefixes
+    component_prefixes: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl KVStoreResourceHost {
-    pub fn new() -> Self {
+    pub fn new(base_store: Arc<Mutex<dyn KVStore>>) -> Self {
         Self {
-            stores: Arc::new(Mutex::new(HashMap::new())),
+            base_store,
+            component_prefixes: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// Mount a KVStore with the given name
-    pub fn mount_store(&self, name: String, store: Arc<Mutex<dyn KVStore>>) -> Result<(), String> {
-        let mut stores = self
-            .stores
+    /// Register a component with its allowed prefix
+    /// For example: ("ante-handler", "/ante/")
+    pub fn register_component_prefix(&self, component_name: String, prefix: String) -> Result<(), String> {
+        let mut prefixes = self
+            .component_prefixes
             .lock()
-            .map_err(|e| format!("Failed to lock stores: {e}"))?;
-        stores.insert(name, store);
+            .map_err(|e| format!("Failed to lock prefixes: {e}"))?;
+        prefixes.insert(component_name, prefix);
         Ok(())
     }
 
     /// Open a store by name and create a resource handle
+    /// The name parameter should match a registered component name
     pub fn open_store(
         &self,
         table: &mut ResourceTable,
         name: &str,
     ) -> Result<Resource<KVStoreResource>, String> {
-        let stores = self
-            .stores
+        let prefixes = self
+            .component_prefixes
             .lock()
-            .map_err(|e| format!("Failed to lock stores: {e}"))?;
+            .map_err(|e| format!("Failed to lock prefixes: {e}"))?;
 
-        let store = stores
+        let prefix = prefixes
             .get(name)
-            .ok_or_else(|| format!("Store '{name}' not found"))?
+            .ok_or_else(|| format!("No prefix registered for component '{name}'"))?
             .clone();
 
-        let resource = KVStoreResource::new(name.to_string(), store);
+        let resource = KVStoreResource::new(
+            name.to_string(),
+            &prefix,
+            self.base_store.clone(),
+        );
 
         table
             .push(resource)
@@ -158,8 +143,3 @@ impl KVStoreResourceHost {
     }
 }
 
-impl Default for KVStoreResourceHost {
-    fn default() -> Self {
-        Self::new()
-    }
-}

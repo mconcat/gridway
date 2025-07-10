@@ -11,6 +11,7 @@ pub mod component_host;
 pub mod kvstore_resource;
 pub mod module_governance;
 pub mod module_router;
+pub mod prefixed_kvstore_resource;
 pub mod vfs;
 pub mod wasi_host;
 
@@ -18,6 +19,12 @@ pub mod wasi_host;
 mod kvstore_resource_test;
 #[cfg(test)]
 mod test_component;
+#[cfg(test)]
+mod test_component_kvstore_integration;
+#[cfg(test)]
+mod test_kvstore_integration;
+#[cfg(test)]
+mod test_prefixed_kvstore;
 #[cfg(test)]
 mod test_wasi;
 #[cfg(test)]
@@ -231,13 +238,16 @@ pub struct BaseApp {
 impl BaseApp {
     /// Create a new base application with microkernel architecture
     pub fn new(name: String) -> Result<Self> {
+        // Create the base store
+        let store = Arc::new(std::sync::Mutex::new(MemStore::new()));
+
         // Initialize WASI runtime host
         let wasi_host = Arc::new(WasiHost::new().map_err(|e| {
             BaseAppError::InitChainFailed(format!("Failed to initialize WASI host: {e}"))
         })?);
 
         // Initialize component host for preview2 components
-        let component_host = Arc::new(ComponentHost::new().map_err(|e| {
+        let component_host = Arc::new(ComponentHost::new(store.clone()).map_err(|e| {
             BaseAppError::InitChainFailed(format!("Failed to initialize Component host: {e}"))
         })?);
 
@@ -1624,12 +1634,14 @@ impl BaseApp {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
     use super::*;
 
     #[test]
     fn test_minimal_wasi_module() {
         // Test with a WASI component using ComponentHost
-        let component_host = ComponentHost::new().unwrap();
+        let base_store = Arc::new(Mutex::new(MemStore::new()));
+        let component_host = ComponentHost::new(base_store).unwrap();
 
         let module_path = std::env::current_dir()
             .unwrap()
@@ -1686,7 +1698,8 @@ mod tests {
     #[test]
     fn test_wasi_module_direct() {
         // Direct test of WASI component execution
-        let component_host = ComponentHost::new().unwrap();
+        let base_store = Arc::new(Mutex::new(MemStore::new()));
+        let component_host = ComponentHost::new(base_store).unwrap();
 
         // Load tx decoder component
         let module_path = std::env::current_dir()

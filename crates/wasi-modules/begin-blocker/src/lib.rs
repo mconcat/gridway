@@ -12,7 +12,7 @@ mod bindings;
 use bindings::exports::helium::framework::begin_blocker::{
     BeginBlockRequest, BeginBlockResponse, Event, EventAttribute, Evidence, Guest,
 };
-use bindings::helium::framework::module_state;
+use bindings::helium::framework::kvstore;
 
 /// Validator information for updates (still needed for internal logic)
 #[derive(Debug, Clone)]
@@ -55,13 +55,22 @@ impl Guest for Component {
     fn begin_block(request: BeginBlockRequest) -> BeginBlockResponse {
         let _component = Component::new();
 
-        // Get module state data from the module-state interface
-        let state_data = module_state::get_state();
+        // Open KVStore for begin-blocker
+        let store = match kvstore::open_store("begin-blocker") {
+            Ok(s) => s,
+            Err(e) => {
+                return BeginBlockResponse {
+                    success: false,
+                    events: vec![],
+                    error: Some(format!("Failed to open kvstore: {}", e)),
+                }
+            }
+        };
 
         let mut events = Vec::new();
 
         // Process block header
-        events.extend(process_block_header(&request, &state_data));
+        events.extend(process_block_header(&request, &store));
 
         // Process byzantine validators (evidence handling)
         events.extend(process_evidence(&request.byzantine_validators));
@@ -79,8 +88,11 @@ impl Guest for Component {
 
 fn process_block_header(
     request: &BeginBlockRequest,
-    state_data: &module_state::StateData,
+    store: &kvstore::Store,
 ) -> Vec<Event> {
+    // Get proposer address from KVStore
+    let proposer_address = store.get(b"proposer_address").unwrap_or_else(|| vec![]);
+    
     // Emit new block event
     vec![Event {
         event_type: "new_block".to_string(),
@@ -99,7 +111,7 @@ fn process_block_header(
             },
             EventAttribute {
                 key: "proposer".to_string(),
-                value: hex::encode(&state_data.proposer_address),
+                value: hex::encode(&proposer_address),
             },
         ],
     }]
