@@ -15,8 +15,9 @@ RUN apt-get update && apt-get install -y \
 # Install cargo-component
 RUN cargo install cargo-component --locked
 
-# Add wasm32-wasip1 target
-RUN rustup target add wasm32-wasip1
+# Add wasm32-wasip1 target and rustfmt component
+RUN rustup target add wasm32-wasip1 && \
+    rustup component add rustfmt
 
 # Create app directory
 WORKDIR /usr/src/helium
