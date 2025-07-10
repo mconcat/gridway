@@ -34,12 +34,18 @@ interface begin-blocker {
         error: option<string>,
     }
 
+    /// Event attribute key-value pair
+    record event-attribute {
+        key: string,
+        value: string,
+    }
+
     /// Event emitted during processing
     record event {
         /// Event type
         event-type: string,
-        /// Event attributes as JSON string
-        attributes: string,
+        /// Event attributes as structured data
+        attributes: list<event-attribute>,
     }
 
     /// Called at the beginning of each block
@@ -47,5 +53,8 @@ interface begin-blocker {
 }
 
 world begin-blocker-world {
+    import kvstore;
+    import module-state;
     export begin-blocker;
 }
+

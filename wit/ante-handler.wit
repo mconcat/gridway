@@ -36,12 +36,18 @@ interface ante-handler {
         priority: u64,
     }
 
+    /// Event attribute key-value pair
+    record event-attribute {
+        key: string,
+        value: string,
+    }
+
     /// Event emitted during processing
     record event {
         /// Event type
         event-type: string,
-        /// Event attributes as JSON string
-        attributes: string,
+        /// Event attributes as structured data
+        attributes: list<event-attribute>,
     }
 
     /// Validate a transaction before execution

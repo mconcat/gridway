@@ -38,12 +38,18 @@ interface module {
         gas-used: u64,
     }
 
+    /// Event attribute key-value pair
+    record event-attribute {
+        key: string,
+        value: string,
+    }
+
     /// Event emitted during execution
     record event {
         /// Event type
         event-type: string,
-        /// Event attributes as JSON string
-        attributes: string,
+        /// Event attributes as structured data
+        attributes: list<event-attribute>,
     }
 
     /// Handle a message
@@ -51,6 +57,45 @@ interface module {
 
     /// Query module state
     query: func(path: string, data: list<u8>) -> result<list<u8>, string>;
+}
+
+/// Module state resource for accessing blockchain module state
+interface module-state {
+    /// Validator update data
+    record validator-update-data {
+        pub-key-type: string,
+        pub-key-value: list<u8>,
+        power: s64,
+    }
+
+    /// Governance proposal
+    record proposal {
+        id: u64,
+        voting-end-time: u64,
+        yes-votes: u64,
+        no-votes: u64,
+        abstain-votes: u64,
+        no-with-veto-votes: u64,
+    }
+
+    /// Module state data
+    record state-data {
+        /// Pending validator updates
+        pending-validator-updates: list<validator-update-data>,
+        /// Active governance proposals
+        active-proposals: list<proposal>,
+        /// Current inflation rate
+        inflation-rate: f64,
+        /// Last reward distribution height
+        last-reward-height: u64,
+        /// Total voting power
+        total-power: s64,
+        /// Block proposer address
+        proposer-address: list<u8>,
+    }
+
+    /// Get current module state
+    get-state: func() -> state-data;
 }
 
 /// KVStore resource for blockchain state access
@@ -78,7 +123,12 @@ interface kvstore {
     open-store: func(name: string) -> result<store, string>;
 }
 
+// Note: begin-blocker and end-blocker interfaces are defined in their respective .wit files
+
 world module-world {
     import kvstore;
     export module;
 }
+
+// Note: world definitions are in their respective .wit files
+

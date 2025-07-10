@@ -3,6 +3,9 @@
 **/*.rs.bk
 /modules/
 
+# Generated bindings from wit-bindgen
+**/src/bindings.rs
+
 # IDE and development tools
 .vscode/
 .idea/
