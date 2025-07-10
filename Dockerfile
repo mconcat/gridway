@@ -21,11 +21,11 @@ WORKDIR /usr/src/helium
 # Copy workspace files
 COPY . ./
 
-# Build the application (excluding WASI modules)
-RUN cargo build --release --bin helium-server
-
-# Build WASI modules using cargo-component
+# Build WASI modules first using cargo-component
 RUN ./scripts/build-wasi-modules.sh
+
+# Build the application (now that WASI bindings exist)
+RUN cargo build --release --bin helium-server
 
 # Runtime stage
 FROM debian:bookworm-slim
