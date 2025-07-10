@@ -7,6 +7,9 @@
 use helium_store::KVStore;
 use std::sync::{Arc, Mutex};
 
+/// Type alias for range query results
+type RangeResult = Vec<(Vec<u8>, Vec<u8>)>;
+
 /// A KVStore resource that enforces prefix-based access control
 #[derive(Clone)]
 pub struct PrefixedKVStore {
@@ -90,7 +93,7 @@ impl PrefixedKVStore {
         start: Option<&[u8]>,
         end: Option<&[u8]>,
         limit: u32,
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+    ) -> Result<RangeResult, String> {
         let store = self
             .store
             .lock()

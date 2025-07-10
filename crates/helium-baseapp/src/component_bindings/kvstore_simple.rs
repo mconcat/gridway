@@ -6,6 +6,12 @@ use helium_store::KVStore;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+/// Type alias for a shared KVStore instance
+type SharedKVStore = Arc<Mutex<dyn KVStore>>;
+
+/// Type alias for the stores map
+type StoresMap = HashMap<String, SharedKVStore>;
+
 /// Simple KVStore resource that can be shared with WASI components
 pub struct SimpleKVStoreResource {
     /// Name of the store
@@ -60,7 +66,7 @@ impl SimpleKVStoreResource {
 #[derive(Clone)]
 pub struct SimpleKVStoreManager {
     /// Available stores by name
-    stores: Arc<Mutex<HashMap<String, Arc<Mutex<dyn KVStore>>>>>,
+    stores: Arc<Mutex<StoresMap>>,
 }
 
 impl SimpleKVStoreManager {
@@ -71,7 +77,7 @@ impl SimpleKVStoreManager {
     }
 
     /// Mount a KVStore with the given name
-    pub fn mount_store(&self, name: String, store: Arc<Mutex<dyn KVStore>>) -> Result<(), String> {
+    pub fn mount_store(&self, name: String, store: SharedKVStore) -> Result<(), String> {
         let mut stores = self
             .stores
             .lock()
@@ -81,7 +87,7 @@ impl SimpleKVStoreManager {
     }
 
     /// Get a store by name
-    pub fn get_store(&self, name: &str) -> Result<Arc<Mutex<dyn KVStore>>, String> {
+    pub fn get_store(&self, name: &str) -> Result<SharedKVStore, String> {
         let stores = self
             .stores
             .lock()

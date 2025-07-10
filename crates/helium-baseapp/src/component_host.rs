@@ -90,10 +90,12 @@ pub struct ComponentResult {
 }
 
 /// Component host state that implements WasiView
-struct ComponentState {
+pub struct ComponentState {
     table: wasmtime_wasi::ResourceTable,
     wasi: WasiCtx,
+    #[allow(dead_code)]
     component_name: String,
+    #[allow(dead_code)]
     kvstore_manager: SimpleKVStoreManager,
     kvstore_host: KVStoreResourceHost,
 }

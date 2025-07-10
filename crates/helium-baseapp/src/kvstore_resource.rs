@@ -8,6 +8,9 @@ use helium_store::KVStore;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use wasmtime::component::Resource;
+
+/// Type alias for range query results
+type RangeResult = Vec<(Vec<u8>, Vec<u8>)>;
 use wasmtime_wasi::ResourceTable;
 
 /// KVStore resource data that will be stored in the ResourceTable
@@ -58,7 +61,7 @@ impl KVStoreResource {
         start: Option<&[u8]>,
         end: Option<&[u8]>,
         limit: u32,
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+    ) -> Result<RangeResult, String> {
         self.store.range(start, end, limit)
     }
 }
