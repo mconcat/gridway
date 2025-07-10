@@ -329,6 +329,7 @@ impl ComponentHost {
     }
 
     /// Execute an ante-handler component
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_ante_handler(
         &self,
         component_name: &str,

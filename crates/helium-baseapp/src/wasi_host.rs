@@ -604,6 +604,7 @@ impl WasiHost {
     }
 
     /// Add host functions to the linker
+    #[allow(dead_code)]
     fn add_host_functions(&self, linker: &mut Linker<WasiP1Ctx>) -> Result<()> {
         // Add basic host functions for memory management and communication
 

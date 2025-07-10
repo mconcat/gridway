@@ -216,6 +216,7 @@ pub struct BaseApp {
     /// Current context
     context: Option<Context>,
     /// WASI runtime host for module execution  
+    #[allow(dead_code)]
     wasi_host: Arc<WasiHost>,
     /// Component host for preview2 components
     component_host: Arc<ComponentHost>,
@@ -445,6 +446,7 @@ impl BaseApp {
         }
 
         #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
         struct BeginBlockResponse {
             success: bool,
             events: Vec<WasiEvent>,
@@ -471,7 +473,7 @@ impl BaseApp {
             byzantine_validators: vec![], // TODO: Get from tendermint
         };
 
-        let input = serde_json::to_string(&request).map_err(|e| {
+        let _input = serde_json::to_string(&request).map_err(|e| {
             BaseAppError::AbciError(format!("Failed to serialize BeginBlock request: {e}"))
         })?;
 
@@ -661,7 +663,7 @@ impl BaseApp {
             last_reward_height: height.saturating_sub(1000),
         };
 
-        let input = serde_json::to_string(&(request, state)).map_err(|e| {
+        let _input = serde_json::to_string(&(request, state)).map_err(|e| {
             BaseAppError::AbciError(format!("Failed to serialize EndBlock request: {e}"))
         })?;
 
@@ -970,6 +972,7 @@ impl BaseApp {
         }
 
         #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
         struct DecodeResponse {
             success: bool,
             decoded_tx: Option<serde_json::Value>,
@@ -984,7 +987,7 @@ impl BaseApp {
             validate: true,
         };
 
-        let input = serde_json::to_string(&request).map_err(|e| {
+        let _input = serde_json::to_string(&request).map_err(|e| {
             BaseAppError::TxFailed(format!("Failed to serialize decode request: {e}"))
         })?;
 
