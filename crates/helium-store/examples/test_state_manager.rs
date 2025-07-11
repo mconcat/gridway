@@ -1,6 +1,4 @@
-use helium_store::{GlobalAppStore, JMTStore, KVStore, MemStore, StateManager};
-use std::sync::{Arc, Mutex};
-use tempfile::tempdir;
+use helium_store::{KVStore, MemStore, StateManager};
 
 fn main() {
     // Create state manager and mount store

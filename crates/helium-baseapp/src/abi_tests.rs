@@ -5,13 +5,12 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
     use crate::abi::*;
     use crate::capabilities::{CapabilityManager, CapabilityType};
     use crate::vfs::VirtualFilesystem;
     use helium_store::MemStore;
     use std::sync::{Arc, Mutex};
-    use wasmtime::*;
 
     /// Create a test WASM module with basic memory exports
     fn create_test_module() -> Vec<u8> {
@@ -173,7 +172,7 @@ mod tests {
     #[test]
     #[ignore = "TODO: Fix capability manager passing through WASM Store context"]
     fn test_host_capability_check() {
-        let (mut context, _vfs, cap_manager) = setup_test_context();
+        let (context, _vfs, cap_manager) = setup_test_context();
 
         // Verify context has capability manager before creating store
         assert!(

@@ -1653,7 +1653,7 @@ mod tests {
             .join("modules/tx_decoder_component.wasm");
 
         if !module_path.exists() {
-            eprintln!("Component not found at: {:?}", module_path);
+            eprintln!("Component not found at: {module_path:?}");
             eprintln!("Note: This test now expects preview2 components, not preview1 modules");
             return;
         }
@@ -1681,7 +1681,7 @@ mod tests {
                         assert!(result.success);
                     }
                     Err(e) => {
-                        eprintln!("Component execution failed: {}", e);
+                        eprintln!("Component execution failed: {e}");
                         // Don't panic on component execution failure since components might not be fully implemented
                         println!(
                             "Note: Component execution failed but component loaded successfully"
@@ -1690,7 +1690,7 @@ mod tests {
                 }
             }
             Err(e) => {
-                eprintln!("Component loading failed: {}", e);
+                eprintln!("Component loading failed: {e}");
                 panic!("Component loading failed");
             }
         }
@@ -1712,7 +1712,7 @@ mod tests {
             .join("modules/tx_decoder_component.wasm");
 
         if !module_path.exists() {
-            eprintln!("Component not found at: {:?}", module_path);
+            eprintln!("Component not found at: {module_path:?}");
             eprintln!("Current dir: {:?}", std::env::current_dir().unwrap());
             eprintln!("Note: This test now expects preview2 components, not preview1 modules");
             // Skip test if component not built
@@ -1746,7 +1746,7 @@ mod tests {
                         // Component should execute (success depends on implementation)
                     }
                     Err(e) => {
-                        eprintln!("Component execution failed: {}", e);
+                        eprintln!("Component execution failed: {e}");
                         // Don't panic since components might not be fully implemented
                         println!(
                             "Note: Component execution failed but component loaded successfully"
@@ -1755,7 +1755,7 @@ mod tests {
                 }
             }
             Err(e) => {
-                eprintln!("Component loading failed: {}", e);
+                eprintln!("Component loading failed: {e}");
                 panic!("Component loading failed");
             }
         }

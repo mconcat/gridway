@@ -32,7 +32,7 @@ fn build_wasi_modules() {
 
     // Ensure we have the wasm32-wasi target
     let output = Command::new("rustup")
-        .args(&["target", "list", "--installed"])
+        .args(["target", "list", "--installed"])
         .output()
         .expect("Failed to check rustup targets");
 
@@ -40,7 +40,7 @@ fn build_wasi_modules() {
     if !installed_targets.contains("wasm32-wasip1") {
         println!("cargo:warning=Installing wasm32-wasip1 target...");
         let status = Command::new("rustup")
-            .args(&["target", "add", "wasm32-wasip1"])
+            .args(["target", "add", "wasm32-wasip1"])
             .status()
             .expect("Failed to install wasm32-wasip1 target");
 
@@ -62,7 +62,7 @@ fn build_wasi_modules() {
     ];
 
     for (module_name, crate_name) in &wasi_modules {
-        println!("cargo:warning=Building WASI module: {}", module_name);
+        println!("cargo:warning=Building WASI module: {module_name}");
 
         let module_path = workspace_root
             .join("crates")
@@ -72,17 +72,17 @@ fn build_wasi_modules() {
         // Build the module
         let status = Command::new("cargo")
             .current_dir(&module_path)
-            .args(&["build", "--target", "wasm32-wasip1", "--release"])
+            .args(["build", "--target", "wasm32-wasip1", "--release"])
             .status()
-            .expect(&format!("Failed to build {} module", module_name));
+            .unwrap_or_else(|_| panic!("Failed to build {module_name} module"));
 
         if !status.success() {
-            panic!("Failed to build {} module", module_name);
+            panic!("Failed to build {module_name} module");
         }
 
         // Copy the built module to the modules directory
-        let wasm_name = format!("{}.wasm", crate_name);
-        let lib_wasm_name = format!("lib{}.wasm", crate_name);
+        let wasm_name = format!("{crate_name}.wasm");
+        let lib_wasm_name = format!("lib{crate_name}.wasm");
 
         let target_dir = workspace_root
             .join("target")
@@ -100,7 +100,7 @@ fn build_wasi_modules() {
             let dest_path = modules_dir.join(&dest_name);
 
             std::fs::copy(&source_path, &dest_path)
-                .expect(&format!("Failed to copy {} module", module_name));
+                .unwrap_or_else(|_| panic!("Failed to copy {module_name} module"));
 
             println!(
                 "cargo:warning=Copied {} to {}",
@@ -108,10 +108,7 @@ fn build_wasi_modules() {
                 dest_path.display()
             );
         } else {
-            println!(
-                "cargo:warning=Warning: Could not find compiled WASM file for {}",
-                module_name
-            );
+            println!("cargo:warning=Warning: Could not find compiled WASM file for {module_name}");
         }
     }
 

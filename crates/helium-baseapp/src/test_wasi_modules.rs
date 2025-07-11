@@ -16,7 +16,7 @@ fn test_our_minimal_component() {
         .join("modules/test_minimal_component.wasm");
 
     if !module_path.exists() {
-        eprintln!("Component not found at: {:?}", module_path);
+        eprintln!("Component not found at: {module_path:?}");
         eprintln!("Note: This test expects preview2 components, not preview1 modules");
         return;
     }
@@ -38,7 +38,7 @@ fn test_our_minimal_component() {
             // since it's a generic component type
         }
         Err(e) => {
-            println!("Failed to load component: {}", e);
+            println!("Failed to load component: {e}");
         }
     }
 }

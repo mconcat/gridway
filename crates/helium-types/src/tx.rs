@@ -815,7 +815,7 @@ mod tests {
         match result {
             Err(TxDecodeError::ProtobufError(_)) => {} // Falls back to protobuf which isn't implemented
             Err(TxDecodeError::InvalidFormat(_)) => {} // Now also acceptable since JSON decoding might fail
-            _ => panic!("Expected ProtobufError or InvalidFormat, got: {:?}", result),
+            _ => panic!("Expected ProtobufError or InvalidFormat, got: {result:?}"),
         }
     }
 
