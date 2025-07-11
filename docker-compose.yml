@@ -20,6 +20,7 @@ services:
     restart: unless-stopped
 
   helium:
+    image: ${HELIUM_IMAGE:-helium:test}
     build:
       context: .
       dockerfile: Dockerfile

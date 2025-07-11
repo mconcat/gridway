@@ -64,6 +64,7 @@ jobs:
           
       - name: Single Node - Start services
         run: |
+          export HELIUM_IMAGE=helium:test
           docker compose up -d
           sleep 10
           
@@ -120,6 +121,7 @@ jobs:
           
       - name: Multi-Node - Start all nodes
         run: |
+          export HELIUM_IMAGE=helium:test
           docker compose -f docker-compose.multi.yml up -d
           sleep 15
           

@@ -203,7 +203,7 @@ impl Guest for Component {
     }
 }
 
-fn create_mock_transaction(tx_bytes: &[u8]) -> Transaction {
+fn create_mock_transaction(_tx_bytes: &[u8]) -> Transaction {
     // In a real implementation, this would deserialize from protobuf
     // For now, create a mock transaction
     Transaction {

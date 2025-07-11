@@ -83,7 +83,7 @@ EOF
 echo "Creating genesis file..."
 cat > "${COMETBFT_HOME}/config/genesis.json" << EOF
 {
-  "genesis_time": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "genesis_time": "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%SZ')",
   "chain_id": "${CHAIN_ID}",
   "initial_height": "1",
   "consensus_params": {

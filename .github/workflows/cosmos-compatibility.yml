@@ -43,6 +43,7 @@ jobs:
           
       - name: ABCI - Start services
         run: |
+          export HELIUM_IMAGE=helium:test
           docker compose up -d
           sleep 10
           
@@ -95,6 +96,7 @@ jobs:
       - name: gRPC - Initialize and start
         run: |
           ./scripts/init-testnet.sh
+          export HELIUM_IMAGE=helium:test
           docker compose up -d
           sleep 10
           
@@ -134,6 +136,7 @@ jobs:
       - name: REST - Initialize and start
         run: |
           ./scripts/init-testnet.sh
+          export HELIUM_IMAGE=helium:test
           docker compose up -d
           
           # Wait for REST API
@@ -201,6 +204,7 @@ jobs:
       - name: Tx Format - Initialize and start
         run: |
           ./scripts/init-testnet.sh
+          export HELIUM_IMAGE=helium:test
           docker compose up -d
           sleep 10
           

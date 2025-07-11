@@ -40,6 +40,7 @@ pub struct VoteInfo {
 
 struct Component {
     /// Track missed blocks for downtime slashing
+    #[allow(dead_code)]
     missed_blocks: HashMap<Vec<u8>, u32>,
 }
 
@@ -115,6 +116,7 @@ fn process_block_header(request: &BeginBlockRequest, store: &kvstore::Store) -> 
 }
 
 impl Component {
+    #[allow(dead_code)]
     fn process_last_commit(&mut self, last_commit: &LastCommitInfo, height: u64) -> Vec<Event> {
         let mut events = vec![];
         let mut missed_validators = vec![];

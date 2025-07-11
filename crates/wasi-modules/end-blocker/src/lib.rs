@@ -18,6 +18,7 @@ use bindings::helium::framework::kvstore;
 
 // Define types that were previously in module_state
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ValidatorUpdateData {
     pub_key_type: String,
     pub_key_value: Vec<u8>,
@@ -25,6 +26,7 @@ struct ValidatorUpdateData {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct Proposal {
     id: u64,
     voting_end_time: u64,
@@ -64,8 +66,8 @@ impl Guest for Component {
 
         // Constants
         const REWARD_FREQUENCY: u64 = 1000; // Distribute rewards every 1000 blocks
-        const QUORUM_THRESHOLD: f64 = 0.334; // 33.4% quorum
-        const PASS_THRESHOLD: f64 = 0.5; // 50% to pass
+        const _QUORUM_THRESHOLD: f64 = 0.334; // 33.4% quorum
+        const _PASS_THRESHOLD: f64 = 0.5; // 50% to pass
 
         // Process validator set updates
         // For now, we'll skip pending validator updates as they require complex serialization
@@ -151,6 +153,7 @@ fn read_f64_from_store(store: &kvstore::Store, key: &[u8]) -> Option<f64> {
     })
 }
 
+#[allow(dead_code)]
 fn process_validator_updates(
     pending_updates: &[ValidatorUpdateData],
 ) -> (Vec<ValidatorUpdate>, Vec<Event>) {
@@ -253,6 +256,7 @@ fn calculate_block_rewards(inflation_rate: f64, total_power: i64) -> u64 {
     (annual_inflation / blocks_per_year as f64) as u64
 }
 
+#[allow(dead_code)]
 fn process_governance_proposals(
     proposals: &[Proposal],
     quorum_threshold: f64,
@@ -302,6 +306,7 @@ fn process_governance_proposals(
     events
 }
 
+#[allow(dead_code)]
 fn evaluate_proposal(
     proposal: &Proposal,
     quorum_threshold: f64,
