@@ -35,6 +35,9 @@ mkdir -p "${COMETBFT_HOME}/data"
 mkdir -p "${HELIUM_HOME}/config"
 mkdir -p "${HELIUM_HOME}/data"
 
+# Set permissions for Docker access
+chmod -R 777 "${TESTNET_DIR}"
+
 # Initialize CometBFT configuration
 echo "Initializing CometBFT configuration..."
 docker run --rm -v "$(pwd)/${COMETBFT_HOME}":/cometbft \
@@ -163,8 +166,8 @@ cat > "${HELIUM_HOME}/genesis.json" << EOF
 }
 EOF
 
-# Set proper permissions
-chmod -R 755 "${TESTNET_DIR}"
+# Set proper permissions - ensure everything is readable/writable
+chmod -R 777 "${TESTNET_DIR}"
 
 echo ""
 echo "Testnet initialization complete!"
