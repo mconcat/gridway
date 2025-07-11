@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.82-slim AS builder
+FROM rust:1.83-slim AS builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y \
     libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install cargo-component (use older version compatible with edition 2021)
-RUN cargo install cargo-component --version 0.17.0 --locked
+# Install cargo-component
+RUN cargo install cargo-component --locked
 
 # Add wasm32-wasip1 target and rustfmt component
 RUN rustup target add wasm32-wasip1 && \
