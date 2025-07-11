@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.83-slim AS builder
+FROM rustlang/rust:nightly-slim AS builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
