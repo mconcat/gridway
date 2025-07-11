@@ -10,6 +10,12 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "Building WASI modules..."
 
+# Check if cargo-component is installed
+if ! command -v cargo-component &> /dev/null; then
+    echo "Error: cargo-component is not installed"
+    exit 1
+fi
+
 # Install wasm32-wasi target if not already installed
 if ! rustup target list --installed | grep -q wasm32-wasip1; then
     echo "Installing wasm32-wasip1 target..."
@@ -38,7 +44,10 @@ for module_info in "${MODULES[@]}"; do
     cd "$PROJECT_ROOT/crates/wasi-modules/$module_name"
     
     # Build the module as a component
-    cargo component build --release
+    if ! cargo component build --release; then
+        echo "Error: Failed to build $module_name"
+        exit 1
+    fi
     
     # Format the generated bindings to match stable rustfmt
     if [ -f "src/bindings.rs" ]; then

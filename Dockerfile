@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y \
     libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install cargo-component
-RUN cargo install cargo-component --locked
+# Install cargo-component (use older version compatible with edition 2021)
+RUN cargo install cargo-component --version 0.17.0 --locked
 
 # Add wasm32-wasip1 target and rustfmt component
 RUN rustup target add wasm32-wasip1 && \
