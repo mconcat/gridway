@@ -26,7 +26,7 @@ mod tests {
         }
 
         // Create component host with the store
-        let host = ComponentHost::new(base_store.clone()).unwrap();
+        let _host = ComponentHost::new(base_store.clone()).unwrap();
 
         // Load the ante-handler component and test it can only access /ante/ prefix
         // This would require having a test ante-handler component that tries to access different keys

@@ -9,7 +9,7 @@ mod tests {
     #[test]
     fn test_component_host_creation() {
         let base_store = Arc::new(Mutex::new(helium_store::MemStore::new()));
-        let host = ComponentHost::new(base_store).unwrap();
+        let _host = ComponentHost::new(base_store).unwrap();
         // Basic test that host can be created
     }
 

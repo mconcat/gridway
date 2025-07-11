@@ -4,6 +4,7 @@
 //! and CapabilityManager for state access and permission checks.
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
 
     use crate::abi::*;
@@ -136,7 +137,7 @@ mod tests {
         let host_state_get_func = host_state_get.into_func().unwrap();
 
         // Allocate buffer for reading value
-        let buffer_size = 1024;
+        let _buffer_size = 1024;
 
         // Call host_state_get
         let params = vec![

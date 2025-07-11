@@ -27,11 +27,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create REST gateway with real gRPC services
     let gateway = RestGateway::new(config).await?;
-    let app = gateway.router();
+    let _app = gateway.router();
 
     // Start server
     let addr: SocketAddr = "127.0.0.1:1317".parse()?;
-    let listener = TcpListener::bind(&addr).await?;
+    let _listener = TcpListener::bind(&addr).await?;
 
     info!("🚀 REST Gateway listening on http://{}", addr);
     info!("📋 Available endpoints:");
