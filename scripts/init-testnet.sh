@@ -44,6 +44,9 @@ docker run --rm -v "$(pwd)/${COMETBFT_HOME}":/cometbft \
     cometbft/cometbft:v0.38.0 \
     init --home /cometbft
 
+# Fix permissions after Docker creates files
+chmod -R 777 "${TESTNET_DIR}"
+
 # Update CometBFT config
 echo "Updating CometBFT configuration..."
 cat > "${COMETBFT_HOME}/config/config.toml" << EOF
@@ -119,6 +122,9 @@ echo "Generating validator key..."
 docker run --rm -v "$(pwd)/${COMETBFT_HOME}":/cometbft \
     cometbft/cometbft:v0.38.0 \
     gen-validator --home /cometbft
+
+# Fix permissions after Docker command
+chmod -R 777 "${TESTNET_DIR}"
 
 # Extract validator public key and create validator entry
 VALIDATOR_PUBKEY=$(docker run --rm -v "$(pwd)/${COMETBFT_HOME}":/cometbft \
