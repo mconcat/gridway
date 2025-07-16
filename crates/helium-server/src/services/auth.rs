@@ -57,6 +57,7 @@ pub struct AuthService {
     /// State manager for persistent storage
     state_manager: Arc<RwLock<StateManager>>,
     /// Base application for transaction processing
+    #[allow(dead_code)]
     base_app: Arc<RwLock<BaseApp>>,
     /// Configuration parameters
     config: AuthConfig,

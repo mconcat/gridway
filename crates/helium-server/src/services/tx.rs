@@ -335,6 +335,7 @@ impl TxService {
     }
 
     /// Get transactions by height range
+    #[allow(dead_code)]
     async fn get_transactions_by_height(
         &self,
         height: i64,
