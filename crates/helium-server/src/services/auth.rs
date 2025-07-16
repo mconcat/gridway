@@ -414,7 +414,6 @@ mod tests {
     use super::*;
     use crate::grpc::auth::Query;
     use helium_baseapp::BaseApp;
-    use helium_store::MemStore;
 
     async fn create_test_service() -> AuthService {
         let mut state_manager = StateManager::new_with_memstore();

@@ -1,0 +1,152 @@
+version: '3.8'
+
+x-cometbft-base: &cometbft-base
+  image: cometbft/cometbft:v0.38.0
+  networks:
+    - helium-network
+  restart: unless-stopped
+
+x-helium-base: &helium-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment:
+    - RUST_LOG=info
+    - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
+  networks:
+    - helium-network
+  healthcheck:
+    test: ["CMD", "nc", "-z", "localhost", "26658"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
+    start_period: 10s
+  restart: unless-stopped
+
+services:
+  # Node 0
+  helium-0:
+    <<: *helium-base
+    container_name: helium-app-0
+    environment:
+      - RUST_LOG=info
+      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
+      - HELIUM_HOME=/helium
+    volumes:
+      - ./testnet/helium-0:/helium
+    ports:
+      - "26658:26658"
+      - "9090:9090"
+      - "1317:1317"
+
+  cometbft-0:
+    <<: *cometbft-base
+    container_name: cometbft-node-0
+    ports:
+      - "26656:26656"
+      - "26657:26657"
+    environment:
+      - CMTHOME=/cometbft
+    volumes:
+      - ./testnet/node0:/cometbft
+    command: ["node", "--proxy_app=tcp://helium-0:26658"]
+    depends_on:
+      helium-0:
+        condition: service_healthy
+
+  # Node 1
+  helium-1:
+    <<: *helium-base
+    container_name: helium-app-1
+    environment:
+      - RUST_LOG=info
+      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
+      - HELIUM_HOME=/helium
+    volumes:
+      - ./testnet/helium-1:/helium
+    ports:
+      - "26668:26658"
+      - "9091:9090"
+      - "1318:1317"
+
+  cometbft-1:
+    <<: *cometbft-base
+    container_name: cometbft-node-1
+    ports:
+      - "26666:26656"
+      - "26667:26657"
+    environment:
+      - CMTHOME=/cometbft
+    volumes:
+      - ./testnet/node1:/cometbft
+    command: ["node", "--proxy_app=tcp://helium-1:26658"]
+    depends_on:
+      helium-1:
+        condition: service_healthy
+
+  # Node 2
+  helium-2:
+    <<: *helium-base
+    container_name: helium-app-2
+    environment:
+      - RUST_LOG=info
+      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
+      - HELIUM_HOME=/helium
+    volumes:
+      - ./testnet/helium-2:/helium
+    ports:
+      - "26678:26658"
+      - "9092:9090"
+      - "1319:1317"
+
+  cometbft-2:
+    <<: *cometbft-base
+    container_name: cometbft-node-2
+    ports:
+      - "26676:26656"
+      - "26677:26657"
+    environment:
+      - CMTHOME=/cometbft
+    volumes:
+      - ./testnet/node2:/cometbft
+    command: ["node", "--proxy_app=tcp://helium-2:26658"]
+    depends_on:
+      helium-2:
+        condition: service_healthy
+
+  # Node 3
+  helium-3:
+    <<: *helium-base
+    container_name: helium-app-3
+    environment:
+      - RUST_LOG=info
+      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
+      - HELIUM_HOME=/helium
+    volumes:
+      - ./testnet/helium-3:/helium
+    ports:
+      - "26688:26658"
+      - "9093:9090"
+      - "1320:1317"
+
+  cometbft-3:
+    <<: *cometbft-base
+    container_name: cometbft-node-3
+    ports:
+      - "26686:26656"
+      - "26687:26657"
+    environment:
+      - CMTHOME=/cometbft
+    volumes:
+      - ./testnet/node3:/cometbft
+    command: ["node", "--proxy_app=tcp://helium-3:26658"]
+    depends_on:
+      helium-3:
+        condition: service_healthy
+
+networks:
+  helium-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

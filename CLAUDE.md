@@ -7,23 +7,41 @@ This document provides essential guidelines and best practices for AI agents wor
 Always run these commands in order before committing any changes:
 
 ```bash
-# 1. Build all crates
-cargo build --all
+# 1. Build WASI modules (required before building other crates)
+./scripts/build-wasi-modules.sh
 
-# 2. Run all tests
-cargo test --all
+# 2. Build all other crates
+cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
 
-# 3. Check formatting 
+# 3. Run all tests
+cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
+
+# 4. Check formatting 
 cargo fmt --all
 
-# 4. Run clippy
-cargo clippy --fix --all
+# 5. Run clippy
+cargo clippy --fix --all --allow-dirty
 
-# 5. If you fixed formatting issues, run formatter
+# 6. If you fixed formatting issues, run formatter again
 cargo fmt --all
 ```
 
 If you have encountered any issues in one of these commands, and you have fixed them, run the commands again from the first to the last to ensure they new changes have not introduced any new issues.
+
+### Building WASI Modules
+
+The project contains WASI (WebAssembly System Interface) modules that must be built using `cargo-component` instead of regular `cargo build`. These modules are:
+- `ante-handler` - Transaction validation
+- `begin-blocker` - Block initialization  
+- `end-blocker` - Block finalization
+- `tx-decoder` - Transaction decoding
+
+**Important**: Always use `./scripts/build-wasi-modules.sh` to build WASI modules. This script:
+1. Installs the `wasm32-wasip1` target if needed
+2. Builds all WASI modules using `cargo component build --release`
+3. Copies the compiled `.wasm` files to the `modules/` directory
+
+**Note**: Regular `cargo build --all` will fail on WASI modules with linking errors. This is expected - use the exclusion flags shown above.
 
 ## Environment-Specific Considerations
 

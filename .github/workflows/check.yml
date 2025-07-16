@@ -35,11 +35,23 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-registry-
     
+    - name: Install cargo-component
+      run: |
+        if ! command -v cargo-component &> /dev/null; then
+          cargo install cargo-component --locked
+        fi
+    
+    - name: Add wasm32-wasip1 target
+      run: rustup target add wasm32-wasip1
+    
+    - name: Build WASI modules
+      run: ./scripts/build-wasi-modules.sh
+    
     - name: Run cargo check
-      run: cargo check --all
+      run: cargo check --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
     
     - name: Check all targets
-      run: cargo check --all --all-targets
+      run: cargo check --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --all-targets
     
     - name: Check with all features
-      run: cargo check --all --all-features
+      run: cargo check --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --all-features

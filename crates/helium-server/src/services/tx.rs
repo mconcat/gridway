@@ -347,7 +347,7 @@ impl TxService {
         let mut transactions = Vec::new();
         let height_prefix = format!("tx_height_{height}_");
 
-        for (key, value) in store.prefix_iterator(height_prefix.as_bytes()) {
+        for (_key, value) in store.prefix_iterator(height_prefix.as_bytes()) {
             let hash = String::from_utf8_lossy(&value).to_string();
             if let Some(stored_tx) = self.get_stored_transaction(&hash).await? {
                 transactions.push(stored_tx);
@@ -490,7 +490,7 @@ impl tx::Service for TxService {
         let mut tx_responses = Vec::new();
         let mut count = 0;
 
-        for (key, value) in store.prefix_iterator(b"tx_hash_") {
+        for (_key, value) in store.prefix_iterator(b"tx_hash_") {
             if count >= self.config.max_tx_query_limit {
                 break;
             }
@@ -531,7 +531,6 @@ mod tests {
     use super::*;
     use crate::grpc::tx::Service as TxServiceTrait;
     use helium_baseapp::BaseApp;
-    use helium_store::MemStore;
 
     async fn create_test_service() -> TxService {
         let mut state_manager = StateManager::new_with_memstore();

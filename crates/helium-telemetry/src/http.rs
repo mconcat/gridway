@@ -214,7 +214,7 @@ mod tests {
     fn test_default_config() {
         let config = MetricsServerConfig::default();
         assert_eq!(config.metrics_path, "/metrics");
-        assert_eq!(config.enable_health_check, true);
+        assert!(config.enable_health_check);
         assert_eq!(config.bind_address.port(), 1317);
         assert!(config.global_labels.is_empty());
     }

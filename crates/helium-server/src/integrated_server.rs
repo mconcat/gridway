@@ -228,12 +228,12 @@ impl IntegratedServer {
     ) -> Result<ServiceStats, Box<dyn std::error::Error + Send + Sync>> {
         let mut stats = ServiceStats::default();
 
-        if let Some(bank_service) = &self.bank_service {
+        if let Some(_bank_service) = &self.bank_service {
             // Count bank store entries
             let state_manager = self.state_manager.read().await;
             if let Ok(store) = state_manager.get_store("bank") {
                 let mut balance_count = 0;
-                for (key, _) in store.prefix_iterator(b"balance_") {
+                for (_key, _) in store.prefix_iterator(b"balance_") {
                     balance_count += 1;
                 }
                 stats.bank_balance_count = balance_count;
@@ -245,11 +245,11 @@ impl IntegratedServer {
             }
         }
 
-        if let Some(auth_service) = &self.auth_service {
+        if let Some(_auth_service) = &self.auth_service {
             // Count auth store entries
             let state_manager = self.state_manager.read().await;
             if let Ok(store) = state_manager.get_store("auth") {
-                let account_count = 0;
+                let _account_count = 0;
                 let mut account_count = 0;
                 let prefix = b"account_";
                 for (key, _) in store.prefix_iterator(prefix) {
@@ -262,12 +262,12 @@ impl IntegratedServer {
             }
         }
 
-        if let Some(tx_service) = &self.tx_service {
+        if let Some(_tx_service) = &self.tx_service {
             // Count tx store entries
             let state_manager = self.state_manager.read().await;
             if let Ok(store) = state_manager.get_store("tx") {
                 let mut tx_count = 0;
-                for (key, _) in store.prefix_iterator(b"tx_hash_") {
+                for (_key, _) in store.prefix_iterator(b"tx_hash_") {
                     tx_count += 1;
                 }
                 stats.tx_transaction_count = tx_count;

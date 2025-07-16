@@ -17,6 +17,7 @@ members = [
     "crates/wasi-modules/begin-blocker",
     "crates/wasi-modules/end-blocker",
     "crates/wasi-modules/tx-decoder",
+    "crates/wasi-modules/test-minimal",
 ]
 
 [workspace.package]
@@ -83,6 +84,22 @@ wasmtime = "25.0"
 # Testing
 proptest = "1.5"
 
+# Workspace-wide profiles
+[profile.wasi]
+inherits = "release"
+opt-level = "z"     # Optimize for size
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Single codegen unit for better optimization
+strip = true        # Strip debug symbols
+
+[profile.release]
+opt-level = 3
+lto = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
 [package]
 name = "helium"
 version = "0.1.0"
@@ -91,6 +108,7 @@ authors = ["mconcat"]
 description = "Minimal Rust implementation of helium BaseApp"
 license = "AGPL-3.0"
 repository = "https://github.com/mconcat/helium"
+build = "build.rs"
 
 [dependencies]
 # Use workspace dependencies
@@ -106,6 +124,7 @@ helium-baseapp = { workspace = true }
 helium-server = { workspace = true }
 helium-client = { workspace = true }
 helium-simapp = { workspace = true }
+helium-telemetry = { workspace = true }
 
 # ABCI interface
 cometbft = "0.1.0-alpha.2"
@@ -129,6 +148,7 @@ anyhow = "1.0"
 
 [dev-dependencies]
 tempfile = "3.8"
+rand = "0.8"
 
 [[example]]
 name = "simple_app"

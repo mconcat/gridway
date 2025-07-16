@@ -1,0 +1,6 @@
+# Rustfmt configuration
+
+# NOTE: The 'ignore' feature is only available in nightly rustfmt.
+# For stable rust, we handle generated files differently.
+# The bindings.rs files are already marked with #[rustfmt::skip]
+# at the top of the file by wit-bindgen.

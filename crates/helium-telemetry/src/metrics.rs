@@ -130,12 +130,18 @@ mod tests {
 
     #[test]
     fn test_metric_creation() {
-        // Test that metrics can be created without panic
-        assert_eq!(BLOCK_HEIGHT.get(), 0);
-        assert_eq!(TOTAL_TRANSACTIONS.get(), 0);
-        assert_eq!(MEMPOOL_SIZE.get(), 0);
-        assert_eq!(TOTAL_BLOCKS_PROCESSED.get(), 0);
-        assert_eq!(CONNECTED_PEERS.get(), 0);
+        // Test that metrics can be created and accessed without panic
+        // Note: We don't test for specific values as metrics are global
+        // and may have been modified by other tests
+        let _ = BLOCK_HEIGHT.get();
+        let _ = TOTAL_TRANSACTIONS.get();
+        let _ = MEMPOOL_SIZE.get();
+        let _ = TOTAL_BLOCKS_PROCESSED.get();
+        let _ = CONNECTED_PEERS.get();
+        
+        // Test that we can update metrics
+        BLOCK_HEIGHT.set(1);
+        assert!(BLOCK_HEIGHT.get() >= 1);
     }
 
     #[test]

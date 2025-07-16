@@ -6,15 +6,15 @@ set -e
 
 echo "Building EndBlock WASI module..."
 
-# Ensure we have the wasm32-wasi target
-rustup target add wasm32-wasi
+# Ensure we have the wasm32-wasip1 target
+rustup target add wasm32-wasip1
 
 # Build the module
-cargo build --target wasm32-wasi --release
+cargo build --target wasm32-wasip1 --release
 
 # Copy the built module to a standard location
 mkdir -p ../../../modules
-cp target/wasm32-wasi/release/end_blocker.wasm ../../../modules/end_blocker.wasm
+cp target/wasm32-wasip1/release/end_blocker.wasm ../../../modules/end_blocker.wasm
 
 echo "EndBlock WASI module built successfully!"
 echo "Output: modules/end_blocker.wasm"

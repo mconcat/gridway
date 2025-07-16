@@ -1,6 +1,10 @@
 # Build artifacts
 /target/
 **/*.rs.bk
+/modules/
+
+# Generated bindings from wit-bindgen
+**/src/bindings.rs
 
 # IDE and development tools
 .vscode/
@@ -22,3 +26,24 @@ worktrees/
 
 # Old references
 cosmos-sdk/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Testnet data
+testnet/
+testnet_backup_*/
+
+# Docker volumes
+.docker/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/

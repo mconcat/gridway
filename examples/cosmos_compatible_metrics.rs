@@ -4,7 +4,7 @@
 //! with Cosmos SDK telemetry standards.
 
 use helium_telemetry::{
-    http::{serve_metrics, MetricsServerConfig},
+    http::MetricsServerConfig,
     metrics::{BLOCK_HEIGHT, MEMPOOL_SIZE, TOTAL_TRANSACTIONS, TX_FAILED},
     registry,
 };
@@ -65,10 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mempool_count = rand::random::<u8>() % 50;
         MEMPOOL_SIZE.set(mempool_count as i64);
 
-        println!(
-            "Block {}: {} txs ({} failed), mempool: {}",
-            height, total_txs, failed_txs, mempool_count
-        );
+        println!("Block {height}: {total_txs} txs ({failed_txs} failed), mempool: {mempool_count}");
 
         height += 1;
         sleep(Duration::from_secs(5)).await;
