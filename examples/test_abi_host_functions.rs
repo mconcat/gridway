@@ -4,7 +4,7 @@
 //! through the host functions that connect to the VirtualFilesystem.
 
 use helium_baseapp::{
-    abi::{AbiContext, AbiResultCode, HostFunctions},
+    abi::AbiContext,
     capabilities::{CapabilityManager, CapabilityType},
     vfs::{Capability as VfsCapability, VirtualFilesystem},
 };
@@ -69,12 +69,12 @@ fn main() {
     let value = r#"{"balance": 1000, "sequence": 5}"#;
 
     // Write through VFS directly (simulating what host_state_set would do)
-    let path = format!("/state/test_module/{}", key);
+    let path = format!("/state/test_module/{key}");
     let fd = vfs.create(std::path::Path::new(&path)).unwrap();
     vfs.write(fd, value.as_bytes()).unwrap();
     vfs.close(fd).unwrap();
 
-    println!("✓ Wrote state: {} = {}", key, value);
+    println!("✓ Wrote state: {key} = {value}");
 
     // Read through VFS (simulating what host_state_get would do)
     let fd = vfs.open(std::path::Path::new(&path), false).unwrap();
@@ -83,7 +83,7 @@ fn main() {
     vfs.close(fd).unwrap();
 
     let read_value = String::from_utf8_lossy(&buffer[..bytes_read]);
-    println!("✓ Read state: {} = {}", key, read_value);
+    println!("✓ Read state: {key} = {read_value}");
 
     // Demonstrate capability checking
     println!("\n=== Testing Capability System ===\n");
@@ -94,7 +94,7 @@ fn main() {
             &CapabilityType::ReadState("test_module".to_string()),
         )
         .unwrap();
-    println!("✓ Module has read capability: {}", has_read);
+    println!("✓ Module has read capability: {has_read}");
 
     let has_forbidden = cap_manager
         .has_capability(
@@ -102,7 +102,7 @@ fn main() {
             &CapabilityType::WriteState("forbidden".to_string()),
         )
         .unwrap();
-    println!("✓ Module has forbidden write capability: {}", has_forbidden);
+    println!("✓ Module has forbidden write capability: {has_forbidden}");
 
     println!("\n=== Summary ===\n");
     println!("Host functions are now connected to:");

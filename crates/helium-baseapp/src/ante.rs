@@ -206,6 +206,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn create_test_tx() -> RawTx {
         RawTx {
             body: TxBody {

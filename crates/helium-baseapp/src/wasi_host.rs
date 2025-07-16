@@ -10,7 +10,11 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::{debug, error, info};
 use wasmtime::*;
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
+use wasmtime_wasi::{
+    pipe::{MemoryInputPipe, MemoryOutputPipe},
+    preview1::{add_to_linker_sync as add_wasi_to_linker, WasiP1Ctx},
+    WasiCtxBuilder,
+};
 
 /// WASI Host errors
 #[derive(Error, Debug)]
@@ -121,7 +125,7 @@ impl WasmModule {
 /// WASI Host instance information
 pub struct HostInstance {
     /// Instance store
-    pub store: Store<WasiCtx>,
+    pub store: Store<WasiP1Ctx>,
     /// WASM instance
     pub instance: Instance,
     /// Module reference
@@ -190,8 +194,8 @@ impl WasiHost {
         config.wasm_backtrace_details(WasmBacktraceDetails::Enable);
         config.wasm_multi_memory(true);
         config.wasm_memory64(false); // Disable 64-bit memory for security
-        config.consume_fuel(true); // Enable fuel consumption for gas metering
-        config.epoch_interruption(true); // Enable epoch-based interruption
+        config.consume_fuel(true); // Enable fuel metering for gas tracking
+        config.epoch_interruption(true); // Enable epoch interruption for timeouts
 
         let engine =
             Engine::new(&config).map_err(|e| WasiHostError::EngineConfig(e.to_string()))?;
@@ -276,21 +280,35 @@ impl WasiHost {
         };
 
         // Create WASI context
-        let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().inherit_env().build();
+        let wasi_ctx = WasiCtxBuilder::new()
+            .inherit_stdio()
+            .inherit_env()
+            .build_p1();
 
         // Create store with WASI context
         let mut store = Store::new(&self.engine, wasi_ctx);
 
-        // Set fuel for gas metering
+        // Set initial fuel (use module's gas limit)
+        let gas_limit = {
+            let modules = self
+                .modules
+                .lock()
+                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
+            modules
+                .get(name)
+                .map(|m| m.gas_limit)
+                .unwrap_or(self.default_gas_limit)
+        };
         store
-            .set_fuel(self.default_gas_limit)
+            .set_fuel(gas_limit)
             .map_err(|e| WasiHostError::ModuleInstantiation(e.to_string()))?;
 
-        // Create basic linker for now (WASI integration to be completed)
+        // Create linker with WASI support
         let mut linker = Linker::new(&self.engine);
 
-        // Add host functions
-        self.add_host_functions(&mut linker)?;
+        // Add WASI to the linker
+        add_wasi_to_linker(&mut linker, |ctx| ctx)
+            .map_err(|e| WasiHostError::WasiSetup(format!("Failed to add WASI to linker: {e}")))?;
 
         // Instantiate the module
         let instance = linker
@@ -586,7 +604,8 @@ impl WasiHost {
     }
 
     /// Add host functions to the linker
-    fn add_host_functions(&self, linker: &mut Linker<WasiCtx>) -> Result<()> {
+    #[allow(dead_code)]
+    fn add_host_functions(&self, linker: &mut Linker<WasiP1Ctx>) -> Result<()> {
         // Add basic host functions for memory management and communication
 
         // Host function for logging from WASM modules
@@ -633,7 +652,7 @@ impl WasiHost {
     pub fn execute_module_with_input(
         &self,
         wasm_bytes: &[u8],
-        _input: &[u8],
+        input: &[u8],
     ) -> Result<ExecutionResult> {
         debug!("Executing WASM module with input");
 
@@ -641,49 +660,104 @@ impl WasiHost {
         let module =
             Module::new(&self.engine, wasm_bytes).map_err(WasiHostError::ModuleCompilation)?;
 
-        // For now, use a simplified approach with inherit_stdio
-        // TODO: Implement proper I/O capture using MemoryPipe when API is stable
-        let wasi_ctx = WasiCtxBuilder::new().inherit_stdio().inherit_env().build();
+        // Create memory pipes for stdout/stderr capture
+        let stdout_pipe = MemoryOutputPipe::new(4096);
+        let stderr_pipe = MemoryOutputPipe::new(4096);
+
+        // Clone pipes for reading later
+        let stdout_reader = stdout_pipe.clone();
+        let stderr_reader = stderr_pipe.clone();
+
+        let wasi_ctx = WasiCtxBuilder::new()
+            .stdin(MemoryInputPipe::new(input.to_vec()))
+            .stdout(stdout_pipe)
+            .stderr(stderr_pipe)
+            .inherit_env()
+            .build_p1();
 
         let mut store = Store::new(&self.engine, wasi_ctx);
 
-        // Set fuel for gas metering
+        // Set initial fuel for execution
         store
             .set_fuel(self.default_gas_limit)
-            .map_err(|e| WasiHostError::ModuleInstantiation(e.to_string()))?;
+            .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?;
 
-        // Create WASI linker - using direct import since the API keeps changing
+        // Create linker with WASI support
         let mut linker = Linker::new(&self.engine);
-        // Add basic host functions for now
-        self.add_host_functions(&mut linker)?;
+
+        // Add WASI to the linker
+        add_wasi_to_linker(&mut linker, |ctx| ctx)
+            .map_err(|e| WasiHostError::WasiSetup(format!("Failed to add WASI to linker: {e}")))?;
 
         // Instantiate the module
         let instance = linker
             .instantiate(&mut store, &module)
             .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?;
 
-        // Get the entry point function (looking for 'ante_handle' or '_start')
-        let exit_code =
-            if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "ante_handle") {
-                // Custom entry point
-                func.call(&mut store, ())
-                    .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
-            } else if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
-                // Standard WASI entry point
-                func.call(&mut store, ())
-                    .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?;
-                0 // Success
-            } else {
-                return Err(WasiHostError::ModuleExecution(
-                    "No entry point found (expected 'ante_handle' or '_start')".to_string(),
-                ));
-            };
+        // Get the entry point function based on module type
+        // Try specific entry points first, then fall back to _start
+        let exit_code = if let Ok(func) =
+            instance.get_typed_func::<(), i32>(&mut store, "ante_handle")
+        {
+            // Ante handler entry point
+            func.call(&mut store, ())
+                .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
+        } else if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "decode_tx") {
+            // Transaction decoder entry point
+            func.call(&mut store, ())
+                .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
+        } else if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "begin_block") {
+            // Begin blocker entry point
+            func.call(&mut store, ())
+                .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
+        } else if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "end_block") {
+            // End blocker entry point
+            func.call(&mut store, ())
+                .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
+        } else if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "test_echo") {
+            // Test echo entry point
+            func.call(&mut store, ())
+                .map_err(|e| WasiHostError::ModuleExecution(e.to_string()))?
+        } else if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "test_simple") {
+            // Test simple entry point
+            debug!("Calling test_simple function");
+            func.call(&mut store, ()).map_err(|e| {
+                error!("test_simple failed: {}", e);
+                WasiHostError::ModuleExecution(format!("test_simple failed: {e}"))
+            })?
+        } else if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "test_decode") {
+            // Test decode entry point
+            debug!("Calling test_decode function");
+            func.call(&mut store, ()).map_err(|e| {
+                error!("test_decode failed: {}", e);
+                WasiHostError::ModuleExecution(format!("test_decode failed: {e}"))
+            })?
+        } else {
+            return Err(WasiHostError::ModuleExecution(
+                "No entry point found (expected ante_handle, decode_tx, begin_block, end_block, test_echo, test_simple, or test_decode)".to_string(),
+            ));
+        };
 
-        // For now, return empty output - will be improved with proper I/O capture
+        // Read captured output from memory pipes
+        let stdout = stdout_reader
+            .try_into_inner()
+            .map(|bytes| bytes.to_vec())
+            .unwrap_or_else(|| {
+                error!("Failed to read stdout from pipe");
+                vec![]
+            });
+        let stderr = stderr_reader
+            .try_into_inner()
+            .map(|bytes| bytes.to_vec())
+            .unwrap_or_else(|| {
+                error!("Failed to read stderr from pipe");
+                vec![]
+            });
+
         Ok(ExecutionResult {
             exit_code,
-            stdout: vec![], // TODO: Capture from pipes
-            stderr: vec![], // TODO: Capture from pipes
+            stdout,
+            stderr,
         })
     }
 }

@@ -1,0 +1,233 @@
+name: Testnet Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      network_type:
+        description: 'Network type to deploy'
+        required: true
+        default: 'single'
+        type: choice
+        options:
+          - single
+          - multi
+      duration:
+        description: 'How long to run the testnet (minutes)'
+        required: true
+        default: '60'
+        type: string
+      chain_id:
+        description: 'Chain ID for the testnet'
+        required: false
+        default: 'helium-testnet'
+        type: string
+
+env:
+  CHAIN_ID: ${{ github.event.inputs.chain_id }}
+
+jobs:
+  deploy-testnet:
+    name: Deploy ${{ github.event.inputs.network_type }} node testnet
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(github.event.inputs.duration) + 30 }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: helium:testnet
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          echo "CHAIN_ID=${{ env.CHAIN_ID }}" >> .env
+          chmod +x scripts/*.sh
+      
+      - name: Initialize testnet
+        run: |
+          if [[ "${{ github.event.inputs.network_type }}" == "single" ]]; then
+            ./scripts/init-testnet.sh
+          else
+            ./scripts/init-multi-testnet.sh
+          fi
+      
+      - name: Start testnet
+        run: |
+          if [[ "${{ github.event.inputs.network_type }}" == "single" ]]; then
+            docker compose up -d
+          else
+            docker compose -f docker compose.multi.yml up -d
+          fi
+          
+          echo "Waiting for services to start..."
+          sleep 30
+      
+      - name: Monitor testnet health
+        run: |
+          DURATION_SECONDS=$(({{ github.event.inputs.duration }} * 60))
+          END_TIME=$(($(date +%s) + DURATION_SECONDS))
+          
+          echo "Monitoring testnet for ${{ github.event.inputs.duration }} minutes..."
+          
+          while [ $(date +%s) -lt $END_TIME ]; do
+            echo "=== Status at $(date) ==="
+            
+            if [[ "${{ github.event.inputs.network_type }}" == "single" ]]; then
+              # Single node monitoring
+              HEIGHT=$(curl -s http://localhost:26657/status | jq -r '.result.sync_info.latest_block_height' || echo "ERROR")
+              HEALTH=$(curl -s http://localhost:8080/health | jq -r '.status' || echo "ERROR")
+              
+              echo "Block Height: $HEIGHT"
+              echo "Health Status: $HEALTH"
+              
+              if [[ "$HEIGHT" == "ERROR" ]] || [[ "$HEALTH" == "ERROR" ]]; then
+                echo "ERROR: Node is not responding!"
+                docker compose logs --tail=50
+                exit 1
+              fi
+            else
+              # Multi-node monitoring
+              for i in 0 1 2 3; do
+                PORT=$((26657 + i * 10))
+                HEALTH_PORT=$((8080 + i))
+                
+                HEIGHT=$(curl -s http://localhost:$PORT/status | jq -r '.result.sync_info.latest_block_height' || echo "ERROR")
+                HEALTH=$(curl -s http://localhost:$HEALTH_PORT/health | jq -r '.status' || echo "ERROR")
+                PEERS=$(curl -s http://localhost:$PORT/net_info | jq -r '.result.n_peers' || echo "ERROR")
+                
+                echo "Node $i - Height: $HEIGHT, Health: $HEALTH, Peers: $PEERS"
+                
+                if [[ "$HEIGHT" == "ERROR" ]]; then
+                  echo "ERROR: Node $i is not responding!"
+                  exit 1
+                fi
+              done
+            fi
+            
+            echo ""
+            sleep 60
+          done
+          
+          echo "Testnet ran successfully for ${{ github.event.inputs.duration }} minutes!"
+      
+      - name: Collect metrics
+        if: always()
+        run: |
+          echo "=== Final Statistics ==="
+          
+          if [[ "${{ github.event.inputs.network_type }}" == "single" ]]; then
+            curl -s http://localhost:26657/status | jq '.result.sync_info'
+            echo "---"
+            curl -s http://localhost:8080/health | jq .
+          else
+            for i in 0 1 2 3; do
+              echo "=== Node $i ==="
+              curl -s http://localhost:$((26657 + i * 10))/status | jq '.result.sync_info'
+            done
+          fi
+      
+      - name: Export logs
+        if: always()
+        run: |
+          mkdir -p testnet-logs
+          
+          if [[ "${{ github.event.inputs.network_type }}" == "single" ]]; then
+            docker compose logs > testnet-logs/all-services.log
+            docker compose logs helium > testnet-logs/helium.log
+            docker compose logs cometbft > testnet-logs/cometbft.log
+          else
+            docker compose -f docker compose.multi.yml logs > testnet-logs/all-services.log
+            for i in 0 1 2 3; do
+              docker compose -f docker compose.multi.yml logs helium-$i > testnet-logs/helium-$i.log
+              docker compose -f docker compose.multi.yml logs cometbft-$i > testnet-logs/cometbft-$i.log
+            done
+          fi
+      
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testnet-logs-${{ github.event.inputs.network_type }}-${{ github.run_id }}
+          path: testnet-logs/
+          retention-days: 7
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          if [[ "${{ github.event.inputs.network_type }}" == "single" ]]; then
+            docker compose down -v
+          else
+            docker compose -f docker compose.multi.yml down -v
+          fi
+          rm -rf testnet/
+
+  performance-test:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event.inputs.network_type == 'single'
+    needs: deploy-testnet
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup test environment
+        run: |
+          cp .env.example .env
+          chmod +x scripts/*.sh
+          ./scripts/init-testnet.sh
+          docker compose up -d
+          sleep 30
+      
+      - name: Run performance tests
+        run: |
+          echo "=== Transaction Throughput Test ==="
+          
+          # Measure block time
+          HEIGHT_1=$(curl -s http://localhost:26657/status | jq -r '.result.sync_info.latest_block_height')
+          TIME_1=$(date +%s)
+          
+          sleep 30
+          
+          HEIGHT_2=$(curl -s http://localhost:26657/status | jq -r '.result.sync_info.latest_block_height')
+          TIME_2=$(date +%s)
+          
+          BLOCKS=$((HEIGHT_2 - HEIGHT_1))
+          DURATION=$((TIME_2 - TIME_1))
+          
+          echo "Produced $BLOCKS blocks in $DURATION seconds"
+          echo "Average block time: $(echo "scale=2; $DURATION / $BLOCKS" | bc) seconds"
+          
+          # Test endpoint latency
+          echo ""
+          echo "=== Endpoint Latency Test ==="
+          
+          for endpoint in health ready; do
+            total=0
+            count=100
+            
+            for i in $(seq 1 $count); do
+              start=$(date +%s%N)
+              curl -s http://localhost:8080/$endpoint > /dev/null
+              end=$(date +%s%N)
+              
+              latency=$(( (end - start) / 1000000 ))
+              total=$((total + latency))
+            done
+            
+            avg=$((total / count))
+            echo "$endpoint endpoint average latency: ${avg}ms"
+          done
+      
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v

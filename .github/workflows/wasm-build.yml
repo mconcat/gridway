@@ -40,35 +40,31 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-target-wasm-
     
+    - name: Install cargo-component
+      run: |
+        if ! command -v cargo-component &> /dev/null; then
+          cargo install cargo-component --locked
+        fi
+    
     - name: Build WASM modules
       run: |
-        # Build each WASM module separately
-        for module in crates/wasi-modules/*/; do
-          if [ -f "$module/Cargo.toml" ]; then
-            echo "Building $module"
-            cd "$module"
-            cargo build --release --target wasm32-wasip1
-            cd - > /dev/null
-          fi
-        done
+        # Use the build script to build WASI modules with cargo-component
+        ./scripts/build-wasi-modules.sh
     
     - name: Verify WASM artifacts
       run: |
-        # Check if any WASM files were built
-        echo "Checking for WASM artifacts..."
-        find crates/wasi-modules -name "*.wasm" -type f | head -20
-        # Check in each module's target directory
-        for module in crates/wasi-modules/*/; do
-          if [ -d "$module/target/wasm32-wasip1/release" ]; then
-            echo "WASM files in $module:"
-            ls -la "$module/target/wasm32-wasip1/release/"*.wasm 2>/dev/null || echo "No WASM files found"
-          fi
-        done
+        # Check if WASM files were built in modules directory
+        echo "Checking for WASM artifacts in modules directory..."
+        ls -la modules/*.wasm || echo "No WASM files found in modules/"
+        
+        # Also check target directories
+        echo "Checking target directories..."
+        find target/wasm32-wasip1/release -name "*.wasm" -type f | head -20
     
     - name: Upload WASM artifacts
       uses: actions/upload-artifact@v4
       with:
         name: wasm-modules
         path: |
-          crates/wasi-modules/*/target/wasm32-wasip1/release/*.wasm
+          modules/*.wasm
         retention-days: 7

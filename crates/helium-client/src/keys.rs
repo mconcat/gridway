@@ -304,7 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_key_non_interactive() {
-        let (handler, _temp_dir) = create_test_handler().await;
+        let (_handler, _temp_dir) = create_test_handler().await;
         let add_cmd = AddKeyCmd {
             name: "test_key".to_string(),
             interactive: false,
@@ -322,7 +322,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_keys_empty() {
-        let (handler, _temp_dir) = create_test_handler().await;
+        let (_handler, _temp_dir) = create_test_handler().await;
         let list_cmd = ListKeysCmd {
             address: false,
             pubkey: false,

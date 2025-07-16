@@ -6,15 +6,15 @@ set -e
 
 echo "Building BeginBlock WASI module..."
 
-# Ensure we have the wasm32-wasi target
-rustup target add wasm32-wasi
+# Ensure we have the wasm32-wasip1 target
+rustup target add wasm32-wasip1
 
 # Build the module
-cargo build --target wasm32-wasi --release
+cargo build --target wasm32-wasip1 --release
 
 # Copy the built module to a standard location
 mkdir -p ../../../modules
-cp target/wasm32-wasi/release/begin_blocker.wasm ../../../modules/begin_blocker.wasm
+cp target/wasm32-wasip1/release/begin_blocker.wasm ../../../modules/begin_blocker.wasm
 
 echo "BeginBlock WASI module built successfully!"
 echo "Output: modules/begin_blocker.wasm"

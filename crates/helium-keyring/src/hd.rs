@@ -339,7 +339,7 @@ mod tests {
         assert_eq!(components.len(), 5);
         assert_eq!(components[0].index, 44 + (1 << 31)); // Hardened
         assert_eq!(components[1].index, 118 + (1 << 31)); // Hardened
-        assert_eq!(components[2].index, 0 + (1 << 31)); // Hardened
+        assert_eq!(components[2].index, (1 << 31)); // Hardened
         assert_eq!(components[3].index, 0); // Not hardened
         assert_eq!(components[4].index, 0); // Not hardened
 

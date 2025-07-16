@@ -398,10 +398,11 @@ mod tests {
 
     #[test]
     fn test_storage_config_validation() {
-        let mut config = StorageConfig::default();
-
         // Test valid compression types
-        config.compression = Some("lz4".to_string());
+        let mut config = StorageConfig {
+            compression: Some("lz4".to_string()),
+            ..Default::default()
+        };
         assert!(configure_db_options(&config).is_ok());
 
         config.compression = Some("invalid".to_string());
