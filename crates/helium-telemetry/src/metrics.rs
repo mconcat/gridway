@@ -138,7 +138,7 @@ mod tests {
         let _ = MEMPOOL_SIZE.get();
         let _ = TOTAL_BLOCKS_PROCESSED.get();
         let _ = CONNECTED_PEERS.get();
-        
+
         // Test that we can update metrics
         BLOCK_HEIGHT.set(1);
         assert!(BLOCK_HEIGHT.get() >= 1);
