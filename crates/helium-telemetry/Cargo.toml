@@ -9,7 +9,7 @@ description = "Telemetry and metrics infrastructure for Helium blockchain"
 
 [dependencies]
 # Metrics
-prometheus = "0.13"
+prometheus = "0.14"
 lazy_static = "1.4"
 
 # Async runtime
