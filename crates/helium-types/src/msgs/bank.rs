@@ -1,7 +1,6 @@
 //! Bank module message types
 
-use crate::{address::AccAddress, error::SdkError, tx::SdkMsg};
-use helium_codec::protobuf::MessageExt;
+use crate::{address::AccAddress, error::SdkError, protobuf::MessageExt, tx::SdkMsg};
 use helium_math::Coins;
 use prost::Message;
 use serde::{Deserialize, Serialize};

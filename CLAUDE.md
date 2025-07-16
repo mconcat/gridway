@@ -2,6 +2,22 @@
 
 This document provides essential guidelines and best practices for AI agents working on the Helium blockchain project. Follow these guidelines to avoid common pitfalls and ensure smooth CI/CD operations.
 
+## MANDATORY: Read Architecture Documentation First
+
+**CRITICAL**: Before starting ANY task, you MUST:
+
+1. **Always read the root PLAN.md** (`/PLAN.md`) to understand the overall architecture and design philosophy
+2. **When working on a specific crate**, also read that crate's PLAN.md (e.g., `/crates/helium-baseapp/PLAN.md`)
+3. **These documents contain critical architectural decisions** that affect all implementation work
+
+The PLAN.md files contain:
+- Core architectural vision (WASI microkernel, VFS, dynamic component loading)
+- Component types and execution models  
+- Design patterns and conventions
+- Critical implementation details for each crate
+
+Failure to read these documents will likely result in implementing code that conflicts with the architectural vision.
+
 ## Critical Commands to Run Before Committing
 
 Always run these commands in order before committing any changes:
