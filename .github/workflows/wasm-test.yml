@@ -59,7 +59,7 @@ jobs:
         for wasm in modules/*.wasm; do
           if [ -f "$wasm" ]; then
             echo "Testing WASM module: $wasm"
-            wasmtime compile "$wasm"
+            $HOME/.wasmtime/bin/wasmtime compile "$wasm"
           fi
         done
     
