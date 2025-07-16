@@ -1,0 +1,60 @@
+package helium:framework@0.1.0;
+
+/// Ante handler interface for transaction validation
+interface ante-handler {
+    /// Transaction context passed to ante handler
+    record tx-context {
+        /// Current block height
+        block-height: u64,
+        /// Current block timestamp (Unix seconds)
+        block-time: u64,
+        /// Chain identifier
+        chain-id: string,
+        /// Gas limit for transaction
+        gas-limit: u64,
+        /// Account sequence number
+        sequence: u64,
+        /// Transaction simulation mode
+        simulate: bool,
+        /// Check transaction mode
+        is-check-tx: bool,
+        /// Recheck mode
+        is-recheck: bool,
+    }
+
+    /// Ante handler response
+    record ante-response {
+        /// Whether validation passed
+        success: bool,
+        /// Updated gas limit after ante handling
+        gas-used: u64,
+        /// Error message if validation failed
+        error: option<string>,
+        /// Any events emitted
+        events: list<event>,
+        /// Priority for mempool ordering
+        priority: u64,
+    }
+
+    /// Event attribute key-value pair
+    record event-attribute {
+        key: string,
+        value: string,
+    }
+
+    /// Event emitted during processing
+    record event {
+        /// Event type
+        event-type: string,
+        /// Event attributes as structured data
+        attributes: list<event-attribute>,
+    }
+
+    /// Validate a transaction before execution
+    ante-handle: func(context: tx-context, tx-bytes: list<u8>) -> ante-response;
+}
+
+world ante-handler-world {
+    import kvstore;
+    export ante-handler;
+}

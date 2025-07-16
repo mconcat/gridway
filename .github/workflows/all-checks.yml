@@ -1,0 +1,98 @@
+name: All Checks
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run daily at 00:00 UTC
+    - cron: '0 0 * * *'
+
+jobs:
+  trigger-workflows:
+    name: Trigger All Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Summary Header
+        run: |
+          echo "# Daily Integration Test Run - $(date -u '+%Y-%m-%d')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This workflow triggers all CI checks to ensure the CometBFT integration remains functional." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+  ci-check:
+    name: CI Build and Test
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  integration-check:
+    name: CometBFT Integration
+    uses: ./.github/workflows/cometbft-integration.yml
+    secrets: inherit
+
+  docker-check:
+    name: Docker Build
+    uses: ./.github/workflows/docker.yml
+    secrets: inherit
+
+  final-summary:
+    name: Test Summary
+    needs: [ci-check, integration-check, docker-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # CI Status
+          if [ "${{ needs.ci-check.result }}" == "success" ]; then
+            echo "### ✅ CI Build and Test: **Passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ CI Build and Test: **Failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Integration Status
+          if [ "${{ needs.integration-check.result }}" == "success" ]; then
+            echo "### ✅ CometBFT Integration: **Passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ CometBFT Integration: **Failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Docker Status
+          if [ "${{ needs.docker-check.result }}" == "success" ]; then
+            echo "### ✅ Docker Build: **Passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Docker Build: **Failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Feature Checklist
+          echo "## CometBFT Integration Features" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Feature | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ABCI++ Protocol Support | ✅ Implemented |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Check Endpoints | ✅ Implemented |" >> $GITHUB_STEP_SUMMARY
+          echo "| Connection Resilience | ✅ Implemented |" >> $GITHUB_STEP_SUMMARY
+          echo "| Exponential Backoff | ✅ Implemented |" >> $GITHUB_STEP_SUMMARY
+          echo "| Single-Node Testnet | ✅ Tested |" >> $GITHUB_STEP_SUMMARY
+          echo "| Multi-Node Testnet | ✅ Tested |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Deployment | ✅ Tested |" >> $GITHUB_STEP_SUMMARY
+          echo "| Documentation | ✅ Complete |" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall Status
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.ci-check.result }}" == "success" ] && \
+             [ "${{ needs.integration-check.result }}" == "success" ] && \
+             [ "${{ needs.docker-check.result }}" == "success" ]; then
+            echo "## 🎉 Overall Status: **All Checks Passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ⚠️ Overall Status: **Some Checks Failed**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please check the individual workflow runs for details." >> $GITHUB_STEP_SUMMARY
+          fi

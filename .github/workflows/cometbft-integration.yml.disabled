@@ -1,0 +1,278 @@
+name: CometBFT Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'crates/helium-server/**'
+      - 'crates/helium-baseapp/**'
+      - 'docker-compose*.yml'
+      - 'Dockerfile'
+      - 'scripts/*.sh'
+      - '.github/workflows/cometbft-integration.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'crates/helium-server/**'
+      - 'crates/helium-baseapp/**'
+      - 'docker-compose*.yml'
+      - 'Dockerfile'
+      - 'scripts/*.sh'
+
+env:
+  CARGO_TERM_COLOR: always
+  CHAIN_ID: helium-testnet-ci
+
+jobs:
+  integration-tests:
+    name: CometBFT Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      
+      - name: Build Helium Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: helium:test
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+      
+      # Single Node Tests
+      - name: Single Node - Initialize testnet
+        run: |
+          ./scripts/init-testnet.sh
+          
+      - name: Single Node - Start services
+        run: |
+          export HELIUM_IMAGE=helium:test
+          docker compose up -d
+          sleep 10
+          
+      - name: Single Node - Verify services are running
+        run: |
+          docker compose ps
+          docker compose logs --tail=50
+          
+      - name: Single Node - Test health endpoints
+        run: |
+          max_attempts=30
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f http://localhost:1317/health; then
+              echo "Health endpoint is ready"
+              curl -f http://localhost:1317/ready || exit 1
+              break
+            fi
+            echo "Waiting for health endpoint... (attempt $((attempt + 1))/$max_attempts)"
+            sleep 2
+            attempt=$((attempt + 1))
+          done
+          if [ $attempt -eq $max_attempts ]; then
+            echo "Health endpoint failed to become ready"
+            docker compose logs helium
+            exit 1
+          fi
+          
+      - name: Single Node - Test CometBFT RPC
+        run: |
+          curl -f http://localhost:26657/status | jq .
+          curl -f http://localhost:26657/abci_info | jq .
+          
+      - name: Single Node - Test transaction submission
+        run: |
+          # Create a simple transfer transaction (will fail but should be accepted)
+          TX_DATA='{"msg": [{"@type": "/cosmos.bank.v1beta1.MsgSend", "from_address": "cosmos1test", "to_address": "cosmos1test2", "amount": [{"denom": "stake", "amount": "100"}]}]}'
+          
+          # Submit to mempool
+          RESULT=$(curl -s -X POST http://localhost:26657/broadcast_tx_sync \
+            -H "Content-Type: application/json" \
+            -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"broadcast_tx_sync\",\"params\":{\"tx\":\"$(echo $TX_DATA | base64 | tr -d '\n')\"}}")
+          
+          echo "Transaction result: $RESULT"
+          
+      - name: Single Node - Clean up
+        if: always()
+        run: docker compose down -v
+          
+      # Multi-Node Tests
+      - name: Multi-Node - Initialize 4-node testnet
+        run: |
+          ./scripts/init-multi-testnet.sh
+          
+      - name: Multi-Node - Start all nodes
+        run: |
+          export HELIUM_IMAGE=helium:test
+          docker compose -f docker-compose.multi.yml up -d
+          sleep 15
+          
+      - name: Multi-Node - Verify all nodes are running
+        run: |
+          docker compose -f docker-compose.multi.yml ps
+          
+          # Check each node
+          for i in 0 1 2 3; do
+            echo "Checking node $i..."
+            docker compose -f docker-compose.multi.yml logs helium-$i --tail=20
+            docker compose -f docker-compose.multi.yml logs cometbft-$i --tail=20
+          done
+          
+      - name: Multi-Node - Test consensus formation
+        run: |
+          # Check that all nodes are connected
+          for i in 0 1 2 3; do
+            port=$((26657 + i * 10))
+            echo "Checking node $i on port $port..."
+            
+            # Get node status
+            STATUS=$(curl -s http://localhost:$port/status)
+            echo "Node $i status: $STATUS" | jq .
+            
+            # Check if node is catching up
+            CATCHING_UP=$(echo $STATUS | jq -r '.result.sync_info.catching_up')
+            echo "Node $i catching up: $CATCHING_UP"
+            
+            # Get number of peers
+            NET_INFO=$(curl -s http://localhost:$port/net_info)
+            N_PEERS=$(echo $NET_INFO | jq -r '.result.n_peers')
+            echo "Node $i has $N_PEERS peers"
+          done
+          
+      - name: Multi-Node - Wait for consensus
+        run: |
+          # Wait for blocks to be produced
+          max_attempts=30
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            HEIGHT=$(curl -s http://localhost:26657/status | jq -r '.result.sync_info.latest_block_height')
+            if [ "$HEIGHT" -gt "1" ]; then
+              echo "Consensus achieved! Current block height: $HEIGHT"
+              break
+            fi
+            echo "Waiting for consensus... Current height: $HEIGHT (attempt $((attempt + 1))/$max_attempts)"
+            sleep 2
+            attempt=$((attempt + 1))
+          done
+          
+          if [ $attempt -eq $max_attempts ]; then
+            echo "Consensus failed to form"
+            for node in 0 1 2 3; do
+              echo "=== Logs for node $node ==="
+              docker compose -f docker-compose.multi.yml logs helium-$node cometbft-$node | tail -100
+            done
+            exit 1
+          fi
+          
+      - name: Multi-Node - Clean up
+        if: always()
+        run: docker compose -f docker-compose.multi.yml down -v
+          
+      # Connection Resilience Tests
+      - name: Resilience - Initialize testnet
+        run: |
+          # Clean any previous state
+          rm -rf testnet/
+          ./scripts/init-testnet.sh
+          
+      - name: Resilience - Start services
+        run: |
+          docker compose up -d
+          sleep 10
+          
+      - name: Resilience - Test connection recovery
+        run: |
+          # Wait for initial connection
+          max_attempts=30
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f http://localhost:1317/health; then
+              echo "Initial connection established"
+              break
+            fi
+            sleep 2
+            attempt=$((attempt + 1))
+          done
+          
+          # Simulate connection failure by stopping helium
+          echo "Simulating connection failure..."
+          docker compose stop helium
+          sleep 5
+          
+          # Restart helium
+          echo "Restarting helium service..."
+          docker compose start helium
+          
+          # Test recovery with exponential backoff
+          echo "Testing connection recovery..."
+          recovery_start=$(date +%s)
+          
+          max_recovery_attempts=60
+          recovery_attempt=0
+          while [ $recovery_attempt -lt $max_recovery_attempts ]; do
+            if curl -f http://localhost:1317/health 2>/dev/null; then
+              recovery_end=$(date +%s)
+              recovery_time=$((recovery_end - recovery_start))
+              echo "Connection recovered after $recovery_time seconds"
+              break
+            fi
+            echo "Waiting for recovery... (attempt $((recovery_attempt + 1))/$max_recovery_attempts)"
+            sleep 2
+            recovery_attempt=$((recovery_attempt + 1))
+          done
+          
+          if [ $recovery_attempt -eq $max_recovery_attempts ]; then
+            echo "Connection failed to recover"
+            docker compose logs helium --tail=100
+            exit 1
+          fi
+          
+      - name: Resilience - Test port blocking scenario
+        run: |
+          # Block ABCI port temporarily
+          echo "Testing port blocking scenario..."
+          docker compose exec -T helium nc -l -p 26658 &
+          BLOCKER_PID=$!
+          sleep 5
+          
+          # Kill the blocker
+          kill $BLOCKER_PID 2>/dev/null || true
+          
+          # Verify recovery
+          sleep 10
+          curl -f http://localhost:1317/health || {
+            echo "Failed to recover from port blocking"
+            docker compose logs helium --tail=50
+            exit 1
+          }
+          
+      - name: Resilience - Clean up
+        if: always()
+        run: docker compose down -v
+          
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-logs
+          path: |
+            testnet/**/*.log
+            docker-compose*.yml

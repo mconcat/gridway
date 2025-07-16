@@ -1,0 +1,63 @@
+package helium:framework@0.1.0;
+
+/// End blocker interface for block finalization
+interface end-blocker {
+    /// End block request
+    record end-block-request {
+        /// Current block height
+        height: u64,
+        /// Chain identifier
+        chain-id: string,
+    }
+
+    /// Validator public key
+    record validator-pub-key {
+        /// Key type (e.g., "ed25519", "secp256k1")
+        key-type: string,
+        /// Key value as bytes
+        value: list<u8>,
+    }
+
+    /// Validator update
+    record validator-update {
+        /// Validator public key
+        pub-key: validator-pub-key,
+        /// Voting power (0 to remove validator)
+        power: s64,
+    }
+
+    /// End block response
+    record end-block-response {
+        /// Whether end block succeeded
+        success: bool,
+        /// Events emitted during end block
+        events: list<event>,
+        /// Validator updates
+        validator-updates: list<validator-update>,
+        /// Error message if failed
+        error: option<string>,
+    }
+
+    /// Event attribute key-value pair
+    record event-attribute {
+        key: string,
+        value: string,
+    }
+
+    /// Event emitted during processing
+    record event {
+        /// Event type
+        event-type: string,
+        /// Event attributes as structured data
+        attributes: list<event-attribute>,
+    }
+
+    /// Called at the end of each block
+    end-block: func(request: end-block-request) -> end-block-response;
+}
+
+world end-blocker-world {
+    import kvstore;
+    export end-blocker;
+}
+

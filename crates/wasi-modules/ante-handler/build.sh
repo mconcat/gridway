@@ -7,14 +7,14 @@ set -e
 
 echo "Building WASI ante handler module..."
 
-# Install wasm32-wasi target if not already installed
-rustup target add wasm32-wasi
+# Install wasm32-wasip1 target if not already installed
+rustup target add wasm32-wasip1
 
 # Build the WASM module
-cargo build --target wasm32-wasi --release
+cargo build --target wasm32-wasip1 --release
 
 # Copy the built module to a known location
-OUTPUT_DIR="../../../target/wasm32-wasi/release"
+OUTPUT_DIR="../../../target/wasm32-wasip1/release"
 MODULE_DIR="../../../modules"
 
 mkdir -p "$MODULE_DIR"
