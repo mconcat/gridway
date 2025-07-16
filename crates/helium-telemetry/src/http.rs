@@ -130,7 +130,7 @@ async fn metrics_handler(
                     metrics,
                 )
                     .into_response()),
-                "text" | _ => {
+                _ => {
                     // Default text format returns JSON structure for Cosmos SDK compatibility
                     let response = MetricsResponse {
                         metrics,
