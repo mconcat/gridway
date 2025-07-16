@@ -370,6 +370,13 @@ mod tests {
 /// Other modules or clients can send messages to this module using the
 /// message types defined above. The runtime routes messages based on the
 /// type field (e.g., "counter/Increment").
-fn _dummy() {
-    // This function exists to satisfy the doc comment requirement
+fn main() {
+    println!("Counter Module Example");
+    println!("=====================");
+    println!();
+    println!("This example demonstrates how to write a WASI module for Helium.");
+    println!("In a real deployment, this would be compiled to WebAssembly and");
+    println!("stored in the blockchain at a path like /bin/counter.");
+    println!();
+    println!("See the source code for the complete implementation.");
 }
