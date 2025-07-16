@@ -9,6 +9,7 @@ pub mod context;
 pub mod error;
 pub mod genesis;
 pub mod msgs;
+pub mod protobuf;
 pub mod tx;
 
 pub use address::{AccAddress, ConsAddress, ValAddress};
@@ -17,6 +18,7 @@ pub use context::Ctx;
 pub use error::{IsSdkError, SdkError};
 pub use genesis::{AppGenesis, AppState, AuthGenesis, BankGenesis};
 pub use msgs::MsgSend;
+pub use protobuf::{Any, MessageExt, ProtobufError};
 pub use tx::{
     AuthInfo, Fee, FeeAmount, RawTx, SdkMsg, SignerInfo, Tx, TxBody, TxDecodeError, TxDecoder,
     TxMessage, TxMetadata,
