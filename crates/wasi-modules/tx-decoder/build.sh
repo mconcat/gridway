@@ -6,15 +6,15 @@ set -e
 
 echo "Building TxDecoder WASI module..."
 
-# Ensure we have the wasm32-wasi target
-rustup target add wasm32-wasi
+# Ensure we have the wasm32-wasip1 target
+rustup target add wasm32-wasip1
 
 # Build the module
-cargo build --target wasm32-wasi --release
+cargo build --target wasm32-wasip1 --release
 
 # Copy the built module to a standard location
 mkdir -p ../../../modules
-cp target/wasm32-wasi/release/tx_decoder.wasm ../../../modules/tx_decoder.wasm
+cp target/wasm32-wasip1/release/tx_decoder.wasm ../../../modules/tx_decoder.wasm
 
 echo "TxDecoder WASI module built successfully!"
 echo "Output: modules/tx_decoder.wasm"

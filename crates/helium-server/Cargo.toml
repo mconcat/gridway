@@ -23,6 +23,10 @@ hex = "0.4"
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
+clap = { version = "4.5", features = ["derive"] }
+toml = "0.8"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.8"
 
 # Local crate dependencies
 helium-store = { path = "../helium-store" }
@@ -34,6 +38,10 @@ helium-proto = { path = "../helium-proto" }
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
+
+[[bin]]
+name = "helium-server"
+path = "src/bin/helium-server.rs"
 
 [build-dependencies]
 tonic-build = "0.12"

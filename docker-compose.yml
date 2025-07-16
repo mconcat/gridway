@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  cometbft:
+    image: cometbft/cometbft:v0.38.0
+    container_name: cometbft-node
+    ports:
+      - "26656:26656"  # P2P port
+      - "26657:26657"  # RPC port
+    environment:
+      - CMTHOME=/cometbft
+    volumes:
+      - ./testnet/node0:/cometbft
+    command: ["node", "--proxy_app=tcp://helium:26658"]
+    depends_on:
+      helium:
+        condition: service_healthy
+    networks:
+      - helium-network
+    restart: unless-stopped
+
+  helium:
+    image: ${HELIUM_IMAGE:-helium:test}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: helium-app
+    ports:
+      - "26658:26658"  # ABCI port
+      - "9090:9090"    # gRPC port
+      - "1317:1317"    # REST API port (Cosmos SDK standard)
+    environment:
+      - RUST_LOG=info
+      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
+      - HELIUM_HOME=/helium
+    volumes:
+      - ./testnet/helium:/helium
+    networks:
+      - helium-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "26658"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+networks:
+  helium-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  cometbft-data:
+  helium-data:

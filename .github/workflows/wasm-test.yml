@@ -22,6 +22,11 @@ jobs:
       with:
         targets: wasm32-wasip1
     
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y protobuf-compiler
+    
     - name: Install wasmtime
       run: |
         curl https://wasmtime.dev/install.sh -sSf | bash
@@ -37,64 +42,42 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-registry-wasm-
     
+    - name: Install cargo-component
+      run: |
+        if ! command -v cargo-component &> /dev/null; then
+          cargo install cargo-component --locked
+        fi
+    
     - name: Build WASM modules
       run: |
-        # Build each WASM module separately
-        for module in crates/wasi-modules/*/; do
-          if [ -f "$module/Cargo.toml" ]; then
-            echo "Building $module"
-            cd "$module"
-            cargo build --release --target wasm32-wasip1
-            cd - > /dev/null
-          fi
-        done
+        # Use the build script to build WASI modules with cargo-component
+        ./scripts/build-wasi-modules.sh
     
     - name: Test WASM module loading
       run: |
         # Test that WASM modules can be loaded
-        for module in crates/wasi-modules/*/; do
-          if [ -d "$module/target/wasm32-wasip1/release" ]; then
-            for wasm in "$module"/target/wasm32-wasip1/release/*.wasm; do
-              if [ -f "$wasm" ]; then
-                echo "Testing WASM module: $wasm"
-                wasmtime compile "$wasm"
-              fi
-            done
+        for wasm in modules/*.wasm; do
+          if [ -f "$wasm" ]; then
+            echo "Testing WASM module: $wasm"
+            wasmtime compile "$wasm"
           fi
         done
     
     - name: Validate WASM modules
       run: |
         # Validate WASM module structure
-        for module in crates/wasi-modules/*/; do
-          if [ -d "$module/target/wasm32-wasip1/release" ]; then
-            for wasm in "$module"/target/wasm32-wasip1/release/*.wasm; do
-              if [ -f "$wasm" ]; then
-                echo "Validating WASM module: $wasm"
-                wasmtime wasm2wat "$wasm" > /dev/null
-              fi
-            done
-          fi
-        done
+        # Note: wasmtime doesn't have a built-in validation command for components
+        # The compile step above already validates the modules
+        echo "WASM modules validated during compile step"
     
     - name: Check WASM module sizes
       run: |
         # Report WASM module sizes
         echo "WASM Module Sizes:"
-        for module in crates/wasi-modules/*/; do
-          if [ -d "$module/target/wasm32-wasip1/release" ]; then
-            ls -lh "$module"/target/wasm32-wasip1/release/*.wasm 2>/dev/null || true
-          fi
-        done
+        ls -lh modules/*.wasm 2>/dev/null || echo "No WASM modules found"
     
-    - name: Run WASM-specific tests
+    - name: Run WASM integration tests
       run: |
-        # Run any WASM-specific tests if they exist
-        for module in crates/wasi-modules/*/; do
-          if [ -f "$module/Cargo.toml" ]; then
-            echo "Running tests for $module"
-            cd "$module"
-            cargo test --target wasm32-wasip1 || echo "No WASM-specific tests found for $module"
-            cd - > /dev/null
-          fi
-        done
+        # Run integration tests that test WASM module loading
+        # These tests run on the host, not in WASM
+        cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder -- test_wasi_modules test_minimal_wasi_module test_component

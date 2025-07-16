@@ -1,6 +1,4 @@
-use helium_store::{GlobalAppStore, JMTStore, KVStore, MemStore, StateManager};
-use std::sync::{Arc, Mutex};
-use tempfile::tempdir;
+use helium_store::{KVStore, MemStore, StateManager};
 
 fn main() {
     println!("Testing bank service scenario with StateManager...\n");
@@ -34,7 +32,7 @@ fn main() {
         for (key, value) in &results {
             let key_str = String::from_utf8_lossy(key);
             let value_str = String::from_utf8_lossy(value);
-            println!("   - {}: {}", key_str, value_str);
+            println!("   - {key_str}: {value_str}");
         }
     }
 
@@ -55,10 +53,7 @@ fn main() {
             .map(|v| String::from_utf8_lossy(&v).parse::<u64>().unwrap())
             .unwrap_or(0);
 
-        println!(
-            "   Current balances: test={}, other={}",
-            test_stake, other_stake
-        );
+        println!("   Current balances: test={test_stake}, other={other_stake}");
 
         // Update balances
         let new_test_stake = test_stake - 100;
@@ -77,10 +72,7 @@ fn main() {
             )
             .unwrap();
 
-        println!(
-            "   New balances: test={}, other={}",
-            new_test_stake, new_other_stake
-        );
+        println!("   New balances: test={new_test_stake}, other={new_other_stake}");
     }
 
     // Check balances before commit (should see updated values)
@@ -92,7 +84,7 @@ fn main() {
             .unwrap()
             .map(|v| String::from_utf8_lossy(&v).to_string())
             .unwrap_or("0".to_string());
-        println!("   cosmos1test stake balance: {}", test_stake);
+        println!("   cosmos1test stake balance: {test_stake}");
     }
 
     // Commit the transfer
@@ -111,7 +103,7 @@ fn main() {
         for (key, value) in &results {
             let key_str = String::from_utf8_lossy(key);
             let value_str = String::from_utf8_lossy(value);
-            println!("     - {}: {}", key_str, value_str);
+            println!("     - {key_str}: {value_str}");
         }
 
         // Check cosmos1other balances
@@ -121,7 +113,7 @@ fn main() {
         for (key, value) in &results {
             let key_str = String::from_utf8_lossy(key);
             let value_str = String::from_utf8_lossy(value);
-            println!("     - {}: {}", key_str, value_str);
+            println!("     - {key_str}: {value_str}");
         }
     }
 

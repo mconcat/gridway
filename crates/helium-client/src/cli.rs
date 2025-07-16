@@ -844,14 +844,14 @@ mod tests {
 
     #[test]
     fn test_subcommand_help() {
-        let _cli = Cli::parse_from(&["helium", "keys", "--help"]);
+        let _cli = Cli::parse_from(["helium", "keys", "--help"]);
         // This test will fail during parsing since --help exits the process,
         // but we can test that the command structure is valid
     }
 
     #[test]
     fn test_global_options() {
-        let cli = Cli::parse_from(&[
+        let cli = Cli::parse_from([
             "helium",
             "--node",
             "http://localhost:8080",
@@ -866,13 +866,13 @@ mod tests {
             Some("http://localhost:8080".to_string())
         );
         assert_eq!(cli.global_opts.chain_id, Some("test-chain".to_string()));
-        assert_eq!(cli.global_opts.verbose, true);
+        assert!(cli.global_opts.verbose);
         assert!(matches!(cli.command, Commands::Status(_)));
     }
 
     #[test]
     fn test_keys_add_command() {
-        let cli = Cli::parse_from(&[
+        let cli = Cli::parse_from([
             "helium",
             "keys",
             "add",
@@ -896,7 +896,7 @@ mod tests {
 
     #[test]
     fn test_bank_send_command() {
-        let cli = Cli::parse_from(&[
+        let cli = Cli::parse_from([
             "helium",
             "tx",
             "bank",
@@ -934,7 +934,7 @@ mod tests {
 
     #[test]
     fn test_query_balance_command() {
-        let cli = Cli::parse_from(&[
+        let cli = Cli::parse_from([
             "helium",
             "query",
             "bank",
