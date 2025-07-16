@@ -6,7 +6,6 @@ members = [
     "crates/helium-keyring",
     "crates/helium-errors",
     "crates/helium-log",
-    "crates/helium-codec",
     "crates/helium-store",
     "crates/helium-baseapp",
     "crates/helium-server",
@@ -33,7 +32,6 @@ helium-crypto = { path = "crates/helium-crypto" }
 helium-keyring = { path = "crates/helium-keyring" }
 helium-errors = { path = "crates/helium-errors" }
 helium-log = { path = "crates/helium-log" }
-helium-codec = { path = "crates/helium-codec" }
 helium-store = { path = "crates/helium-store" }
 helium-baseapp = { path = "crates/helium-baseapp" }
 helium-server = { path = "crates/helium-server" }
@@ -116,7 +114,6 @@ helium-crypto = { workspace = true }
 helium-keyring = { workspace = true }
 helium-errors = { workspace = true }
 helium-log = { workspace = true }
-helium-codec = { workspace = true }
 helium-store = { workspace = true }
 helium-baseapp = { workspace = true }
 helium-server = { workspace = true }
@@ -147,5 +144,9 @@ anyhow = "1.0"
 tempfile = "3.8"
 
 [[example]]
-name = "simple_app"
-path = "examples/simple_app.rs"
+name = "counter_module"
+path = "examples/counter_module.rs"
+
+[[example]]
+name = "counter_client"
+path = "examples/counter_client.rs"

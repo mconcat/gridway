@@ -9,7 +9,6 @@ repository = "https://github.com/cosmos/helium-rust"
 
 [dependencies]
 helium-math = { path = "../helium-math" }
-helium-codec = { path = "../helium-codec" }
 helium-store = { path = "../helium-store" }
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
