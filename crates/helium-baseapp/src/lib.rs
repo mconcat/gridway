@@ -8,6 +8,7 @@ pub mod ante;
 pub mod capabilities;
 pub mod component_bindings;
 pub mod component_host;
+pub mod converter;
 pub mod kvstore_resource;
 pub mod module_governance;
 pub mod module_router;
@@ -92,38 +93,10 @@ pub enum BaseAppError {
 /// Result type alias
 pub type Result<T> = std::result::Result<T, BaseAppError>;
 
-/// Transaction response
-#[derive(Debug, Clone)]
-pub struct TxResponse {
-    /// Response code (0 = success)
-    pub code: u32,
-    /// Log message
-    pub log: String,
-    /// Gas used
-    pub gas_used: u64,
-    /// Gas wanted
-    pub gas_wanted: u64,
-    /// Events emitted
-    pub events: Vec<Event>,
-}
-
-/// Event emitted during execution
-#[derive(Debug, Clone)]
-pub struct Event {
-    /// Event type
-    pub event_type: String,
-    /// Event attributes
-    pub attributes: Vec<Attribute>,
-}
-
-/// Event attribute
-#[derive(Debug, Clone)]
-pub struct Attribute {
-    /// Attribute key
-    pub key: String,
-    /// Attribute value
-    pub value: String,
-}
+// Re-export proto types
+pub use helium_proto::cometbft::abci::v1::{
+    Event, EventAttribute as Attribute, ExecTxResult as TxResponse,
+};
 
 /// ABCI Application trait
 pub trait Application: Send + Sync {
@@ -526,13 +499,14 @@ impl BaseApp {
                                     .events
                                     .into_iter()
                                     .map(|e| Event {
-                                        event_type: e.event_type,
+                                        r#type: e.event_type,
                                         attributes: e
                                             .attributes
                                             .into_iter()
                                             .map(|a| Attribute {
                                                 key: a.key,
                                                 value: a.value,
+                                                index: true,
                                             })
                                             .collect(),
                                     })
@@ -712,13 +686,14 @@ impl BaseApp {
                                     .events
                                     .into_iter()
                                     .map(|e| Event {
-                                        event_type: e.event_type,
+                                        r#type: e.event_type,
                                         attributes: e
                                             .attributes
                                             .into_iter()
                                             .map(|a| Attribute {
                                                 key: a.key,
                                                 value: a.value,
+                                                index: true,
                                             })
                                             .collect(),
                                     })
@@ -790,33 +765,16 @@ impl BaseApp {
         // Execute ante handler for validation
         let mut ante_handler = self.ante_handler.lock().unwrap();
         match ante_handler.handle(&ctx, &raw_tx) {
-            Ok(response) => Ok(TxResponse {
-                code: response.code,
-                log: response.log,
-                gas_used: response.gas_used,
-                gas_wanted: response.gas_wanted,
-                events: response
-                    .events
-                    .into_iter()
-                    .map(|e| Event {
-                        event_type: e.event_type,
-                        attributes: e
-                            .attributes
-                            .into_iter()
-                            .map(|a| Attribute {
-                                key: a.key,
-                                value: a.value,
-                            })
-                            .collect(),
-                    })
-                    .collect(),
-            }),
+            Ok(response) => Ok(response),
             Err(e) => Ok(TxResponse {
                 code: 1,
+                data: vec![],
                 log: format!("ante handler validation failed: {e}"),
+                info: String::new(),
+                gas_wanted: ctx.gas_limit as i64,
                 gas_used: 0,
-                gas_wanted: ctx.gas_limit,
                 events: vec![],
+                codespace: String::new(),
             }),
         }
     }
@@ -857,27 +815,7 @@ impl BaseApp {
         };
 
         if ante_response.code != 0 {
-            return Ok(TxResponse {
-                code: ante_response.code,
-                log: ante_response.log,
-                gas_used: ante_response.gas_used,
-                gas_wanted: ante_response.gas_wanted,
-                events: ante_response
-                    .events
-                    .into_iter()
-                    .map(|e| Event {
-                        event_type: e.event_type,
-                        attributes: e
-                            .attributes
-                            .into_iter()
-                            .map(|a| Attribute {
-                                key: a.key,
-                                value: a.value,
-                            })
-                            .collect(),
-                    })
-                    .collect(),
-            });
+            return Ok(ante_response);
         }
 
         // Extract messages and route to appropriate modules
@@ -887,22 +825,8 @@ impl BaseApp {
             .and_then(|m| m.as_array())
             .ok_or_else(|| BaseAppError::InvalidTx("no messages in transaction".to_string()))?;
 
-        let mut total_gas_used = ante_response.gas_used;
-        let mut events = ante_response
-            .events
-            .into_iter()
-            .map(|e| Event {
-                event_type: e.event_type,
-                attributes: e
-                    .attributes
-                    .into_iter()
-                    .map(|a| Attribute {
-                        key: a.key,
-                        value: a.value,
-                    })
-                    .collect(),
-            })
-            .collect::<Vec<_>>();
+        let mut total_gas_used = ante_response.gas_used as u64;
+        let mut events = ante_response.events;
 
         for (idx, msg) in messages.iter().enumerate() {
             let type_url = msg
@@ -928,39 +852,41 @@ impl BaseApp {
 
             // Add execution event
             events.push(Event {
-                event_type: "message".to_string(),
+                r#type: "message".to_string(),
                 attributes: vec![
                     Attribute {
                         key: "action".to_string(),
                         value: type_url.to_string(),
+                        index: true,
                     },
                     Attribute {
                         key: "module".to_string(),
                         value: self.extract_module_from_type_url(type_url),
+                        index: true,
                     },
                 ],
             });
         }
 
-        let response = TxResponse {
-            code: 0,
-            log: format!("executed {} messages", messages.len()),
-            gas_used: total_gas_used,
-            gas_wanted: decoded_tx
-                .get("auth_info")
-                .and_then(|a| a.get("fee"))
-                .and_then(|f| f.get("gas_limit"))
-                .and_then(|g| g.as_u64())
-                .unwrap_or(200000),
-            events,
-        };
+        let gas_wanted = decoded_tx
+            .get("auth_info")
+            .and_then(|a| a.get("fee"))
+            .and_then(|f| f.get("gas_limit"))
+            .and_then(|g| g.as_u64())
+            .unwrap_or(200000) as i64;
 
         // Record metrics for successful transactions
         TOTAL_TRANSACTIONS.inc();
         let tx_duration = tx_start.elapsed();
         observe_transaction_time("deliver", tx_duration.as_secs_f64());
 
-        Ok(response)
+        Ok(converter::success_tx_response(
+            format!("executed {} messages", messages.len()),
+            vec![],
+            gas_wanted,
+            total_gas_used as i64,
+            events,
+        ))
     }
 
     /// Extract module name from message type URL
@@ -1373,13 +1299,13 @@ impl BaseApp {
                 Ok(response) => responses.push(response),
                 Err(e) => {
                     // Transaction failed - create error response
-                    responses.push(TxResponse {
-                        code: 1,
-                        log: format!("Transaction {i} failed: {e}"),
-                        gas_used: 0,
-                        gas_wanted: 0,
-                        events: vec![],
-                    });
+                    // Failed transactions typically don't emit events
+                    responses.push(converter::failed_tx_response(
+                        1,
+                        format!("Transaction {i} failed: {e}"),
+                        String::new(),
+                        0,
+                    ));
                 }
             }
         }
@@ -1427,22 +1353,26 @@ impl BaseApp {
                     match self.module_governance.handle_store_code(msg) {
                         Ok(code_id) => {
                             events.push(Event {
-                                event_type: "store_code".to_string(),
+                                r#type: "store_code".to_string(),
                                 attributes: vec![Attribute {
                                     key: "code_id".to_string(),
                                     value: code_id.to_string(),
+                                    index: true,
                                 }],
                             });
                             total_gas_used += 50000; // Base gas cost for storing code
                         }
                         Err(e) => {
-                            return Ok(TxResponse {
-                                code: 1,
-                                log: format!("store_code failed: {e}"),
-                                gas_used: total_gas_used,
-                                gas_wanted: 100000,
+                            return Ok(converter::create_tx_response(
+                                1,
+                                format!("store_code failed: {e}"),
+                                String::new(),
+                                vec![],
+                                100000_i64,
+                                total_gas_used as i64,
                                 events,
-                            });
+                                String::new(),
+                            ));
                         }
                     }
                 }
@@ -1457,28 +1387,33 @@ impl BaseApp {
                     match self.module_governance.handle_install_module(msg.clone()) {
                         Ok(_) => {
                             events.push(Event {
-                                event_type: "install_module".to_string(),
+                                r#type: "install_module".to_string(),
                                 attributes: vec![
                                     Attribute {
                                         key: "module_name".to_string(),
                                         value: msg.config.name,
+                                        index: true,
                                     },
                                     Attribute {
                                         key: "code_id".to_string(),
                                         value: msg.code_id.to_string(),
+                                        index: true,
                                     },
                                 ],
                             });
                             total_gas_used += 100000; // Base gas cost for installing module
                         }
                         Err(e) => {
-                            return Ok(TxResponse {
-                                code: 1,
-                                log: format!("install_module failed: {e}"),
-                                gas_used: total_gas_used,
-                                gas_wanted: 200000,
+                            return Ok(converter::create_tx_response(
+                                1,
+                                format!("install_module failed: {e}"),
+                                String::new(),
+                                vec![],
+                                200000_i64,
+                                total_gas_used as i64,
                                 events,
-                            });
+                                String::new(),
+                            ));
                         }
                     }
                 }
@@ -1493,28 +1428,33 @@ impl BaseApp {
                     match self.module_governance.handle_upgrade_module(msg.clone()) {
                         Ok(_) => {
                             events.push(Event {
-                                event_type: "upgrade_module".to_string(),
+                                r#type: "upgrade_module".to_string(),
                                 attributes: vec![
                                     Attribute {
                                         key: "module_name".to_string(),
                                         value: msg.module_name,
+                                        index: true,
                                     },
                                     Attribute {
                                         key: "new_code_id".to_string(),
                                         value: msg.new_code_id.to_string(),
+                                        index: true,
                                     },
                                 ],
                             });
                             total_gas_used += 150000; // Base gas cost for upgrading module
                         }
                         Err(e) => {
-                            return Ok(TxResponse {
-                                code: 1,
-                                log: format!("upgrade_module failed: {e}"),
-                                gas_used: total_gas_used,
-                                gas_wanted: 300000,
+                            return Ok(converter::create_tx_response(
+                                1,
+                                format!("upgrade_module failed: {e}"),
+                                String::new(),
+                                vec![],
+                                300000_i64,
+                                total_gas_used as i64,
                                 events,
-                            });
+                                String::new(),
+                            ));
                         }
                     }
                 }
@@ -1542,24 +1482,27 @@ impl BaseApp {
 
                     // TODO: Create a proper SdkMsg implementation for unknown message types
                     // For now, return an error for unhandled message types
-                    return Ok(TxResponse {
-                        code: 1,
-                        log: format!("unhandled message type: {type_url}"),
-                        gas_used: total_gas_used,
-                        gas_wanted: 100000,
+                    return Ok(converter::create_tx_response(
+                        1,
+                        format!("unhandled message type: {type_url}"),
+                        String::new(),
+                        vec![],
+                        100000_i64,
+                        total_gas_used as i64,
                         events,
-                    });
+                        String::new(),
+                    ));
                 }
             }
         }
 
-        Ok(TxResponse {
-            code: 0,
-            log: "transaction executed successfully".to_string(),
-            gas_used: total_gas_used,
-            gas_wanted: total_gas_used + 10000,
+        Ok(converter::success_tx_response(
+            "transaction executed successfully".to_string(),
+            vec![],
+            (total_gas_used + 10000) as i64,
+            total_gas_used as i64,
             events,
-        })
+        ))
     }
 
     /// Initialize chain from genesis
@@ -1629,13 +1572,15 @@ impl BaseApp {
         let gas_wanted = (estimated_gas as f64 * 1.2) as u64;
         let gas_used = (estimated_gas as f64 * 0.85) as u64; // Simulate 85% efficiency
 
-        Ok(TxResponse {
-            code: 0,
-            log: "simulation successful".to_string(),
-            gas_used,
-            gas_wanted,
-            events: vec![],
-        })
+        // TODO: Simulation should ideally emit events that would occur during actual execution
+        // For now, return empty events as simulation doesn't execute state changes
+        Ok(converter::success_tx_response(
+            "simulation successful".to_string(),
+            vec![],
+            gas_wanted as i64,
+            gas_used as i64,
+            vec![], // Events would be populated during actual execution
+        ))
     }
 
     /// Helper methods for testing

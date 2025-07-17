@@ -250,8 +250,8 @@ impl tx::Service for TxService {
         match baseapp.simulate_tx(&req.tx_bytes) {
             Ok(tx_response) => {
                 let gas_info = GasInfo {
-                    gas_wanted: tx_response.gas_wanted,
-                    gas_used: tx_response.gas_used,
+                    gas_wanted: tx_response.gas_wanted as u64,
+                    gas_used: tx_response.gas_used as u64,
                 };
 
                 let result = Result_ {
@@ -261,7 +261,7 @@ impl tx::Service for TxService {
                         .events
                         .into_iter()
                         .map(|event| Event {
-                            type_: event.event_type,
+                            r#type: event.r#type,
                             attributes: event
                                 .attributes
                                 .into_iter()
@@ -327,7 +327,7 @@ impl tx::Service for TxService {
             tx: None,
             timestamp: "2024-01-01T12:00:00Z".to_string(),
             events: vec![Event {
-                type_: "transfer".to_string(),
+                r#type: "transfer".to_string(),
                 attributes: vec![
                     EventAttribute {
                         key: "sender".to_string(),
