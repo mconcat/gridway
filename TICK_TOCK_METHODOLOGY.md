@@ -94,31 +94,9 @@ Create `STAGE_MARKER.md` in repository root:
 
 **Important**: Only the `STAGE_MARKER.md` file determines the current stage. This allows for standard branch naming conventions (feat/, fix/, etc.) while maintaining stage-specific behavior.
 
-### Stage Transition Criteria
+### Stage Transition Management
 
-#### Tick → Tock Transition
-**Automated Triggers**:
-- Agent efficiency metrics drop >50%
-- Build failure rate exceeds 30% over 3 days
-- Average task completion time increases >3x baseline
-- Code complexity metrics reach saturation
-
-**Manual Triggers**:
-- All planned features for cycle are implemented
-- Technical debt accumulation is too high
-- Architecture needs redesign
-
-#### Tock → Tick Transition
-**Automated Triggers**:
-- Documentation coverage >90%
-- All public interfaces documented
-- Code complexity reduced >20%
-- Architectural refactoring complete
-
-**Manual Triggers**:
-- Architecture documentation is complete
-- Development team confident in system clarity
-- Ready to add new features efficiently
+**Manual Control**: Stage transitions are managed manually by human maintainers. The human maintainer will update the `STAGE_MARKER.md` file to transition between stages based on project needs and development progress.
 
 ## CI/CD Pipeline Configuration
 
@@ -233,25 +211,88 @@ Create `STAGE_MARKER.md` in repository root:
 5. **Ready for review**: Delete `SUMMARY.md` and mark PR as ready for review
 
 #### SUMMARY.md Template
+
+**IMPORTANT**: The SUMMARY.md file is meant to be a verbose, detailed scratchpad that can span hundreds of lines. Do not worry about formatting or structure - focus on capturing all activities, thoughts, decisions, and progress. This is NOT a refined document - it's a working notebook that will be distilled later.
+
 ```markdown
 # Branch Work Summary
 
 ## Objective
-Brief description of branch goals
+Detailed description of what this branch aims to accomplish, including context and background.
 
-## Progress
-- [x] Completed tasks
-- [ ] Pending tasks
+## Work Log
+Verbose chronological log of all activities, decisions, experiments, and findings. This can be very long and detailed - include everything that might be relevant for the CHANGELOG distillation process.
 
-## Decisions Made
-- Key decisions with reasoning
+Example entries:
+- Started by analyzing the existing authentication system
+- Found that the current JWT implementation has issues with token refresh
+- Tried implementing refresh tokens but ran into race conditions
+- Discovered that the database connection pooling was causing the race condition
+- Implemented connection pooling fix and retested
+- All tests passing, moving to next feature
+- Realized we need to update the API documentation
+- Added comprehensive API docs with examples
+- Discovered edge case in error handling during testing
+- Fixed edge case and added regression test
 
-## Blockers/Issues
-- Current issues and their status
+## Technical Decisions
+Detailed reasoning behind technical choices, including alternatives considered and trade-offs made.
 
-## Learnings/Notes
-- Important findings and workarounds
+## Blockers and Solutions
+Detailed description of any blockers encountered and how they were resolved.
+
+## Testing and Validation
+Detailed notes on testing approaches, findings, and validation results.
+
+## Notes for Future Work
+Any observations, ideas, or technical debt that should be addressed in future work.
 ```
+
+### CHANGELOG.md Process
+
+**MANDATORY**: When deleting the `SUMMARY.md` file and marking a PR as ready for review, you MUST distill the SUMMARY.md content and append it to the `CHANGELOG.md` file.
+
+#### CHANGELOG.md Requirements
+- **Distill from SUMMARY.md**: Transform the verbose work log into concise, meaningful entries
+- **Include developmental progress**: Unlike typical changelogs, include significant development activities and decisions
+- **Rough ratio**: Approximately 1 line of CHANGELOG entry per 50 lines of diff (this is a heuristic, not a strict rule)
+- **Chronological order**: Newest entries at the top
+- **Include context**: Provide enough context to understand the changes and their impact
+
+#### CHANGELOG.md Format
+```markdown
+# CHANGELOG
+
+## [Unreleased]
+
+### Added
+- New user authentication system with JWT and refresh token support
+- Comprehensive API documentation with examples and usage scenarios
+- Connection pooling fix to resolve race conditions in database operations
+- Edge case handling for authentication error scenarios with regression tests
+
+### Changed
+- Refactored authentication flow to use modern JWT patterns
+- Updated API error responses to provide more detailed error information
+- Improved database connection management for better performance
+
+### Fixed
+- Race condition in JWT token refresh that could cause authentication failures
+- Edge case in error handling that could cause undefined behavior
+- Database connection pooling issues that were causing intermittent failures
+
+### Technical Decisions
+- Chose JWT over session-based authentication for better scalability
+- Implemented connection pooling to reduce database overhead
+- Added comprehensive error handling to improve debugging experience
+```
+
+#### Process Flow
+1. **Before deleting SUMMARY.md**: Review the entire work log and technical decisions
+2. **Distill key changes**: Extract the most important developments, decisions, and fixes
+3. **Append to CHANGELOG.md**: Add new entries under the `[Unreleased]` section
+4. **Include developmental context**: Unlike typical changelogs, include significant development activities and architectural decisions
+5. **Delete SUMMARY.md**: Only after the changelog has been updated
 
 ### Initial Setup
 1. Choose starting stage based on current codebase state
