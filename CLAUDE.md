@@ -257,12 +257,14 @@ When writing documentation, proposals, or technical explanations, maintain a neu
 - Let the technical merit speak for itself
 
 **Be concise**:
-- Avoid unnecessary verbose explanations
 - Get to the point quickly
 - Use clear, direct language
 - Remove redundant phrasing
+- However be sure not to oversimplify
+
 
 **Stay technical**:
 - Emphasize implementation details over grand visions
 - Discuss concrete benefits rather than abstract concepts
 - Focus on how things work, not how amazing they are
+- Include all technical details and implicit context
