@@ -24,18 +24,24 @@ jobs:
       
       - name: Install protoc
         run: |
+          # Wait for apt locks to be released
+          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+            echo "Waiting for other apt processes to finish..."
+            sleep 1
+          done
           sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
       - name: Cache cargo dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       
       - name: Install cargo-component
         run: |
@@ -72,18 +78,24 @@ jobs:
       
       - name: Install protoc
         run: |
+          # Wait for apt locks to be released
+          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+            echo "Waiting for other apt processes to finish..."
+            sleep 1
+          done
           sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
       - name: Cache cargo dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
           key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.rust }}-cargo-
       
       - name: Install cargo-component
         run: |
@@ -114,18 +126,24 @@ jobs:
       
       - name: Install protoc
         run: |
+          # Wait for apt locks to be released
+          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+            echo "Waiting for other apt processes to finish..."
+            sleep 1
+          done
           sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
       - name: Cache cargo dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
       
       - name: Install cargo-component
         run: |
@@ -156,6 +174,11 @@ jobs:
       
       - name: Install protoc
         run: |
+          # Wait for apt locks to be released
+          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+            echo "Waiting for other apt processes to finish..."
+            sleep 1
+          done
           sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
       - name: Install tarpaulin

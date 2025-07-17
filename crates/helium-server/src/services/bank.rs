@@ -366,10 +366,20 @@ impl BankService {
     /// Initialize bank store with default balances for testing
     pub async fn initialize_for_testing(&self) -> Result<(), BankServiceError> {
         // Add some default balances for testing
-        self.set_balance("cosmos1abcd1234", "stake", 1000000)
+        self.set_balance(
+            "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+            "stake",
+            1000000,
+        )
+        .await?;
+        self.set_balance("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", "atom", 500)
             .await?;
-        self.set_balance("cosmos1abcd1234", "atom", 500).await?;
-        self.set_balance("cosmos1wxyz5678", "stake", 750000).await?;
+        self.set_balance(
+            "cosmos1fl48vsnmsdzcv85q5d2q4z5ajdha8yu34mf0eh",
+            "stake",
+            750000,
+        )
+        .await?;
 
         Ok(())
     }
@@ -476,16 +486,26 @@ mod tests {
 
         // Set a balance
         service
-            .set_balance("cosmos1test", "stake", 1000)
+            .set_balance(
+                "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+                "stake",
+                1000,
+            )
             .await
             .unwrap();
 
         // Get the balance
-        let balance = service.get_balance("cosmos1test", "stake").await.unwrap();
+        let balance = service
+            .get_balance("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", "stake")
+            .await
+            .unwrap();
         assert_eq!(balance, 1000);
 
         // Check non-existent balance
-        let zero_balance = service.get_balance("cosmos1test", "atom").await.unwrap();
+        let zero_balance = service
+            .get_balance("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", "atom")
+            .await
+            .unwrap();
         assert_eq!(zero_balance, 0);
     }
 
@@ -495,16 +515,23 @@ mod tests {
 
         // Set multiple balances
         service
-            .set_balance("cosmos1test", "stake", 1000)
+            .set_balance(
+                "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+                "stake",
+                1000,
+            )
             .await
             .unwrap();
         service
-            .set_balance("cosmos1test", "atom", 500)
+            .set_balance("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", "atom", 500)
             .await
             .unwrap();
 
         // Get all balances
-        let balances = service.get_all_balances("cosmos1test").await.unwrap();
+        let balances = service
+            .get_all_balances("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux")
+            .await
+            .unwrap();
         assert_eq!(balances.len(), 2);
 
         // Should be sorted by denom
@@ -520,20 +547,32 @@ mod tests {
 
         // Set initial balance
         service
-            .set_balance("cosmos1sender", "stake", 1000)
+            .set_balance(
+                "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+                "stake",
+                1000,
+            )
             .await
             .unwrap();
 
         // Transfer
         service
-            .transfer("cosmos1sender", "cosmos1recipient", 300, "stake")
+            .transfer(
+                "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+                "cosmos1fl48vsnmsdzcv85q5d2q4z5ajdha8yu34mf0eh",
+                300,
+                "stake",
+            )
             .await
             .unwrap();
 
         // Check balances
-        let sender_balance = service.get_balance("cosmos1sender", "stake").await.unwrap();
+        let sender_balance = service
+            .get_balance("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", "stake")
+            .await
+            .unwrap();
         let recipient_balance = service
-            .get_balance("cosmos1recipient", "stake")
+            .get_balance("cosmos1fl48vsnmsdzcv85q5d2q4z5ajdha8yu34mf0eh", "stake")
             .await
             .unwrap();
 
@@ -547,13 +586,22 @@ mod tests {
 
         // Set initial balance
         service
-            .set_balance("cosmos1sender", "stake", 100)
+            .set_balance(
+                "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+                "stake",
+                100,
+            )
             .await
             .unwrap();
 
         // Try to transfer more than available
         let result = service
-            .transfer("cosmos1sender", "cosmos1recipient", 200, "stake")
+            .transfer(
+                "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+                "cosmos1fl48vsnmsdzcv85q5d2q4z5ajdha8yu34mf0eh",
+                200,
+                "stake",
+            )
             .await;
 
         assert!(matches!(
@@ -568,15 +616,23 @@ mod tests {
 
         // Set balances for multiple accounts
         service
-            .set_balance("cosmos1addr1", "stake", 1000)
+            .set_balance(
+                "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+                "stake",
+                1000,
+            )
             .await
             .unwrap();
         service
-            .set_balance("cosmos1addr2", "stake", 500)
+            .set_balance(
+                "cosmos1fl48vsnmsdzcv85q5d2q4z5ajdha8yu34mf0eh",
+                "stake",
+                500,
+            )
             .await
             .unwrap();
         service
-            .set_balance("cosmos1addr1", "atom", 200)
+            .set_balance("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", "atom", 200)
             .await
             .unwrap();
 
@@ -600,13 +656,17 @@ mod tests {
 
         // Set up test data
         service
-            .set_balance("cosmos1test", "stake", 1000)
+            .set_balance(
+                "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+                "stake",
+                1000,
+            )
             .await
             .unwrap();
 
         // Test balance query
         let request = Request::new(bank::QueryBalanceRequest {
-            address: "cosmos1test".to_string(),
+            address: "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux".to_string(),
             denom: "stake".to_string(),
         });
 

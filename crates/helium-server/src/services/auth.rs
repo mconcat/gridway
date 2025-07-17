@@ -3,12 +3,11 @@
 //! This module provides a production-ready auth service that integrates with
 //! the state manager for persistent account storage and authentication.
 
-use crate::grpc::{auth, BaseAccount, AuthParams};
+use crate::grpc::{auth, AuthParams, BaseAccount};
 use helium_baseapp::BaseApp;
-use helium_store::{StateManager, StoreError};
+use helium_store::{KVStore, StateManager, StoreError};
 use helium_types::address::AccAddress;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -58,6 +57,7 @@ pub struct AuthService {
     /// State manager for persistent storage
     state_manager: Arc<RwLock<StateManager>>,
     /// Base application for transaction processing
+    #[allow(dead_code)]
     base_app: Arc<RwLock<BaseApp>>,
     /// Configuration parameters
     config: AuthConfig,
@@ -139,7 +139,7 @@ impl AuthService {
             .get_store("auth")
             .map_err(AuthServiceError::StoreError)?;
 
-        let key = format!("account_{}", address);
+        let key = format!("account_{address}");
         match store.get(key.as_bytes()) {
             Ok(Some(data)) => {
                 let account: StoredAccount = serde_json::from_slice(&data)
@@ -202,7 +202,7 @@ impl AuthService {
             .map_err(|e| AuthServiceError::SerializationError(e.to_string()))?;
 
         store
-            .set(key.into_bytes(), data)
+            .set(&key.into_bytes(), &data)
             .map_err(AuthServiceError::StoreError)?;
 
         // Commit changes immediately for consistency
@@ -221,7 +221,7 @@ impl AuthService {
             .map_err(AuthServiceError::StoreError)?;
 
         store
-            .set(b"next_account_number".to_vec(), next_num.to_string().into_bytes())
+            .set(b"next_account_number", &next_num.to_string().into_bytes())
             .map_err(AuthServiceError::StoreError)?;
 
         state_manager
@@ -241,7 +241,8 @@ impl AuthService {
         match store.get(b"next_account_number") {
             Ok(Some(data)) => {
                 let num_str = String::from_utf8_lossy(&data);
-                let num = num_str.parse::<u64>()
+                let num = num_str
+                    .parse::<u64>()
                     .map_err(|_| AuthServiceError::InvalidAccountNumber(num_str.to_string()))?;
                 *self.next_account_number.write().await = num;
             }
@@ -308,12 +309,22 @@ impl AuthService {
         self.load_next_account_number().await?;
 
         // Create some default accounts for testing if they don't exist
-        if self.get_account("cosmos1abcd1234").await?.is_none() {
-            self.create_account("cosmos1abcd1234", None).await?;
+        if self
+            .get_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux")
+            .await?
+            .is_none()
+        {
+            self.create_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", None)
+                .await?;
         }
 
-        if self.get_account("cosmos1wxyz5678").await?.is_none() {
-            self.create_account("cosmos1wxyz5678", None).await?;
+        if self
+            .get_account("cosmos1fl48vsnmsdzcv85q5d2q4z5ajdha8yu34mf0eh")
+            .await?
+            .is_none()
+        {
+            self.create_account("cosmos1fl48vsnmsdzcv85q5d2q4z5ajdha8yu34mf0eh", None)
+                .await?;
         }
 
         Ok(())
@@ -321,7 +332,9 @@ impl AuthService {
 
     /// Increment account sequence (for transaction processing)
     pub async fn increment_sequence(&self, address: &str) -> Result<(), AuthServiceError> {
-        let mut account = self.get_account(address).await?
+        let mut account = self
+            .get_account(address)
+            .await?
             .ok_or_else(|| AuthServiceError::AccountNotFound(address.to_string()))?;
 
         account.sequence += 1;
@@ -331,8 +344,14 @@ impl AuthService {
     }
 
     /// Set account public key
-    pub async fn set_public_key(&self, address: &str, pub_key: Vec<u8>) -> Result<(), AuthServiceError> {
-        let mut account = self.get_account(address).await?
+    pub async fn set_public_key(
+        &self,
+        address: &str,
+        pub_key: Vec<u8>,
+    ) -> Result<(), AuthServiceError> {
+        let mut account = self
+            .get_account(address)
+            .await?
             .ok_or_else(|| AuthServiceError::AccountNotFound(address.to_string()))?;
 
         account.pub_key = Some(pub_key);
@@ -396,16 +415,14 @@ mod tests {
     use super::*;
     use crate::grpc::auth::Query;
     use helium_baseapp::BaseApp;
-    use helium_store::MemStore;
 
     async fn create_test_service() -> AuthService {
-        // Create a simple in-memory store directly
-        let store = Box::new(MemStore::new());
-
-        let mut state_manager = StateManager::new();
-        state_manager.mount_store("auth".to_string(), store);
+        let mut state_manager = StateManager::new_with_memstore();
+        state_manager
+            .register_namespace("auth".to_string(), false)
+            .unwrap();
         let state_manager = Arc::new(RwLock::new(state_manager));
-        let base_app = Arc::new(RwLock::new(BaseApp::new("test-app".to_string())));
+        let base_app = Arc::new(RwLock::new(BaseApp::new("test-app".to_string()).unwrap()));
 
         AuthService::with_defaults(state_manager, base_app)
     }
@@ -416,17 +433,24 @@ mod tests {
 
         // Create an account
         let account = service
-            .create_account("cosmos1test", None)
+            .create_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", None)
             .await
             .unwrap();
 
-        assert_eq!(account.address, "cosmos1test");
+        assert_eq!(
+            account.address,
+            "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux"
+        );
         assert_eq!(account.account_number, 1);
         assert_eq!(account.sequence, 0);
         assert!(account.pub_key.is_none());
 
         // Retrieve the account
-        let retrieved = service.get_account("cosmos1test").await.unwrap().unwrap();
+        let retrieved = service
+            .get_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(retrieved.address, account.address);
         assert_eq!(retrieved.account_number, account.account_number);
     }
@@ -436,13 +460,23 @@ mod tests {
         let service = create_test_service().await;
 
         // Create an account
-        service.create_account("cosmos1test", None).await.unwrap();
+        service
+            .create_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", None)
+            .await
+            .unwrap();
 
         // Increment sequence
-        service.increment_sequence("cosmos1test").await.unwrap();
+        service
+            .increment_sequence("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux")
+            .await
+            .unwrap();
 
         // Check sequence was incremented
-        let account = service.get_account("cosmos1test").await.unwrap().unwrap();
+        let account = service
+            .get_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(account.sequence, 1);
     }
 
@@ -451,14 +485,27 @@ mod tests {
         let service = create_test_service().await;
 
         // Create an account
-        service.create_account("cosmos1test", None).await.unwrap();
+        service
+            .create_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", None)
+            .await
+            .unwrap();
 
         // Set public key
         let pub_key = vec![1, 2, 3, 4];
-        service.set_public_key("cosmos1test", pub_key.clone()).await.unwrap();
+        service
+            .set_public_key(
+                "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux",
+                pub_key.clone(),
+            )
+            .await
+            .unwrap();
 
         // Check public key was set
-        let account = service.get_account("cosmos1test").await.unwrap().unwrap();
+        let account = service
+            .get_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(account.pub_key, Some(pub_key));
     }
 
@@ -467,8 +514,14 @@ mod tests {
         let service = create_test_service().await;
 
         // Create multiple accounts
-        let account1 = service.create_account("cosmos1test1", None).await.unwrap();
-        let account2 = service.create_account("cosmos1test2", None).await.unwrap();
+        let account1 = service
+            .create_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", None)
+            .await
+            .unwrap();
+        let account2 = service
+            .create_account("cosmos1fl48vsnmsdzcv85q5d2q4z5ajdha8yu34mf0eh", None)
+            .await
+            .unwrap();
 
         // Account numbers should be sequential
         assert_eq!(account1.account_number, 1);
@@ -480,17 +533,23 @@ mod tests {
         let service = create_test_service().await;
 
         // Create an account
-        service.create_account("cosmos1test", None).await.unwrap();
+        service
+            .create_account("cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux", None)
+            .await
+            .unwrap();
 
         // Test account query
         let request = Request::new(auth::QueryAccountRequest {
-            address: "cosmos1test".to_string(),
+            address: "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux".to_string(),
         });
 
         let response = service.account(request).await.unwrap();
         let account = response.into_inner().account.unwrap();
 
-        assert_eq!(account.address, "cosmos1test");
+        assert_eq!(
+            account.address,
+            "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux"
+        );
         assert_eq!(account.account_number, 1);
         assert_eq!(account.sequence, 0);
     }

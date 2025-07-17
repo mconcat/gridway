@@ -34,6 +34,7 @@ helium-types = { path = "../helium-types" }
 helium-baseapp = { path = "../helium-baseapp" }
 helium-math = { path = "../helium-math" }
 helium-log = { path = "../helium-log" }
+helium-telemetry = { path = "../helium-telemetry" }
 helium-proto = { path = "../helium-proto" }
 
 [dev-dependencies]
