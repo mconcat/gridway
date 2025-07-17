@@ -1,10 +1,10 @@
-# CometBFT Integration for Helium
+# Helium Deployment Guide
 
 [![CI](https://github.com/mconcat/helium/actions/workflows/ci.yml/badge.svg)](https://github.com/mconcat/helium/actions/workflows/ci.yml)
 [![CometBFT Integration](https://github.com/mconcat/helium/actions/workflows/cometbft-integration.yml/badge.svg)](https://github.com/mconcat/helium/actions/workflows/cometbft-integration.yml)
 [![Docker](https://github.com/mconcat/helium/actions/workflows/docker.yml/badge.svg)](https://github.com/mconcat/helium/actions/workflows/docker.yml)
 
-This directory contains the CometBFT integration setup for the Helium blockchain, enabling Byzantine Fault Tolerant consensus through the ABCI++ protocol.
+This guide covers deploying and operating Helium blockchain nodes with CometBFT consensus engine, including single-node testnets and multi-validator networks.
 
 ## 🚀 Quick Start
 

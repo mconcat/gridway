@@ -163,15 +163,15 @@ struct TxProto {
 #[derive(Clone, PartialEq, Message)]
 pub struct TxBodyProto {
     #[prost(message, repeated, tag = "1")]
-    pub messages: Vec<helium_codec::protobuf::Any>,
+    pub messages: Vec<crate::protobuf::Any>,
     #[prost(string, tag = "2")]
     pub memo: String,
     #[prost(uint64, tag = "3")]
     pub timeout_height: u64,
     #[prost(message, repeated, tag = "1023")]
-    pub extension_options: Vec<helium_codec::protobuf::Any>,
+    pub extension_options: Vec<crate::protobuf::Any>,
     #[prost(message, repeated, tag = "2047")]
-    pub non_critical_extension_options: Vec<helium_codec::protobuf::Any>,
+    pub non_critical_extension_options: Vec<crate::protobuf::Any>,
 }
 
 /// Protobuf representation of auth info
@@ -187,7 +187,7 @@ pub struct AuthInfoProto {
 #[derive(Clone, PartialEq, Message)]
 pub struct SignerInfoProto {
     #[prost(message, optional, tag = "1")]
-    pub public_key: Option<helium_codec::protobuf::Any>,
+    pub public_key: Option<crate::protobuf::Any>,
     #[prost(message, optional, tag = "2")]
     pub mode_info: Option<ModeInfoProto>,
     #[prost(uint64, tag = "3")]
@@ -279,7 +279,7 @@ impl From<&TxBody> for TxBodyProto {
             messages: body
                 .messages
                 .iter()
-                .map(|msg| helium_codec::protobuf::Any {
+                .map(|msg| crate::protobuf::Any {
                     type_url: msg.type_url.clone(),
                     value: msg.value.clone(),
                 })
@@ -299,13 +299,10 @@ impl From<&AuthInfo> for AuthInfoProto {
                 .signer_infos
                 .iter()
                 .map(|info| SignerInfoProto {
-                    public_key: info
-                        .public_key
-                        .as_ref()
-                        .map(|pk| helium_codec::protobuf::Any {
-                            type_url: pk.type_url.clone(),
-                            value: pk.value.clone(),
-                        }),
+                    public_key: info.public_key.as_ref().map(|pk| crate::protobuf::Any {
+                        type_url: pk.type_url.clone(),
+                        value: pk.value.clone(),
+                    }),
                     mode_info: info.mode_info.single.as_ref().map(|single| ModeInfoProto {
                         sum: Some(mode_info_proto::Sum::Single(ModeInfoSingleProto {
                             mode: single.mode as i32,
@@ -555,7 +552,7 @@ impl TxDecoder {
 
     /// Encode a transaction to protobuf bytes
     pub fn encode_tx(&self, tx: &RawTx) -> Result<Vec<u8>, TxDecodeError> {
-        use helium_codec::protobuf::Any;
+        use crate::protobuf::Any;
 
         // Convert messages to Any types
         let messages: Vec<Any> = tx
@@ -638,7 +635,7 @@ impl TxDecoder {
     /// Decode a message from Any type using the registry
     pub fn decode_any_message(
         &self,
-        any: &helium_codec::protobuf::Any,
+        any: &crate::protobuf::Any,
     ) -> Result<Box<dyn SdkMsg>, TxDecodeError> {
         self.decode_message(&TxMessage {
             type_url: any.type_url.clone(),

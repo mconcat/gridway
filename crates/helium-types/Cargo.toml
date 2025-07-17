@@ -9,7 +9,6 @@ repository = "https://github.com/cosmos/helium-rust"
 
 [dependencies]
 helium-math = { path = "../helium-math" }
-helium-codec = { path = "../helium-codec" }
 helium-store = { path = "../helium-store" }
 helium-proto = { path = "../helium-proto" }
 thiserror = "1.0"

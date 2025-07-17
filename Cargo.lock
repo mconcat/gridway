@@ -1674,7 +1674,6 @@ dependencies = [
  "cometbft-proto",
  "helium-baseapp",
  "helium-client",
- "helium-codec",
  "helium-crypto",
  "helium-errors",
  "helium-keyring",
@@ -1751,19 +1750,6 @@ dependencies = [
  "toml",
  "tracing",
  "url",
-]
-
-[[package]]
-name = "helium-codec"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "lazy_static",
- "prost 0.12.6",
- "prost-types 0.12.6",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1920,7 +1906,6 @@ dependencies = [
  "bech32",
  "chrono",
  "dirs 5.0.1",
- "helium-codec",
  "helium-math",
  "helium-proto",
  "helium-store",
