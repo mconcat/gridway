@@ -71,16 +71,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sleep(Duration::from_secs(5)).await;
     }
 }
-
-// Add rand as dev dependency for the example
-#[cfg(test)]
-mod rand {
-    pub fn random<T>() -> T
-    where
-        Standard: Distribution<T>,
-    {
-        use rand::distributions::{Distribution, Standard};
-        use rand::thread_rng;
-        Standard.sample(&mut thread_rng())
-    }
-}

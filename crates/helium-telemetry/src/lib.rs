@@ -20,10 +20,15 @@ use std::sync::Arc;
 
 lazy_static! {
     /// Global metrics registry instance
-    pub static ref METRICS_REGISTRY: Arc<MetricsRegistry> = Arc::new(
-        MetricsRegistry::new()
-            .expect("Failed to initialize metrics registry")
-    );
+    pub static ref METRICS_REGISTRY: Arc<MetricsRegistry> = {
+        match MetricsRegistry::new() {
+            Ok(registry) => Arc::new(registry),
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to initialize metrics registry");
+                panic!("Critical error: Failed to initialize metrics registry: {e}");
+            }
+        }
+    };
 }
 
 /// Initialize the telemetry subsystem

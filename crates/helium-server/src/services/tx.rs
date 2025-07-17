@@ -234,23 +234,21 @@ impl TxService {
         let result = Result_ {
             data: vec![], // Would contain result data in real implementation
             log: "simulation successful".to_string(),
-            events: vec![
-                Event {
-                    r#type: "message".to_string(),
-                    attributes: vec![
-                        EventAttribute {
-                            key: "action".to_string(),
-                            value: "/cosmos.bank.v1beta1.MsgSend".to_string(),
-                            index: true,
-                        },
-                        EventAttribute {
-                            key: "module".to_string(),
-                            value: "bank".to_string(),
-                            index: true,
-                        },
-                    ],
-                },
-            ],
+            events: vec![Event {
+                r#type: "message".to_string(),
+                attributes: vec![
+                    EventAttribute {
+                        key: "action".to_string(),
+                        value: "/cosmos.bank.v1beta1.MsgSend".to_string(),
+                        index: true,
+                    },
+                    EventAttribute {
+                        key: "module".to_string(),
+                        value: "bank".to_string(),
+                        index: true,
+                    },
+                ],
+            }],
         };
 
         Ok((gas_info, result))
@@ -293,30 +291,46 @@ impl TxService {
             code: response.code,
             data: String::new(), // Would be base64 encoded data
             raw_log: response.log.clone(),
-            logs: response.events.iter().map(|event| ABCIMessageLog {
-                msg_index: 0, // Would be actual message index
-                log: String::new(),
-                events: vec![StringEvent {
-                    r#type: event.r#type.clone(),
-                    attributes: event.attributes.iter().map(|attr| StringAttribute {
-                        key: attr.key.clone(),
-                        value: attr.value.clone(),
-                    }).collect(),
-                }],
-            }).collect(),
+            logs: response
+                .events
+                .iter()
+                .map(|event| ABCIMessageLog {
+                    msg_index: 0, // Would be actual message index
+                    log: String::new(),
+                    events: vec![StringEvent {
+                        r#type: event.r#type.clone(),
+                        attributes: event
+                            .attributes
+                            .iter()
+                            .map(|attr| StringAttribute {
+                                key: attr.key.clone(),
+                                value: attr.value.clone(),
+                            })
+                            .collect(),
+                    }],
+                })
+                .collect(),
             info: String::new(),
             gas_wanted: response.gas_wanted,
             gas_used: response.gas_used,
             tx: None, // Would contain decoded transaction
             timestamp: chrono::Utc::now().to_rfc3339(),
-            events: response.events.iter().map(|event| Event {
-                r#type: event.r#type.clone(),
-                attributes: event.attributes.iter().map(|attr| EventAttribute {
-                    key: attr.key.clone(),
-                    value: attr.value.clone(),
-                    index: true,
-                }).collect(),
-            }).collect(),
+            events: response
+                .events
+                .iter()
+                .map(|event| Event {
+                    r#type: event.r#type.clone(),
+                    attributes: event
+                        .attributes
+                        .iter()
+                        .map(|attr| EventAttribute {
+                            key: attr.key.clone(),
+                            value: attr.value.clone(),
+                            index: true,
+                        })
+                        .collect(),
+                })
+                .collect(),
         }
     }
 
@@ -484,11 +498,13 @@ impl tx::Service for TxService {
 
             if let Ok(stored_tx) = serde_json::from_slice::<StoredTransaction>(&value) {
                 // Simple event filtering (in real implementation would parse events properly)
-                let matches_events = req.events.is_empty() || 
-                    req.events.iter().any(|event_filter| {
-                        stored_tx.tx_response.events.iter().any(|event| {
-                            event_filter.contains(&event.r#type)
-                        })
+                let matches_events = req.events.is_empty()
+                    || req.events.iter().any(|event_filter| {
+                        stored_tx
+                            .tx_response
+                            .events
+                            .iter()
+                            .any(|event| event_filter.contains(&event.r#type))
                     });
 
                 if matches_events {

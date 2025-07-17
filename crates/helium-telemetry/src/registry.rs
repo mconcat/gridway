@@ -66,16 +66,22 @@ impl MetricsRegistry {
     ) -> MetricResult<()> {
         self.register_collector(collector)?;
 
-        let mut metrics = self.custom_metrics.write().unwrap();
+        let mut metrics = self
+            .custom_metrics
+            .write()
+            .map_err(|_| MetricError::RegistrationFailed("Lock poisoned".to_string()))?;
         metrics.push(name);
 
         Ok(())
     }
 
     /// Get all registered metric names
-    pub fn metric_names(&self) -> Vec<String> {
-        let metrics = self.custom_metrics.read().unwrap();
-        metrics.clone()
+    pub fn metric_names(&self) -> MetricResult<Vec<String>> {
+        let metrics = self
+            .custom_metrics
+            .read()
+            .map_err(|_| MetricError::RegistrationFailed("Lock poisoned".to_string()))?;
+        Ok(metrics.clone())
     }
 
     /// Gather all metrics from the registry
@@ -94,14 +100,6 @@ impl MetricsRegistry {
             .map_err(|e| MetricError::EncodingFailed(e.to_string()))?;
 
         String::from_utf8(buffer).map_err(|e| MetricError::EncodingFailed(e.to_string()))
-    }
-
-    /// Unregister all metrics (useful for testing)
-    #[cfg(test)]
-    pub fn clear(&self) -> MetricResult<()> {
-        // Prometheus doesn't support unregistering, so we create a new registry
-        // This is only available in tests
-        Ok(())
     }
 }
 
@@ -137,9 +135,8 @@ mod tests {
         let result = registry.register_metric("test_counter".to_string(), Box::new(counter));
 
         assert!(result.is_ok());
-        assert!(registry
-            .metric_names()
-            .contains(&"test_counter".to_string()));
+        let metric_names = registry.metric_names().unwrap();
+        assert!(metric_names.contains(&"test_counter".to_string()));
     }
 
     #[test]

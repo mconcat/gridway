@@ -1912,6 +1912,7 @@ dependencies = [
  "helium-types",
  "lazy_static",
  "prometheus",
+ "rand",
  "reqwest 0.12.22",
  "serde",
  "serde_json",
