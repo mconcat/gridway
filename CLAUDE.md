@@ -168,6 +168,162 @@ WASI modules may show profile warnings. These are expected but should ideally be
 opt-level = 3
 ```
 
+## Tick-Tock Development Methodology
+
+This project uses a tick-tock development methodology that alternates between two distinct phases. **Always detect your current stage before beginning work**.
+
+### Stage Detection Commands
+
+Run these commands to determine the current development stage:
+
+```bash
+# Method 1: Check current branch
+git branch --show-current
+
+# Method 2: Check environment variable
+echo $HELIUM_DEVELOPMENT_STAGE
+
+# Method 3: Check stage marker file
+cat STAGE_MARKER.md 2>/dev/null || echo "No stage marker found"
+
+# Method 4: Check for active stage branches
+git branch -r | grep -E "(tick|tock)/current"
+```
+
+**Stage Determination Logic**:
+- If on `tick/current` branch → **TICK STAGE**
+- If on `tock/current` branch → **TOCK STAGE**
+- If `HELIUM_DEVELOPMENT_STAGE=tick` → **TICK STAGE**
+- If `HELIUM_DEVELOPMENT_STAGE=tock` → **TOCK STAGE**
+- If `STAGE_MARKER.md` contains "tick" → **TICK STAGE**
+- If `STAGE_MARKER.md` contains "tock" → **TOCK STAGE**
+
+### TICK Stage (Implementation Velocity)
+
+**When in TICK stage, you MUST follow these guidelines:**
+
+#### Core Principles
+- **Maximum Speed**: Prioritize working code over perfect code
+- **Fast Merges**: Merge changes as quickly as possible
+- **High Parallelization**: Work on multiple features simultaneously
+- **Volume Over Clarity**: Focus on implementing features rather than documentation
+
+#### Command Sequence (TICK)
+```bash
+# 1. Build WASI modules (required before building other crates)
+./scripts/build-wasi-modules.sh
+
+# 2. Build all other crates
+cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
+
+# 3. Run all tests - MUST PASS in tick stage
+cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
+
+# 4. Check formatting 
+cargo fmt --all
+
+# 5. Run clippy
+cargo clippy --fix --all --allow-dirty
+
+# 6. Final format check
+cargo fmt --all
+```
+
+#### STRICTLY PROHIBITED in TICK
+- **TODOs, FIXMEs, or XXX comments**: All code must be complete
+- **Mock implementations**: No `todo!()`, `unimplemented!()`, or `panic!()` in production code
+- **Placeholder code**: All functions must be fully implemented
+- **Broken builds**: All builds and tests MUST pass
+- **Extensive documentation**: Keep docs minimal and focused
+
+#### Agent Behavior (TICK)
+- **Aggressive Implementation**: Get features working quickly
+- **Minimal Documentation**: Only essential comments
+- **Fast Iteration**: Don't over-engineer solutions
+- **Parallel Work**: Handle multiple tasks simultaneously
+- **Merge Confidence**: Merge working code immediately
+
+### TOCK Stage (Architectural Refinement)
+
+**When in TOCK stage, you MUST follow these guidelines:**
+
+#### Core Principles
+- **Documentation First**: Comprehensive documentation is priority
+- **Architectural Clarity**: Focus on system design and interfaces
+- **Code Hygiene**: Refactor and clean up existing code
+- **Rubber Duck Mode**: Act as thinking companion, not aggressive coder
+
+#### Command Sequence (TOCK)
+```bash
+# 1. Build check (relaxed - failures permitted during refactoring)
+cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder || echo "Build failures permitted in tock"
+
+# 2. Generate documentation
+cargo doc --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --no-deps
+
+# 3. Check documentation coverage
+grep -r "///" --include="*.rs" crates/ | wc -l
+
+# 4. Run tests (failures permitted during refactoring)
+cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder || echo "Test failures permitted in tock"
+
+# 5. Check formatting 
+cargo fmt --all
+
+# 6. Run clippy (warnings acceptable)
+cargo clippy --all --allow-dirty || echo "Clippy warnings acceptable in tock"
+```
+
+#### PERMITTED in TOCK
+- **TODOs and FIXMEs**: For architectural planning
+- **Mock implementations**: For architectural backbone (`todo!()`, `unimplemented!()`)
+- **Broken builds**: Temporary failures during refactoring
+- **Placeholder interfaces**: For system design
+- **Extensive documentation**: Comprehensive docs are encouraged
+
+#### Agent Behavior (TOCK)
+- **Rubber Duck Companion**: Focus on understanding existing code
+- **Architectural Thinking**: Consider system-wide implications
+- **Documentation Priority**: Write comprehensive docs before code
+- **Refactoring Focus**: Improve existing code structure
+- **Slow and Deliberate**: Quality over speed
+
+### Stage-Specific Merge Conflict Resolution
+
+#### TICK Stage Conflicts
+- **Speed First**: Choose the solution that works fastest
+- **Minimal Disruption**: Avoid large refactors during conflicts
+- **Build Stability**: Ensure resolution doesn't break builds
+- **Feature Complete**: Prefer complete implementations over partial ones
+
+#### TOCK Stage Conflicts
+- **Architecture First**: Choose the solution that improves system design
+- **Documentation Clarity**: Prefer well-documented approaches
+- **Long-term Maintainability**: Consider future development needs
+- **Interface Consistency**: Maintain clean API boundaries
+
+### Stage Transition Guidelines
+
+#### When to Transition from TICK to TOCK
+- Agent efficiency drops significantly
+- Build failures become frequent
+- Code complexity reaches saturation
+- ~30 days have passed
+
+#### When to Transition from TOCK to TICK
+- Documentation coverage >90%
+- All interfaces are clean and documented
+- Architecture refactoring is complete
+- ~30 days have passed
+
+### Emergency Overrides
+
+If you encounter conflicts between tick-tock guidelines and critical project needs:
+1. **Document the Override**: Explain why normal guidelines don't apply
+2. **Minimize Impact**: Keep overrides as small as possible
+3. **Return to Guidelines**: Resume normal stage behavior immediately after
+4. **Report Override**: Note the override in commit messages
+
 ## Merge Conflict Resolution Guidelines
 
 ### 1. Check Definitions and Usages First
