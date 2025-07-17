@@ -14,11 +14,13 @@ serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 thiserror = "1.0"
 
-# JMT (Jellyfish Merkle Tree) implementation
-jmt = "0.10"
+# JMT (Jellyfish Merkle Tree) implementation - Penumbra's ICS23-compatible fork
+jmt = { git = "https://github.com/penumbra-zone/jmt", branch = "main" }
 # Additional crypto dependencies for JMT
 blake3 = "1.5"
 hex = "0.4"
+bincode = "1.3"
+anyhow = "1.0"
 
 [dev-dependencies]
 tempfile = "3.14"

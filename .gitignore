@@ -46,4 +46,4 @@ testnet_backup_*/
 *.tmp
 *.temp
 tmp/
-temp/
+temp/data/

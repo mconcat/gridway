@@ -39,6 +39,7 @@ helium-proto = { path = "../helium-proto" }
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
+uuid = { version = "1.5", features = ["v4"] }
 
 [[bin]]
 name = "helium-server"

@@ -221,7 +221,7 @@ impl AbciService for AbciServer {
 
         let app = self.app.read().await;
         let height = app.get_height();
-        let app_hash = app.get_last_app_hash().to_vec();
+        let app_hash = app.get_last_app_hash();
 
         Ok(Response::new(InfoResponse {
             data: "helium".to_string(),
@@ -652,7 +652,7 @@ impl AbciService for AbciServer {
             tx_results,
             validator_updates: vec![],
             consensus_param_updates: None,
-            app_hash: app.get_last_app_hash().to_vec(),
+            app_hash: app.get_last_app_hash(),
         }))
     }
 }
@@ -717,10 +717,110 @@ impl Default for AbciServerBuilder {
     }
 }
 
+/// Connection retry configuration
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    /// Initial backoff duration in milliseconds
+    pub initial_backoff_ms: u64,
+    /// Maximum backoff duration in milliseconds
+    pub max_backoff_ms: u64,
+    /// Backoff multiplier
+    pub multiplier: f64,
+    /// Maximum number of retries
+    pub max_retries: u32,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            initial_backoff_ms: 100,
+            max_backoff_ms: 30000,
+            multiplier: 2.0,
+            max_retries: 10,
+        }
+    }
+}
+
+/// Handle ABCI connection with retry logic
+async fn handle_abci_connection_with_retry(
+    server: AbciServer,
+    stream: tokio::net::TcpStream,
+    peer_addr: std::net::SocketAddr,
+    retry_config: RetryConfig,
+) -> Result<()> {
+    let backoff_ms = retry_config.initial_backoff_ms;
+    let retry_count = 0;
+
+    // Since we can't clone the stream, we handle it once
+    // Retry logic should be implemented at the connection acceptance level
+    match handle_abci_connection_inner(server, stream, peer_addr).await {
+        Ok(()) => {
+            info!("ABCI connection from {} completed successfully", peer_addr);
+            Ok(())
+        }
+        Err(e) => {
+            error!("ABCI connection error from {}: {}", peer_addr, e);
+
+            // Log retry information for debugging
+            if retry_count < retry_config.max_retries {
+                info!(
+                    "Connection failed. In a production setup, CometBFT would retry with backoff: {}ms",
+                    backoff_ms
+                );
+            }
+
+            Err(e)
+        }
+    }
+}
+
+/// Inner ABCI connection handler
+async fn handle_abci_connection_inner(
+    _server: AbciServer,
+    stream: tokio::net::TcpStream,
+    peer_addr: std::net::SocketAddr,
+) -> Result<()> {
+    info!("New ABCI connection from {}", peer_addr);
+
+    // Set TCP keepalive and nodelay for better connection stability
+    stream
+        .set_nodelay(true)
+        .map_err(|e| AbciError::ServerError(format!("Failed to set TCP nodelay: {e}")))?;
+
+    // TODO: Implement actual ABCI wire protocol handling
+    // This would involve:
+    // 1. Reading length-prefixed messages
+    // 2. Decoding ABCI requests
+    // 3. Routing to appropriate methods
+    // 4. Encoding and sending responses
+
+    // For now, we're using gRPC via tonic, so this is a placeholder
+    // In a real implementation, we would:
+    // - Read message length (4 bytes, big endian)
+    // - Read message bytes
+    // - Decode protobuf message
+    // - Route to appropriate handler
+    // - Encode response
+    // - Write response length and bytes
+
+    Ok(())
+}
+
+/// Handle ABCI connection - wrapper with retry logic
+async fn handle_abci_connection(
+    server: AbciServer,
+    stream: tokio::net::TcpStream,
+    peer_addr: std::net::SocketAddr,
+) -> Result<()> {
+    let retry_config = RetryConfig::default();
+    handle_abci_connection_with_retry(server, stream, peer_addr, retry_config).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::AbciConfig;
+    use helium_store::KVStore;
 
     #[tokio::test]
     async fn test_abci_server_creation() {
@@ -878,103 +978,275 @@ mod tests {
             100
         );
     }
-}
 
-/// Connection retry configuration
-#[derive(Debug, Clone)]
-pub struct RetryConfig {
-    /// Initial backoff duration in milliseconds
-    pub initial_backoff_ms: u64,
-    /// Maximum backoff duration in milliseconds
-    pub max_backoff_ms: u64,
-    /// Backoff multiplier
-    pub multiplier: f64,
-    /// Maximum number of retries
-    pub max_retries: u32,
-}
+    #[tokio::test]
+    async fn test_app_hash_persistence() {
+        // Create a unique app name to avoid conflicts
+        let app_name = format!("test-persist-{}", uuid::Uuid::new_v4());
 
-impl Default for RetryConfig {
-    fn default() -> Self {
-        Self {
-            initial_backoff_ms: 100,
-            max_backoff_ms: 30000,
-            multiplier: 2.0,
-            max_retries: 10,
+        // First session: create state and get app hash
+        let initial_app_hash = {
+            let mut app = BaseApp::new(app_name.clone()).expect("Failed to create BaseApp");
+
+            // Register namespace and add data
+            app.register_namespace("test", false)
+                .expect("Failed to register namespace");
+            let mut store = app
+                .get_namespace_store("test")
+                .expect("Failed to get store");
+            store.set(b"key1", b"value1").expect("Failed to set value");
+
+            // Commit and get hash
+            let hash = app.commit().expect("Failed to commit");
+
+            // Create ABCI server and get info
+            let server = AbciServer::new(app, "test-chain".to_string());
+            let request = Request::new(InfoRequest {});
+            let response = server.info(request).await.unwrap();
+            let info = response.into_inner();
+
+            assert_eq!(info.last_block_app_hash, hash);
+            hash
+        };
+
+        // Second session: verify app hash persists
+        {
+            let app = BaseApp::new(app_name.clone()).expect("Failed to create BaseApp");
+            let server = AbciServer::new(app, "test-chain".to_string());
+
+            let request = Request::new(InfoRequest {});
+            let response = server.info(request).await.unwrap();
+            let info = response.into_inner();
+
+            // The app hash should match the one from the first session
+            assert_eq!(info.last_block_app_hash, initial_app_hash);
         }
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(format!("data/{app_name}"));
     }
-}
 
-/// Handle ABCI connection with retry logic
-async fn handle_abci_connection_with_retry(
-    server: AbciServer,
-    stream: tokio::net::TcpStream,
-    peer_addr: std::net::SocketAddr,
-    retry_config: RetryConfig,
-) -> Result<()> {
-    let backoff_ms = retry_config.initial_backoff_ms;
-    let retry_count = 0;
+    #[tokio::test]
+    async fn test_finalize_block_app_hash() {
+        let app_name = format!("test-finalize-{}", uuid::Uuid::new_v4());
+        let mut app = BaseApp::new(app_name.clone()).expect("Failed to create BaseApp");
 
-    // Since we can't clone the stream, we handle it once
-    // Retry logic should be implemented at the connection acceptance level
-    match handle_abci_connection_inner(server, stream, peer_addr).await {
-        Ok(()) => {
-            info!("ABCI connection from {} completed successfully", peer_addr);
-            Ok(())
-        }
-        Err(e) => {
-            error!("ABCI connection error from {}: {}", peer_addr, e);
+        // Register namespace and add initial state
+        app.register_namespace("test", false)
+            .expect("Failed to register namespace");
+        let mut store = app
+            .get_namespace_store("test")
+            .expect("Failed to get store");
+        store
+            .set(b"initial", b"state")
+            .expect("Failed to set value");
+        app.commit().expect("Failed to commit");
 
-            // Log retry information for debugging
-            if retry_count < retry_config.max_retries {
-                info!(
-                    "Connection failed. In a production setup, CometBFT would retry with backoff: {}ms",
-                    backoff_ms
-                );
-            }
+        let server = AbciServer::new(app, "test-chain".to_string());
 
-            Err(e)
-        }
+        // Finalize a block with no transactions
+        let request = Request::new(FinalizeBlockRequest {
+            txs: vec![],
+            decided_last_commit: None,
+            misbehavior: vec![],
+            hash: vec![1, 2, 3],
+            height: 1,
+            time: Some(prost_types::Timestamp {
+                seconds: 1234567890,
+                nanos: 0,
+            }),
+            next_validators_hash: vec![],
+            proposer_address: vec![],
+        });
+
+        let response = server.finalize_block(request).await.unwrap();
+        let result = response.into_inner();
+
+        // App hash should not be empty
+        assert!(!result.app_hash.is_empty());
+        assert_ne!(result.app_hash, vec![0u8; 32]);
+
+        // Store the hash for comparison
+        let block1_hash = result.app_hash.clone();
+
+        // Finalize another block without state changes
+        let request2 = Request::new(FinalizeBlockRequest {
+            txs: vec![],
+            decided_last_commit: None,
+            misbehavior: vec![],
+            hash: vec![4, 5, 6],
+            height: 2,
+            time: Some(prost_types::Timestamp {
+                seconds: 1234567891,
+                nanos: 0,
+            }),
+            next_validators_hash: vec![],
+            proposer_address: vec![],
+        });
+
+        let response2 = server.finalize_block(request2).await.unwrap();
+        let result2 = response2.into_inner();
+
+        // Without state changes, app hash might change due to version increment
+        // This depends on JMT implementation details
+        assert!(!result2.app_hash.is_empty());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(format!("data/{app_name}"));
     }
-}
 
-/// Inner ABCI connection handler
-async fn handle_abci_connection_inner(
-    _server: AbciServer,
-    stream: tokio::net::TcpStream,
-    peer_addr: std::net::SocketAddr,
-) -> Result<()> {
-    info!("New ABCI connection from {}", peer_addr);
+    #[tokio::test]
+    async fn test_commit_and_info_consistency() {
+        let app_name = format!("test-consistency-{}", uuid::Uuid::new_v4());
+        let app = BaseApp::new(app_name.clone()).expect("Failed to create BaseApp");
 
-    // Set TCP keepalive and nodelay for better connection stability
-    stream
-        .set_nodelay(true)
-        .map_err(|e| AbciError::ServerError(format!("Failed to set TCP nodelay: {e}")))?;
+        // Set up initial state
+        app.register_namespace("test", false)
+            .expect("Failed to register namespace");
+        let mut store = app
+            .get_namespace_store("test")
+            .expect("Failed to get store");
+        store
+            .set(b"test_key", b"test_value")
+            .expect("Failed to set value");
 
-    // TODO: Implement actual ABCI wire protocol handling
-    // This would involve:
-    // 1. Reading length-prefixed messages
-    // 2. Decoding ABCI requests
-    // 3. Routing to appropriate methods
-    // 4. Encoding and sending responses
+        let server = AbciServer::new(app, "test-chain".to_string());
 
-    // For now, we're using gRPC via tonic, so this is a placeholder
-    // In a real implementation, we would:
-    // - Read message length (4 bytes, big endian)
-    // - Read message bytes
-    // - Decode protobuf message
-    // - Route to appropriate handler
-    // - Encode response
-    // - Write response length and bytes
+        // Finalize a block to trigger state changes
+        let finalize_request = Request::new(FinalizeBlockRequest {
+            txs: vec![],
+            decided_last_commit: None,
+            misbehavior: vec![],
+            hash: vec![7, 8, 9],
+            height: 1,
+            time: Some(prost_types::Timestamp {
+                seconds: 1234567890,
+                nanos: 0,
+            }),
+            next_validators_hash: vec![],
+            proposer_address: vec![],
+        });
 
-    Ok(())
-}
+        let finalize_response = server.finalize_block(finalize_request).await.unwrap();
+        let finalize_result = finalize_response.into_inner();
+        let finalize_hash = finalize_result.app_hash;
 
-/// Handle ABCI connection - wrapper with retry logic
-async fn handle_abci_connection(
-    server: AbciServer,
-    stream: tokio::net::TcpStream,
-    peer_addr: std::net::SocketAddr,
-) -> Result<()> {
-    let retry_config = RetryConfig::default();
-    handle_abci_connection_with_retry(server, stream, peer_addr, retry_config).await
+        // Commit the block
+        let commit_request = Request::new(CommitRequest {});
+        let commit_response = server.commit(commit_request).await.unwrap();
+        let _commit_result = commit_response.into_inner();
+
+        // Get info and verify consistency
+        let info_request = Request::new(InfoRequest {});
+        let info_response = server.info(info_request).await.unwrap();
+        let info_result = info_response.into_inner();
+
+        // The app hash from Info should match the one from FinalizeBlock
+        assert_eq!(info_result.last_block_app_hash, finalize_hash);
+        assert_eq!(info_result.last_block_height, 1);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(format!("data/{app_name}"));
+    }
+
+    #[tokio::test]
+    async fn test_prepare_process_proposal() {
+        let app = BaseApp::new("test-proposal".to_string()).expect("Failed to create BaseApp");
+        let server = AbciServer::new(app, "test-chain".to_string());
+
+        // Test PrepareProposal
+        let prepare_request = Request::new(PrepareProposalRequest {
+            max_tx_bytes: 1000000,
+            txs: vec![vec![1, 2, 3], vec![4, 5, 6]],
+            local_last_commit: None,
+            misbehavior: vec![],
+            height: 1,
+            time: Some(prost_types::Timestamp {
+                seconds: 1234567890,
+                nanos: 0,
+            }),
+            next_validators_hash: vec![],
+            proposer_address: vec![],
+        });
+
+        let prepare_response = server.prepare_proposal(prepare_request).await.unwrap();
+        let prepare_result = prepare_response.into_inner();
+
+        // Should return the same transactions (no filtering implemented yet)
+        assert_eq!(prepare_result.txs.len(), 2);
+
+        // Test ProcessProposal with the prepared transactions
+        let process_request = Request::new(ProcessProposalRequest {
+            txs: prepare_result.txs,
+            proposed_last_commit: None,
+            misbehavior: vec![],
+            hash: vec![7, 8, 9],
+            height: 1,
+            time: Some(prost_types::Timestamp {
+                seconds: 1234567890,
+                nanos: 0,
+            }),
+            next_validators_hash: vec![],
+            proposer_address: vec![],
+        });
+
+        let process_response = server.process_proposal(process_request).await.unwrap();
+        let process_result = process_response.into_inner();
+
+        // Should accept the proposal
+        assert_eq!(
+            process_result.status,
+            ProcessProposalStatus::AcceptProposal as i32
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all("data/test-proposal");
+    }
+
+    #[tokio::test]
+    async fn test_vote_extensions() {
+        let app = BaseApp::new("test-vote-ext".to_string()).expect("Failed to create BaseApp");
+        let server = AbciServer::new(app, "test-chain".to_string());
+
+        // Test ExtendVote
+        let extend_request = Request::new(ExtendVoteRequest {
+            hash: vec![1, 2, 3],
+            height: 1,
+            time: Some(prost_types::Timestamp {
+                seconds: 1234567890,
+                nanos: 0,
+            }),
+            txs: vec![],
+            proposed_last_commit: None,
+            misbehavior: vec![],
+            next_validators_hash: vec![],
+            proposer_address: vec![],
+        });
+
+        let extend_response = server.extend_vote(extend_request).await.unwrap();
+        let extend_result = extend_response.into_inner();
+
+        // Should return empty vote extension (not implemented)
+        assert!(extend_result.vote_extension.is_empty());
+
+        // Test VerifyVoteExtension
+        let verify_request = Request::new(VerifyVoteExtensionRequest {
+            hash: vec![1, 2, 3],
+            validator_address: vec![0; 20],
+            height: 1,
+            vote_extension: vec![],
+        });
+
+        let verify_response = server.verify_vote_extension(verify_request).await.unwrap();
+        let verify_result = verify_response.into_inner();
+
+        // Should accept empty vote extension
+        assert_eq!(
+            verify_result.status,
+            VerifyVoteExtensionStatus::AcceptVote as i32
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all("data/test-vote-ext");
+    }
 }

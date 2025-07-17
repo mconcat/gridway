@@ -37,3 +37,4 @@ log = "0.4"
 [dev-dependencies]
 wat = "1.0"
 tempfile = "3.0"
+uuid = { version = "1.5", features = ["v4"] }

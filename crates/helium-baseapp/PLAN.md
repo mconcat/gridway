@@ -204,16 +204,12 @@ The VFS establishes a Unix-inspired hierarchy for organizing blockchain componen
 │   ├── begin-blocker     # Block initialization  
 │   └── end-blocker       # Block finalization
 ├── bin/            # Application modules
-│   ├── bank             # Token transfers
-│   ├── staking          # Validator staking
-│   ├── governance       # Proposal handling
-│   └── custom-module    # Chain-specific modules
+│   └── {modules}        # Chain-specific modules loaded dynamically
 ├── lib/            # Shared libraries and contracts
 │   ├── token-v1         # Reusable token implementation
 │   └── multisig-v2      # Multisig wallet library
 └── home/           # Module state storage
-    ├── bank/            # Bank module state
-    └── staking/         # Staking module state
+    └── {modules}/       # Each module gets its own state directory
 ```
 
 This hierarchy serves multiple purposes:
@@ -454,7 +450,7 @@ interface end-blocker {
 }
 ```
 
-These components handle critical tasks like validator set updates, reward distribution, and governance proposals. By componentizing these operations, chains can compose complex block processing logic from simpler, auditable pieces. A DeFi chain might include an end blocker for liquidations, while a gaming chain might process match results in its begin blocker.
+These components handle critical tasks that vary by blockchain design. By componentizing these operations, chains can compose complex block processing logic from simpler, auditable pieces. Different chains will implement different logic based on their specific requirements.
 
 ### The Three Worlds of Module Components
 
@@ -475,7 +471,7 @@ interface sdk-module {
 }
 ```
 
-These modules handle discrete business logic—token transfers, governance proposals, staking operations. They operate within well-defined boundaries, accessing only their designated state namespace and interacting with other modules through structured messages. This tier serves as the workhorse of most blockchain applications.
+These modules handle discrete business logic specific to each blockchain application. They operate within well-defined boundaries, accessing only their designated state namespace and interacting with other modules through structured messages. This tier serves as the workhorse of most blockchain applications, with no assumptions about which modules must exist.
 
 #### Chain-in-Chain Modules
 
@@ -701,7 +697,7 @@ Message routing now follows a path-based resolution strategy:
 impl<T: ComponentContext> BaseApp<T> {
     pub fn resolve_message_handler(&self, message: &Message) -> Result<String, RouterError> {
         // Messages specify their target module path
-        // e.g., {"to": "/bin/bank", "action": "send", ...}
+        // e.g., {"to": "/bin/transfer", "action": "send", ...}
         let module_path = message.to.as_ref()
             .ok_or(RouterError::NoTargetSpecified)?;
         
