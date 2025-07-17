@@ -45,18 +45,22 @@ This document provides an accurate assessment of the implementation status of fe
 
 **Evidence**: The `capabilities.rs` implementation uses in-memory storage and doesn't follow the file descriptor-based capability model described in PLAN.md.
 
-### 4. JMT Storage ❌ **Not Connected to BaseApp**
+### 4. JMT Storage ⚠️ **Partially Connected to BaseApp**
 
 **Claimed**: "High-performance Jellyfish Merkle Tree replacing IAVL"
 
 **Actual Status**:
 - ✅ JMT implementation exists in helium-store
-- ❌ BaseApp uses MemStore instead of JMT
-- ❌ No GlobalAppStore integration in BaseApp
-- ❌ Commit() returns placeholder hash without merkle computation
-- ❌ State is not persistent across restarts
+- ✅ RealJMTStore implemented using Penumbra's ICS23-compatible fork
+- ✅ BaseApp now uses JMT through GlobalAppStore
+- ✅ GlobalAppStore integration in BaseApp completed
+- ✅ Commit() computes actual merkle root hash
+- ✅ State persists across restarts (app hash and height)
+- ⚠️ VFS still mounts individual stores rather than unified views
+- ❌ Prefix iterator not implemented (returns empty)
+- ❌ Some error handling silently returns default values
 
-**Evidence**: BaseApp creates `MemStore::new()` instead of using JMT, and the VFS mounts individual MemStores rather than views into a unified GlobalAppStore.
+**Evidence**: BaseApp now creates `RealJMTStore` for GlobalAppStore in `baseapp/src/lib.rs:276-282`, and commit() properly computes merkle roots in lines 1224-1276.
 
 ### 5. API Compatibility ✅ **Maintained**
 
@@ -83,29 +87,33 @@ While component infrastructure exists, core functions like ante handlers still u
 
 ## Accurate Technology Readiness Level
 
-Based on this assessment, the project is at **TRL 3-4** (Proof of concept / Component validation), not TRL 6 as claimed. While individual components exist, they are not integrated into a persistent, working blockchain system:
+Based on this assessment, the project is at **TRL 4** (Component validation), not TRL 6 as claimed. While individual components exist and some integration has been achieved, critical pieces remain unconnected:
 
-- No state persistence (everything is in-memory)
-- Core architectural vision (JMT-backed unified store with components in merkle tree) is not implemented
-- Capability model diverges from the file descriptor-based design
-- The system cannot survive a restart
+- ✅ State persistence now works (JMT integration completed)
+- ✅ App hash computation is functional
+- ⚠️ JMT-backed unified store partially implemented (GlobalAppStore works but VFS integration missing)
+- ❌ Components still not in merkle tree
+- ❌ Capability model still diverges from file descriptor-based design
+- ❌ VFS-WASI integration missing
 
 ## Recommendations
 
-1. **Priority 1**: Connect BaseApp to GlobalAppStore with JMT backend for state persistence
-2. **Priority 2**: Implement VFS-WASI integration to enable file-based state access
-3. **Priority 3**: Redesign capability system to use file descriptors as capability handles
-4. **Priority 4**: Implement dynamic component loading from merkle storage paths
-5. **Priority 5**: Update documentation to reflect actual implementation status
+1. **Priority 1**: ~~Connect BaseApp to GlobalAppStore with JMT backend for state persistence~~ ✅ COMPLETED
+2. **Priority 2**: Fix critical JMT issues (app hash timing, prefix iterator, error handling)
+3. **Priority 3**: Implement VFS-WASI integration to enable file-based state access
+4. **Priority 4**: Redesign capability system to use file descriptors as capability handles
+5. **Priority 5**: Implement dynamic component loading from merkle storage paths
+6. **Priority 6**: Update documentation to reflect actual implementation status
 
 ## Summary
 
-The project has built several isolated components (VFS, capabilities, JMT, WASI execution) but they are not integrated into a coherent system:
+The project has made progress in integrating some components, but key architectural elements remain disconnected:
 
-1. **No State Persistence**: The entire system uses in-memory stores and cannot persist state
-2. **JMT Not Connected**: The JMT implementation exists but BaseApp doesn't use it
-3. **Wrong Capability Model**: Implemented traditional capabilities instead of file descriptor-based ocap
-4. **Components Not in Merkle Tree**: WASI components are loaded from filesystem, not merkle storage
-5. **VFS Not Connected to WASI**: Modules cannot actually use file operations for state access
+1. **State Persistence**: ✅ NOW WORKING - JMT integration provides persistent state with proper app hash computation
+2. **JMT Connected**: ✅ COMPLETED - BaseApp uses GlobalAppStore backed by RealJMTStore
+3. **Wrong Capability Model**: ❌ Still uses traditional capabilities instead of file descriptor-based ocap
+4. **Components Not in Merkle Tree**: ❌ WASI components are loaded from filesystem, not merkle storage
+5. **VFS Not Connected to WASI**: ❌ Modules cannot use file operations for state access
+6. **Critical JMT Issues**: ⚠️ App hash timing, missing prefix iterator, silent error handling
 
-The revolutionary vision of a blockchain where core components live in the merkle tree and can be upgraded through governance remains unrealized. The current implementation is essentially a WASI execution proof-of-concept without the persistent, capability-secured, VFS-based state management that defines the Helium architecture.
+The revolutionary vision of a blockchain where core components live in the merkle tree and can be upgraded through governance remains partially unrealized. However, with JMT integration complete, the project now has a foundation for persistent state management. The next critical steps are fixing JMT issues and connecting the VFS layer to WASI to enable the file-based state access model described in the architecture.
