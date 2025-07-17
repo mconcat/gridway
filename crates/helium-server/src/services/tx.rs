@@ -229,7 +229,7 @@ impl TxService {
             log: "simulation successful".to_string(),
             events: vec![
                 Event {
-                    type_: "message".to_string(),
+                    r#type: "message".to_string(),
                     attributes: vec![
                         EventAttribute {
                             key: "action".to_string(),
@@ -282,7 +282,7 @@ impl TxService {
                 msg_index: 0, // Would be actual message index
                 log: String::new(),
                 events: vec![StringEvent {
-                    type_: event.event_type.clone(),
+                    r#type: event.r#type.clone(),
                     attributes: event.attributes.iter().map(|attr| StringAttribute {
                         key: attr.key.clone(),
                         value: attr.value.clone(),
@@ -290,12 +290,12 @@ impl TxService {
                 }],
             }).collect(),
             info: String::new(),
-            gas_wanted: response.gas_wanted as i64,
-            gas_used: response.gas_used as i64,
+            gas_wanted: response.gas_wanted,
+            gas_used: response.gas_used,
             tx: None, // Would contain decoded transaction
             timestamp: chrono::Utc::now().to_rfc3339(),
             events: response.events.iter().map(|event| Event {
-                type_: event.event_type.clone(),
+                r#type: event.r#type.clone(),
                 attributes: event.attributes.iter().map(|attr| EventAttribute {
                     key: attr.key.clone(),
                     value: attr.value.clone(),
@@ -468,7 +468,7 @@ impl tx::Service for TxService {
                 let matches_events = req.events.is_empty() || 
                     req.events.iter().any(|event_filter| {
                         stored_tx.tx_response.events.iter().any(|event| {
-                            event_filter.contains(&event.type_)
+                            event_filter.contains(&event.r#type)
                         })
                     });
 

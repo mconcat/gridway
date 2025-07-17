@@ -11,6 +11,7 @@ description = "Base application framework for the helium blockchain"
 helium-store = { path = "../helium-store" }
 helium-types = { path = "../helium-types" }
 helium-crypto = { path = "../helium-crypto" }
+helium-proto = { path = "../helium-proto" }
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 cometbft = "0.1.0-alpha.2"

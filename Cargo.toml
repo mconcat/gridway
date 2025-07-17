@@ -7,6 +7,7 @@ members = [
     "crates/helium-errors",
     "crates/helium-log",
     "crates/helium-store",
+    "crates/helium-proto",
     "crates/helium-baseapp",
     "crates/helium-server",
     "crates/helium-client",
@@ -33,6 +34,7 @@ helium-keyring = { path = "crates/helium-keyring" }
 helium-errors = { path = "crates/helium-errors" }
 helium-log = { path = "crates/helium-log" }
 helium-store = { path = "crates/helium-store" }
+helium-proto = { path = "crates/helium-proto" }
 helium-baseapp = { path = "crates/helium-baseapp" }
 helium-server = { path = "crates/helium-server" }
 helium-client = { path = "crates/helium-client" }

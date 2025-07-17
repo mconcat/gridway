@@ -12,7 +12,7 @@ use tonic::{transport::Server, Request, Response, Status};
 // use tokio::io::{AsyncReadExt, AsyncWriteExt};
 // use prost_types::Any;
 
-use helium_baseapp::{BaseApp, Event};
+use helium_baseapp::BaseApp;
 
 use crate::config::AbciConfig;
 use thiserror::Error;
@@ -74,12 +74,8 @@ impl AbciError {
 
 pub type Result<T> = std::result::Result<T, AbciError>;
 
-/// ABCI++ Protocol Definitions
-pub mod abci {
-    tonic::include_proto!("cometbft.abci.v1");
-}
-
-use abci::{
+// Use protobuf types from helium-proto
+use helium_proto::cometbft::abci::v1::{
     abci_service_server::{AbciService, AbciServiceServer},
     *,
 };
@@ -281,7 +277,7 @@ impl AbciService for AbciServer {
     async fn query(
         &self,
         request: Request<QueryRequest>,
-    ) -> std::result::Result<Response<abci::QueryResponse>, Status> {
+    ) -> std::result::Result<Response<QueryResponse>, Status> {
         let req = request.into_inner();
         debug!("ABCI Query: path={}, height={}", req.path, req.height);
 
@@ -299,7 +295,7 @@ impl AbciService for AbciServer {
             match app.query(req.path.clone(), &req.data, req.height as u64, req.prove) {
                 Ok(result) => result,
                 Err(e) => {
-                    return Ok(Response::new(abci::QueryResponse {
+                    return Ok(Response::new(QueryResponse {
                         code: 1,
                         log: e.to_string(),
                         info: String::new(),
@@ -345,7 +341,7 @@ impl AbciService for AbciServer {
             }
         };
 
-        Ok(Response::new(abci::QueryResponse {
+        Ok(Response::new(QueryResponse {
             code: response.code,
             log: response.log,
             info: String::new(),
@@ -354,7 +350,7 @@ impl AbciService for AbciServer {
             value: response.value,
             proof_ops: response.proof.map(|_p| {
                 // TODO: Convert proof to ProofOps when merkle proofs are implemented
-                abci::ProofOps { ops: vec![] }
+                ProofOps { ops: vec![] }
             }),
             height: response.height as i64,
             codespace: String::new(),
@@ -386,8 +382,8 @@ impl AbciService for AbciServer {
             data: vec![],
             log: result.log,
             info: String::new(),
-            gas_wanted: result.gas_wanted as i64,
-            gas_used: result.gas_used as i64,
+            gas_wanted: result.gas_wanted,
+            gas_used: result.gas_used,
             events: convert_events(result.events),
             codespace: String::new(),
         }))
@@ -642,8 +638,8 @@ impl AbciService for AbciServer {
                 data: vec![],
                 log: result.log,
                 info: String::new(),
-                gas_wanted: result.gas_wanted as i64,
-                gas_used: result.gas_used as i64,
+                gas_wanted: result.gas_wanted,
+                gas_used: result.gas_used,
                 events: convert_events(result.events),
                 codespace: String::new(),
             })
@@ -661,27 +657,9 @@ impl AbciService for AbciServer {
     }
 }
 
-/// Convert internal events to ABCI events
-fn convert_events(events: Vec<Event>) -> Vec<abci::Event> {
+/// Convert internal events to ABCI events - no conversion needed as they're the same type
+fn convert_events(events: Vec<Event>) -> Vec<Event> {
     events
-        .into_iter()
-        .map(|event| {
-            abci::Event {
-                r#type: event.event_type,
-                attributes: event
-                    .attributes
-                    .into_iter()
-                    .map(|attr| {
-                        abci::EventAttribute {
-                            key: attr.key,
-                            value: attr.value,
-                            index: true, // Index all attributes for now
-                        }
-                    })
-                    .collect(),
-            }
-        })
-        .collect()
 }
 
 /// ABCI++ Server Builder

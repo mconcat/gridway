@@ -4,6 +4,7 @@
 //! All transaction validation logic resides in the WASI module itself.
 
 use crate::wasi_host::WasiHost;
+use helium_proto::cometbft::abci::v1::{Event, EventAttribute, ExecTxResult as TxResponse};
 use helium_types::RawTx;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -69,22 +70,7 @@ pub struct WasiAttribute {
     pub value: String,
 }
 
-/// Transaction response for ante handler
-#[derive(Debug, Clone)]
-pub struct TxResponse {
-    /// Response code (0 = success)
-    pub code: u32,
-    /// Log message
-    pub log: String,
-    /// Gas used
-    pub gas_used: u64,
-    /// Gas wanted
-    pub gas_wanted: u64,
-    /// Events emitted
-    pub events: Vec<WasiEvent>,
-}
-
-/// WASI-based ante handler adapter
+/// WASI-based ante handler that loads and executes WASM modules
 pub struct WasiAnteHandler {
     /// WASI host for executing modules
     wasi_host: WasiHost,
@@ -140,15 +126,36 @@ impl WasiAnteHandler {
         // Execute the ante handler module
         let response = self.execute_ante_module("default", &input)?;
 
+        // Convert WASI events to proto events
+        let events = response
+            .events
+            .into_iter()
+            .map(|e| Event {
+                r#type: e.event_type,
+                attributes: e
+                    .attributes
+                    .into_iter()
+                    .map(|a| EventAttribute {
+                        key: a.key,
+                        value: a.value,
+                        index: true,
+                    })
+                    .collect(),
+            })
+            .collect();
+
         // Convert response
         Ok(TxResponse {
             code: if response.success { 0 } else { 1 },
+            data: vec![],
             log: response
                 .error
                 .unwrap_or_else(|| "ante handler validation completed".to_string()),
-            gas_used: response.gas_used,
-            gas_wanted: ctx.gas_limit,
-            events: response.events,
+            info: String::new(),
+            gas_wanted: ctx.gas_limit as i64,
+            gas_used: response.gas_used as i64,
+            events,
+            codespace: String::new(),
         })
     }
 
