@@ -280,6 +280,16 @@ impl KVStore for JMTStore {
     }
 }
 
+impl crate::CommittableStore for JMTStore {
+    fn commit(&mut self) -> crate::Result<Hash> {
+        self.commit()
+    }
+
+    fn root_hash(&self) -> Hash {
+        self.root_hash()
+    }
+}
+
 /// A versioned JMT store that maintains multiple versions
 pub struct VersionedJMTStore {
     /// The underlying JMT store

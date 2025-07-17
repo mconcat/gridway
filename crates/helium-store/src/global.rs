@@ -4,14 +4,14 @@
 //! It provides namespace isolation through key prefixing, allowing different modules
 //! to have isolated storage spaces while using a single underlying JMT store.
 
-use crate::{JMTStore, KVStore, Result, StoreError};
+use crate::{CommittableStore, Hash, KVStore, Result, StoreError};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// Global application store that provides namespace isolation
 pub struct GlobalAppStore {
-    /// The underlying JMT store
-    store: Arc<Mutex<JMTStore>>,
+    /// The underlying CommittableStore (JMTStore, RealJMTStore, etc.)
+    store: Arc<Mutex<Box<dyn CommittableStore + Send + Sync>>>,
     /// Registered namespaces
     namespaces: Arc<Mutex<HashMap<String, StoreConfig>>>,
 }
@@ -26,10 +26,10 @@ pub struct StoreConfig {
 }
 
 impl GlobalAppStore {
-    /// Create a new global app store
-    pub fn new(store: JMTStore) -> Self {
+    /// Create a new global app store with a CommittableStore implementation
+    pub fn new<S: CommittableStore + Send + Sync + 'static>(store: S) -> Self {
         Self {
-            store: Arc::new(Mutex::new(store)),
+            store: Arc::new(Mutex::new(Box::new(store))),
             namespaces: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -110,14 +110,32 @@ impl GlobalAppStore {
     }
 
     /// Get the underlying store for direct access (use with caution)
-    pub fn get_store(&self) -> Arc<Mutex<JMTStore>> {
+    pub fn get_store(&self) -> Arc<Mutex<Box<dyn CommittableStore + Send + Sync>>> {
         self.store.clone()
+    }
+
+    /// Commit pending changes and return the root hash
+    pub fn commit(&self) -> Result<Hash> {
+        let mut store = self
+            .store
+            .lock()
+            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {e}")))?;
+        store.commit()
+    }
+
+    /// Get the current root hash without committing
+    pub fn root_hash(&self) -> Result<Hash> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|e| StoreError::BackendError(format!("Failed to lock store: {e}")))?;
+        Ok(store.root_hash())
     }
 }
 
 /// A namespaced view of the global store
 pub struct NamespacedStore {
-    store: Arc<Mutex<JMTStore>>,
+    store: Arc<Mutex<Box<dyn CommittableStore + Send + Sync>>>,
     config: StoreConfig,
 }
 
@@ -227,7 +245,7 @@ mod tests {
 
     fn create_test_store() -> (GlobalAppStore, TempDir) {
         let temp_dir = TempDir::new().unwrap();
-        let jmt_store = JMTStore::new("test".to_string(), temp_dir.path()).unwrap();
+        let jmt_store = crate::jmt::JMTStore::new("test".to_string(), temp_dir.path()).unwrap();
         let global_store = GlobalAppStore::new(jmt_store);
         (global_store, temp_dir)
     }

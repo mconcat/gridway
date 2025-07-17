@@ -15,13 +15,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{Read, Write};
 
 // In the real implementation, these would come from the WASI component interface
 mod helium {
-    pub mod types {
-        pub use super::super::{Event, EventAttribute};
-    }
+    pub mod types {}
 }
 
 /// The messages that this module can handle
@@ -82,7 +79,7 @@ pub struct EventAttribute {
 pub fn handle_message(msg_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // Deserialize the incoming message
     let msg: CounterMsg =
-        serde_json::from_slice(msg_bytes).map_err(|e| format!("Failed to parse message: {}", e))?;
+        serde_json::from_slice(msg_bytes).map_err(|e| format!("Failed to parse message: {e}"))?;
 
     // Process the message
     match msg {
@@ -104,9 +101,7 @@ fn load_state() -> Result<CounterState, String> {
 
     // Simulated VFS read
     match fs::read_to_string(state_path) {
-        Ok(data) => {
-            serde_json::from_str(&data).map_err(|e| format!("Failed to parse state: {}", e))
-        }
+        Ok(data) => serde_json::from_str(&data).map_err(|e| format!("Failed to parse state: {e}")),
         Err(_) => {
             // If state doesn't exist, return default
             Ok(CounterState::default())
@@ -118,11 +113,11 @@ fn load_state() -> Result<CounterState, String> {
 fn save_state(state: &CounterState) -> Result<(), String> {
     let state_path = "/home/counter/state";
     let state_json =
-        serde_json::to_string(state).map_err(|e| format!("Failed to serialize state: {}", e))?;
+        serde_json::to_string(state).map_err(|e| format!("Failed to serialize state: {e}"))?;
 
     // In a real WASI component, this would use WASI file operations
     // The runtime ensures atomic writes within a transaction
-    fs::write(state_path, state_json).map_err(|e| format!("Failed to write state: {}", e))
+    fs::write(state_path, state_json).map_err(|e| format!("Failed to write state: {e}"))
 }
 
 /// Emit an event that will be included in the block
@@ -130,11 +125,11 @@ fn save_state(state: &CounterState) -> Result<(), String> {
 /// Events are written to a special VFS path that the runtime monitors
 fn emit_event(event: Event) -> Result<(), String> {
     let event_json =
-        serde_json::to_vec(&event).map_err(|e| format!("Failed to serialize event: {}", e))?;
+        serde_json::to_vec(&event).map_err(|e| format!("Failed to serialize event: {e}"))?;
 
     // In the real system, events would be written to `/sys/events/`
     // and collected by the runtime
-    println!("Event emitted: {:?}", event);
+    println!("Event emitted: {event:?}");
     Ok(())
 }
 
@@ -168,7 +163,7 @@ fn handle_increment(amount: u64) -> Result<Vec<u8>, String> {
         message: format!("Counter incremented by {} to {}", amount, state.value),
     };
 
-    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {e}"))
 }
 
 /// Handle decrement message
@@ -201,7 +196,7 @@ fn handle_decrement(amount: u64) -> Result<Vec<u8>, String> {
         message: format!("Counter decremented by {} to {}", amount, state.value),
     };
 
-    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {e}"))
 }
 
 /// Handle reset message
@@ -228,7 +223,7 @@ fn handle_reset() -> Result<Vec<u8>, String> {
         message: "Counter reset to 0".to_string(),
     };
 
-    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {e}"))
 }
 
 /// Handle query message
@@ -240,7 +235,7 @@ fn handle_query() -> Result<Vec<u8>, String> {
         total_operations: state.total_operations,
     };
 
-    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {e}"))
 }
 
 /// Module initialization

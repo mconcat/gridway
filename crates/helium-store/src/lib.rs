@@ -5,6 +5,7 @@
 
 pub mod global;
 pub mod jmt;
+pub mod jmt_real;
 pub mod state;
 pub mod storage;
 
@@ -14,6 +15,7 @@ use thiserror::Error;
 
 pub use global::{GlobalAppStore, NamespacedStore};
 pub use jmt::{Hash, JMTStore, VersionedJMTStore};
+pub use jmt_real::RealJMTStore;
 pub use state::StateManager;
 pub use storage::{init_storage, run_migrations, Storage, StorageConfig, StorageMigration};
 
@@ -72,6 +74,15 @@ pub trait KVStore: Send + Sync {
 
     /// Iterate over keys with a prefix
     fn prefix_iterator(&self, prefix: &[u8]) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + '_>;
+}
+
+/// Trait for stores that support commit operations
+pub trait CommittableStore: KVStore {
+    /// Commit pending changes and return the root hash
+    fn commit(&mut self) -> Result<Hash>;
+
+    /// Get the current root hash without committing
+    fn root_hash(&self) -> Hash;
 }
 
 // Implement KVStore for Box<dyn KVStore>

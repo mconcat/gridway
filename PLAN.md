@@ -38,7 +38,7 @@ This architectural document is focused exclusively on the **core SDK framework**
 
 **Out of Scope:**
 
-- **Standard Application Modules (`x/`):** Implementations of modules like `x/bank` or `x/staking` will be built *using* this framework but are not part of its core design.
+- **Standard Application Modules (`x/`):** The framework makes no assumptions about specific modules. Implementations of modules like `x/bank`, `x/staking`, `x/auth`, or `x/gov` are entirely optional and will be built *using* this framework but are not part of its core design. The framework is designed to be module-agnostic.
 - **Inter-Blockchain Communication (IBC):** While the SDK is designed to be IBC-compatible, the implementation of the `ibc-go` module's Rust equivalent is a separate undertaking.
 - **CometBFT:** We integrate with CometBFT via its ABCI 2.0 interface; a rewrite of the consensus engine itself is out of scope.
 - **WASM Runtime Implementation:** We integrate and build upon the existing `wasmtime` runtime; we are not creating a new WebAssembly runtime.
