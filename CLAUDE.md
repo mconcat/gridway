@@ -225,3 +225,46 @@ helium-baseapp (depends on all above)
 - Check similar code in the project for patterns
 - Prefer the approach used elsewhere in the codebase
 - If introducing a new pattern, apply it consistently across all affected files
+
+## Writing Style and Tone Guidelines
+
+When writing documentation, proposals, or technical explanations, maintain a neutral, professional tone that focuses on technical substance rather than dramatic language.
+
+### Language to Avoid
+
+**Avoid overly dramatic or hyperbolic language**:
+- "revolutionary" 
+- "fundamentally changes"
+- "groundbreaking"
+- "paradigm shift"
+- "transforms everything"
+- "game-changing"
+
+**Instead, use neutral, descriptive language**:
+- "introduces"
+- "enables"
+- "provides"
+- "implements"
+- "allows"
+- "supports"
+
+### Writing Principles
+
+**Keep it chill and neutral**:
+- Focus on technical facts and benefits
+- Avoid marketing-style language
+- Use precise, descriptive terms
+- Let the technical merit speak for itself
+
+**Be concise**:
+- Get to the point quickly
+- Use clear, direct language
+- Remove redundant phrasing
+- However be sure not to oversimplify
+
+
+**Stay technical**:
+- Emphasize implementation details over grand visions
+- Discuss concrete benefits rather than abstract concepts
+- Focus on how things work, not how amazing they are
+- Include all technical details and implicit context
