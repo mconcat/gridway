@@ -19,15 +19,19 @@ This document defines the tick-tock development methodology for the Helium proje
 
 #### Agent Behavior
 - **Aggressive Implementation**: Focus on getting features working quickly
-- **Minimal Documentation**: Only essential comments and docs
+- **Activity Documentation**: Record all work activities, decisions, and workarounds
+- **Security First**: Never compromise on security checks and validation
 - **Fast Iteration**: Prefer working code over perfect code
 - **High Parallelization**: Multiple agents working simultaneously
+- **Autopilot Mode**: Work autonomously with minimal user interaction
 
 #### Rules and Restrictions
 - **STRICTLY PROHIBITED**: Mock implementations, TODOs, or placeholders just to make builds pass
 - **REQUIRED**: All code must be fully functional
 - **REQUIRED**: All builds and tests must pass
 - **REQUIRED**: No broken functionality in production code
+- **REQUIRED**: Security checks and validation are NEVER omitted
+- **REQUIRED**: Document all activities, decisions, and workarounds
 
 #### End Conditions
 - Agent efficiency drops below 50% baseline
@@ -47,10 +51,12 @@ This document defines the tick-tock development methodology for the Helium proje
 - Reduce complexity while preserving functionality
 
 #### Agent Behavior
-- **Rubber-Duck Companion**: Focus on understanding and explaining code
+- **Conversational Mode**: Actively engage with user through back-and-forth dialogue
 - **Architectural Thinking**: Consider system-wide implications
-- **Documentation First**: Prioritize clarity over speed
+- **Documentation First**: Write comprehensive ADRs and distilled documentation
 - **Refactoring Focus**: Improve existing code structure
+- **User-Guided**: Follow user's architectural decisions and preferences
+- **Less Agentic**: Work collaboratively rather than autonomously
 
 #### Rules and Permissions
 - **PROHIBITED**: Adding new features (except those required for architecture)
@@ -68,16 +74,7 @@ This document defines the tick-tock development methodology for the Helium proje
 
 ### Automatic Stage Detection
 
-#### Environment Variables
-```bash
-export HELIUM_DEVELOPMENT_STAGE=tick    # or tock
-```
-
-#### Branch Patterns
-- `tick/current` - Active tick development
-- `tock/current` - Active tock development
-- `tick/archive/YYYY-MM` - Historical tick cycles
-- `tock/archive/YYYY-MM` - Historical tock cycles
+Stage detection is determined ONLY by the stage marker file. Branch names and environment variables are NOT used.
 
 #### Stage Marker File
 Create `STAGE_MARKER.md` in repository root:
@@ -94,6 +91,8 @@ Create `STAGE_MARKER.md` in repository root:
 - Add transaction processing
 - Build REST API endpoints
 ```
+
+**Important**: Only the `STAGE_MARKER.md` file determines the current stage. This allows for standard branch naming conventions (feat/, fix/, etc.) while maintaining stage-specific behavior.
 
 ### Stage Transition Criteria
 
@@ -138,6 +137,8 @@ Create `STAGE_MARKER.md` in repository root:
 - All tests must pass
 - Code coverage maintained
 - No TODOs or placeholders allowed
+- Security checks must pass
+- Clippy disabled to avoid blocking fast merges
 
 ### Tock Stage CI Pipeline
 **File**: `.github/workflows/tock-ci.yml`
@@ -160,9 +161,10 @@ Create `STAGE_MARKER.md` in repository root:
 
 #### Command Priority
 1. Feature implementation speed
-2. Test coverage maintenance
-3. Build stability
-4. Minimal documentation
+2. Security checks and validation
+3. Test coverage maintenance
+4. Build stability
+5. Activity documentation
 
 #### Merge Strategy
 - Fast-forward merges preferred
@@ -179,10 +181,11 @@ Create `STAGE_MARKER.md` in repository root:
 ### Tock Stage Agent Instructions
 
 #### Command Priority
-1. Code understanding and documentation
-2. Architectural refactoring
-3. Interface clarification
-4. System-wide consistency
+1. User interaction and dialogue
+2. Code understanding and documentation
+3. Architectural refactoring
+4. Interface clarification
+5. System-wide consistency
 
 #### Merge Strategy
 - Careful review of architectural changes
@@ -218,12 +221,43 @@ Create `STAGE_MARKER.md` in repository root:
 
 ## Implementation Guidelines
 
+### SUMMARY.md Process
+
+**MANDATORY**: All feature branch work must maintain a `SUMMARY.md` file as a scratchpad for current work.
+
+#### Process Flow
+1. **Start of work**: Create `SUMMARY.md` with branch objectives
+2. **During work**: Continuously update with progress, decisions, and issues
+3. **PR creation**: Create PR as DRAFT while `SUMMARY.md` exists
+4. **CI verification**: Ensure all CI checks pass
+5. **Ready for review**: Delete `SUMMARY.md` and mark PR as ready for review
+
+#### SUMMARY.md Template
+```markdown
+# Branch Work Summary
+
+## Objective
+Brief description of branch goals
+
+## Progress
+- [x] Completed tasks
+- [ ] Pending tasks
+
+## Decisions Made
+- Key decisions with reasoning
+
+## Blockers/Issues
+- Current issues and their status
+
+## Learnings/Notes
+- Important findings and workarounds
+```
+
 ### Initial Setup
 1. Choose starting stage based on current codebase state
-2. Create appropriate branch (`tick/current` or `tock/current`)
-3. Set environment variables and stage markers
-4. Configure CI pipeline for chosen stage
-5. Brief development team on stage-specific guidelines
+2. Create `STAGE_MARKER.md` with current stage
+3. Configure CI pipeline for chosen stage
+4. Brief development team on stage-specific guidelines
 
 ### Stage Transitions
 1. Monitor transition criteria continuously

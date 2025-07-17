@@ -2,12 +2,11 @@ name: Tock Stage CI Pipeline
 
 on:
   push:
-    branches: [ "tock/current" ]
+    branches: [ "*" ]
   pull_request:
-    branches: [ "tock/current" ]
+    branches: [ "*" ]
 
 env:
-  HELIUM_DEVELOPMENT_STAGE: tock
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -20,11 +19,7 @@ jobs:
       - name: Detect development stage
         id: detect
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/tock/current" ]]; then
-            echo "stage=tock" >> $GITHUB_OUTPUT
-          elif [[ -f "STAGE_MARKER.md" ]] && grep -q "tock" STAGE_MARKER.md; then
-            echo "stage=tock" >> $GITHUB_OUTPUT
-          elif [[ "$HELIUM_DEVELOPMENT_STAGE" == "tock" ]]; then
+          if [[ -f "STAGE_MARKER.md" ]] && grep -q "tock" STAGE_MARKER.md; then
             echo "stage=tock" >> $GITHUB_OUTPUT
           else
             echo "stage=unknown" >> $GITHUB_OUTPUT

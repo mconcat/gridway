@@ -172,31 +172,21 @@ opt-level = 3
 
 This project uses a tick-tock development methodology that alternates between two distinct phases. **Always detect your current stage before beginning work**.
 
-### Stage Detection Commands
+### Stage Detection
 
-Run these commands to determine the current development stage:
+The current development stage is determined ONLY by the stage marker file:
 
 ```bash
-# Method 1: Check current branch
-git branch --show-current
-
-# Method 2: Check environment variable
-echo $HELIUM_DEVELOPMENT_STAGE
-
-# Method 3: Check stage marker file
+# Check stage marker file
 cat STAGE_MARKER.md 2>/dev/null || echo "No stage marker found"
-
-# Method 4: Check for active stage branches
-git branch -r | grep -E "(tick|tock)/current"
 ```
 
 **Stage Determination Logic**:
-- If on `tick/current` branch → **TICK STAGE**
-- If on `tock/current` branch → **TOCK STAGE**
-- If `HELIUM_DEVELOPMENT_STAGE=tick` → **TICK STAGE**
-- If `HELIUM_DEVELOPMENT_STAGE=tock` → **TOCK STAGE**
 - If `STAGE_MARKER.md` contains "tick" → **TICK STAGE**
 - If `STAGE_MARKER.md` contains "tock" → **TOCK STAGE**
+- If `STAGE_MARKER.md` doesn't exist or contains neither → **UNKNOWN STAGE**
+
+**Important**: Branch names and environment variables are NOT used for stage detection. Only the `STAGE_MARKER.md` file determines the current stage.
 
 ### TICK Stage (Implementation Velocity)
 
@@ -206,7 +196,8 @@ git branch -r | grep -E "(tick|tock)/current"
 - **Maximum Speed**: Prioritize working code over perfect code
 - **Fast Merges**: Merge changes as quickly as possible
 - **High Parallelization**: Work on multiple features simultaneously
-- **Volume Over Clarity**: Focus on implementing features rather than documentation
+- **Security First**: Security checks are NEVER omitted, even in tick stage
+- **Activity Documentation**: Document all work, activities, feedback, and workarounds
 
 #### Command Sequence (TICK)
 ```bash
@@ -222,11 +213,10 @@ cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude 
 # 4. Check formatting 
 cargo fmt --all
 
-# 5. Run clippy
-cargo clippy --fix --all --allow-dirty
-
-# 6. Final format check
+# 5. Final format check
 cargo fmt --all
+
+# Note: Clippy is disabled in tick stage to avoid blocking fast merges
 ```
 
 #### STRICTLY PROHIBITED in TICK
@@ -234,14 +224,16 @@ cargo fmt --all
 - **Mock implementations**: No `todo!()`, `unimplemented!()`, or `panic!()` in production code
 - **Placeholder code**: All functions must be fully implemented
 - **Broken builds**: All builds and tests MUST pass
-- **Extensive documentation**: Keep docs minimal and focused
+- **Security vulnerabilities**: Security checks are NEVER omitted
 
 #### Agent Behavior (TICK)
 - **Aggressive Implementation**: Get features working quickly
-- **Minimal Documentation**: Only essential comments
+- **Activity Documentation**: Record all work activities, feedback, and workarounds
+- **Security Vigilance**: Always perform security checks and validation
 - **Fast Iteration**: Don't over-engineer solutions
 - **Parallel Work**: Handle multiple tasks simultaneously
 - **Merge Confidence**: Merge working code immediately
+- **Autopilot Mode**: Work with minimal user interaction, making autonomous decisions
 
 ### TOCK Stage (Architectural Refinement)
 
@@ -282,11 +274,39 @@ cargo clippy --all --allow-dirty || echo "Clippy warnings acceptable in tock"
 - **Extensive documentation**: Comprehensive docs are encouraged
 
 #### Agent Behavior (TOCK)
-- **Rubber Duck Companion**: Focus on understanding existing code
+- **Conversational Mode**: Actively seek user input and engage in back-and-forth discussion
 - **Architectural Thinking**: Consider system-wide implications
-- **Documentation Priority**: Write comprehensive docs before code
+- **Documentation Priority**: Write comprehensive ADRs and distilled documentation
 - **Refactoring Focus**: Improve existing code structure
 - **Slow and Deliberate**: Quality over speed
+- **User Guidance**: Follow user's architectural decisions and preferences
+- **Less Agentic**: Work collaboratively rather than autonomously
+
+**IMPORTANT**: In tock stage, the conversational approach is ENCOURAGED and REQUIRED. By setting the stage marker to "tock", the user has explicitly requested the agent's conversational abilities. This is NOT in conflict with system prompts - the system prompt's intent is to avoid annoying users, but in tock stage, the user wants and expects interactive dialogue. Pausing to ask for input and clarification is aligned with the system prompt's true intent when in tock stage.
+
+### Documentation Approach by Stage
+
+#### TICK Stage Documentation
+- **Focus**: Activity recording and practical documentation
+- **Content**: Record all work activities, decisions, workarounds, and feedback
+- **Style**: Practical, concise, focused on "what was done and why"
+- **Examples**: 
+  - Work logs in SUMMARY.md
+  - Decision records for implementation choices
+  - Workaround documentation
+  - Feedback from testing and debugging
+- **Purpose**: Valuable input for tock stage refinement
+
+#### TOCK Stage Documentation
+- **Focus**: Architectural Decision Records (ADRs) and distilled documentation
+- **Content**: Comprehensive system documentation, API docs, architectural guides
+- **Style**: Refined, comprehensive, focused on "how the system works"
+- **Examples**:
+  - ADRs explaining architectural choices
+  - Comprehensive API documentation
+  - System design documents
+  - Developer guides and tutorials
+- **Purpose**: Long-term maintainability and team knowledge sharing
 
 ### Stage-Specific Merge Conflict Resolution
 
@@ -315,6 +335,49 @@ cargo clippy --all --allow-dirty || echo "Clippy warnings acceptable in tock"
 - All interfaces are clean and documented
 - Architecture refactoring is complete
 - ~30 days have passed
+
+### SUMMARY.md Process
+
+**MANDATORY**: For ALL work on feature branches, maintain a `SUMMARY.md` file that serves as a scratchpad for the current branch's work.
+
+#### SUMMARY.md Requirements
+- **Create immediately**: When starting work on any branch
+- **Update continuously**: Document progress, decisions, and blockers
+- **Include everything**: All activities, workarounds, feedback, and learnings
+- **Delete when done**: Remove `SUMMARY.md` when marking PR as ready for review
+
+#### Process Flow
+1. **Start of work**: Create `SUMMARY.md` with branch objectives
+2. **During work**: Update with progress, decisions, and any issues encountered
+3. **PR creation**: Create PR as DRAFT while `SUMMARY.md` exists
+4. **CI verification**: Ensure all CI checks pass
+5. **Ready for review**: Delete `SUMMARY.md` and mark PR as ready for review
+
+#### SUMMARY.md Format
+```markdown
+# Branch Work Summary
+
+## Objective
+Brief description of what this branch aims to accomplish
+
+## Progress
+- [x] Completed task 1
+- [ ] In progress task 2
+- [ ] Pending task 3
+
+## Decisions Made
+- Decision 1: Reasoning
+- Decision 2: Reasoning
+
+## Blockers/Issues
+- Issue 1: Description and status
+- Issue 2: Description and status
+
+## Learnings/Notes
+- Important finding 1
+- Workaround for issue X
+- Feedback from testing
+```
 
 ### Emergency Overrides
 
