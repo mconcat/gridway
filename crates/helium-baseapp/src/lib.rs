@@ -32,8 +32,12 @@ mod test_wasi;
 mod test_wasi_modules;
 
 use helium_store::{KVStore, MemStore};
+use helium_telemetry::metrics::{
+    observe_block_time, observe_transaction_time, BLOCK_HEIGHT, TOTAL_TRANSACTIONS,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use thiserror::Error;
 
 // Import microkernel components
@@ -367,6 +371,9 @@ impl BaseApp {
 
     /// Begin block processing using WASI module
     pub fn begin_block(&mut self, height: u64, time: u64, chain_id: String) -> Result<()> {
+        // Update metrics
+        BLOCK_HEIGHT.set(height as i64);
+
         // Set context for current block
         self.context = Some(Context::new(
             height,
@@ -774,6 +781,8 @@ impl BaseApp {
 
     /// Deliver transaction
     pub fn deliver_tx(&mut self, tx_bytes: &[u8]) -> Result<TxResponse> {
+        let tx_start = Instant::now();
+
         if self.context.is_none() {
             return Err(BaseAppError::InvalidTx("no active context".to_string()));
         }
@@ -865,6 +874,11 @@ impl BaseApp {
             .and_then(|f| f.get("gas_limit"))
             .and_then(|g| g.as_u64())
             .unwrap_or(200000) as i64;
+
+        // Record metrics for successful transactions
+        TOTAL_TRANSACTIONS.inc();
+        let tx_duration = tx_start.elapsed();
+        observe_transaction_time("deliver", tx_duration.as_secs_f64());
 
         Ok(converter::success_tx_response(
             format!("executed {} messages", messages.len()),
@@ -1272,6 +1286,8 @@ impl BaseApp {
         time: u64,
         txs: Vec<Vec<u8>>,
     ) -> Result<Vec<TxResponse>> {
+        let block_start = Instant::now();
+
         // Begin block processing
         self.begin_block(height, time, "helium-1".to_string())?;
 
@@ -1296,6 +1312,10 @@ impl BaseApp {
 
         // End block processing
         self.end_block()?;
+
+        // Record block processing time
+        let block_duration = block_start.elapsed();
+        observe_block_time("normal", block_duration.as_secs_f64());
 
         Ok(responses)
     }
@@ -1902,8 +1922,9 @@ mod tests {
         let response = app
             .check_tx_with_mode(b"dummy_tx", ExecMode::ReCheck)
             .unwrap();
-        // Should fail
+        // Should fail because the ante handler module is not loaded
         assert_eq!(response.code, 1);
+        assert_eq!(response.log, "ante handler validation failed: Ante handler module not found: Module not loaded: default");
     }
 
     #[test]

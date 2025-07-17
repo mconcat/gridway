@@ -10,6 +10,7 @@ pub mod api_router;
 pub mod config;
 pub mod grpc;
 pub mod health;
+pub mod integrated_server;
 pub mod rest;
 pub mod services;
 pub mod swagger;

@@ -1,0 +1,40 @@
+[package]
+name = "helium-telemetry"
+version = "0.1.0"
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+description = "Telemetry and metrics infrastructure for Helium blockchain"
+
+[dependencies]
+# Metrics
+prometheus = "0.14"
+lazy_static = "1.4"
+
+# Async runtime
+tokio = { workspace = true }
+
+# HTTP server
+axum = { version = "0.7", features = ["http2"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Internal dependencies
+helium-types = { workspace = true }
+helium-errors = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+reqwest = { version = "0.12", features = ["json"] }
+rand = "0.8"
