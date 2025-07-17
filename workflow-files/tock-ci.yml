@@ -19,7 +19,7 @@ jobs:
       - name: Detect development stage
         id: detect
         run: |
-          if [[ -f "STAGE_MARKER.md" ]] && grep -q "tock" STAGE_MARKER.md; then
+          if [[ -f "CLAUDE.md" ]] && grep -q "You are currently in TOCK STAGE" CLAUDE.md; then
             echo "stage=tock" >> $GITHUB_OUTPUT
           else
             echo "stage=unknown" >> $GITHUB_OUTPUT

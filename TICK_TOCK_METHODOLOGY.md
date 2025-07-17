@@ -72,31 +72,47 @@ This document defines the tick-tock development methodology for the Helium proje
 
 ## Stage Detection and Management
 
-### Automatic Stage Detection
+### Template-Based Stage Detection
 
-Stage detection is determined ONLY by the stage marker file. Branch names and environment variables are NOT used.
+Stage detection is determined by the content of the `CLAUDE.md` file. This file is generated from templates to show only relevant instructions for the current stage.
 
-#### Stage Marker File
-Create `STAGE_MARKER.md` in repository root:
-```markdown
-# Current Development Stage
+#### Template System Components
 
-**Stage**: tick  
-**Started**: 2024-01-15  
-**Expected End**: 2024-02-15  
-**Cycle**: 2024-Q1-01  
+**Template Files**:
+- `CLAUDE.md.template`: Master template with placeholders
+- `tick-tock-content/common-content.md`: Common instructions for both stages
+- `tick-tock-content/tick-content.md`: Tick-specific content
+- `tick-tock-content/tock-content.md`: Tock-specific content
 
-## Stage Objectives
-- Implement user authentication system
-- Add transaction processing
-- Build REST API endpoints
-```
+**Generation Scripts**:
+- `scripts/generate-claude-md.py`: Python script to generate CLAUDE.md from template
+- `scripts/tick-command.sh`: Command handler for switching to tick stage
+- `scripts/tock-command.sh`: Command handler for switching to tock stage
 
-**Important**: Only the `STAGE_MARKER.md` file determines the current stage. This allows for standard branch naming conventions (feat/, fix/, etc.) while maintaining stage-specific behavior.
+#### Stage Detection Logic
+
+The CI/CD system detects the current stage by reading the `CLAUDE.md` file content:
+
+- **Tick Stage**: `CLAUDE.md` contains "You are currently in TICK STAGE"
+- **Tock Stage**: `CLAUDE.md` contains "You are currently in TOCK STAGE"
 
 ### Stage Transition Management
 
-**Manual Control**: Stage transitions are managed manually by human maintainers. The human maintainer will update the `STAGE_MARKER.md` file to transition between stages based on project needs and development progress.
+**Manual Control**: Stage transitions are managed manually by human maintainers using the template generation system:
+
+```bash
+# Switch to tick stage
+./scripts/tick-command.sh
+
+# Switch to tock stage
+./scripts/tock-command.sh
+```
+
+**Benefits**:
+- Agents only see relevant instructions for current stage
+- Reduced cognitive load with stage-specific guidance
+- Easy to maintain and modify stage-specific content
+- Automatic stage detection from generated content
 
 ## CI/CD Pipeline Configuration
 

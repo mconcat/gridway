@@ -28,23 +28,23 @@ jobs:
       - name: Detect current development stage
         id: detect
         run: |
-          # Check stage marker file only
-          if [[ -f "STAGE_MARKER.md" ]] && grep -q "tick" STAGE_MARKER.md; then
+          # Check CLAUDE.md content for stage detection
+          if [[ -f "CLAUDE.md" ]] && grep -q "You are currently in TICK STAGE" CLAUDE.md; then
             echo "stage=tick" >> $GITHUB_OUTPUT
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
             
-            # Calculate stage duration from STAGE_MARKER.md creation/modification time
-            stage_start=$(stat -c %Y STAGE_MARKER.md)
+            # Calculate stage duration from CLAUDE.md modification time
+            stage_start=$(stat -c %Y CLAUDE.md)
             current_time=$(date +%s)
             duration_days=$(( (current_time - stage_start) / 86400 ))
             echo "duration=$duration_days" >> $GITHUB_OUTPUT
             
-          elif [[ -f "STAGE_MARKER.md" ]] && grep -q "tock" STAGE_MARKER.md; then
+          elif [[ -f "CLAUDE.md" ]] && grep -q "You are currently in TOCK STAGE" CLAUDE.md; then
             echo "stage=tock" >> $GITHUB_OUTPUT
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
             
-            # Calculate stage duration from STAGE_MARKER.md creation/modification time
-            stage_start=$(stat -c %Y STAGE_MARKER.md)
+            # Calculate stage duration from CLAUDE.md modification time
+            stage_start=$(stat -c %Y CLAUDE.md)
             current_time=$(date +%s)
             duration_days=$(( (current_time - stage_start) / 86400 ))
             echo "duration=$duration_days" >> $GITHUB_OUTPUT
