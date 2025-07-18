@@ -226,26 +226,26 @@ helium-baseapp (depends on all above)
 - Prefer the approach used elsewhere in the codebase
 - If introducing a new pattern, apply it consistently across all affected files
 
-## SUMMARY.md Process
+## SCRATCHPAD.md Process
 
-**MANDATORY**: For ALL work on feature branches, maintain a `SUMMARY.md` file that serves as a scratchpad for the current branch's work.
+**MANDATORY**: For ALL work on feature branches, maintain a `SCRATCHPAD.md` file that serves as a scratchpad for the current branch's work.
 
-### SUMMARY.md Requirements
+### SCRATCHPAD.md Requirements
 - **Create immediately**: When starting work on any branch
 - **Update continuously**: Document progress, decisions, and blockers
 - **Include everything**: All activities, workarounds, feedback, and learnings
-- **Delete when done**: Remove `SUMMARY.md` when marking PR as ready for review
+- **Delete when done**: Remove `SCRATCHPAD.md` when marking PR as ready for review
 
 ### Process Flow
-1. **Start of work**: Create `SUMMARY.md` with branch objectives
+1. **Start of work**: Create `SCRATCHPAD.md` with branch objectives
 2. **During work**: Update with progress, decisions, and any issues encountered
-3. **PR creation**: Create PR as DRAFT while `SUMMARY.md` exists
+3. **PR creation**: Create PR as DRAFT while `SCRATCHPAD.md` exists
 4. **CI verification**: Ensure all CI checks pass
-5. **Ready for review**: Delete `SUMMARY.md` and mark PR as ready for review
+5. **Ready for review**: Delete `SCRATCHPAD.md` and mark PR as ready for review
 
-### SUMMARY.md Format
+### SCRATCHPAD.md Format
 
-**IMPORTANT**: The SUMMARY.md file is meant to be a verbose, detailed scratchpad that can span hundreds of lines. Do not worry about formatting or structure - focus on capturing all activities, thoughts, decisions, and progress. This is NOT a refined document - it's a working notebook that will be distilled later.
+**IMPORTANT**: The SCRATCHPAD.md file is meant to be a verbose, detailed scratchpad that can span hundreds of lines. Do not worry about formatting or structure - focus on capturing all activities, thoughts, decisions, and progress. This is NOT a refined document - it's a working notebook that will be distilled later.
 
 ```markdown
 # Branch Work Summary
@@ -281,20 +281,20 @@ Detailed notes on testing approaches, findings, and validation results.
 Any observations, ideas, or technical debt that should be addressed in future work.
 ```
 
-### CHANGELOG.md Process
+### HISTORY.md Process
 
-**MANDATORY**: When deleting the `SUMMARY.md` file and marking a PR as ready for review, you MUST distill the SUMMARY.md content and append it to the `CHANGELOG.md` file.
+**MANDATORY**: When deleting the `SCRATCHPAD.md` file and marking a PR as ready for review, you MUST distill the SCRATCHPAD.md content and append it to the `HISTORY.md` file.
 
-#### CHANGELOG.md Requirements
-- **Distill from SUMMARY.md**: Transform the verbose work log into concise, meaningful entries
+#### HISTORY.md Requirements
+- **Distill from SCRATCHPAD.md**: Transform the verbose work log into concise, meaningful entries
 - **Include developmental progress**: Unlike typical changelogs, include significant development activities and decisions
-- **Rough ratio**: Approximately 1 line of CHANGELOG entry per 50 lines of diff (this is a heuristic, not a strict rule)
+- **Rough ratio**: Approximately 1 line of HISTORY entry per 50 lines of diff (this is a heuristic, not a strict rule)
 - **Chronological order**: Newest entries at the top
 - **Include context**: Provide enough context to understand the changes and their impact
 
-#### CHANGELOG.md Format
+#### HISTORY.md Format
 ```markdown
-# CHANGELOG
+# HISTORY
 
 ## [Unreleased]
 
@@ -321,8 +321,8 @@ Any observations, ideas, or technical debt that should be addressed in future wo
 ```
 
 #### Process Flow
-1. **Before deleting SUMMARY.md**: Review the entire work log and technical decisions
+1. **Before deleting SCRATCHPAD.md**: Review the entire work log and technical decisions
 2. **Distill key changes**: Extract the most important developments, decisions, and fixes
-3. **Append to CHANGELOG.md**: Add new entries under the `[Unreleased]` section
+3. **Append to HISTORY.md**: Add new entries under the `[Unreleased]` section
 4. **Include developmental context**: Unlike typical changelogs, include significant development activities and architectural decisions
-5. **Delete SUMMARY.md**: Only after the changelog has been updated
+5. **Delete SCRATCHPAD.md**: Only after the history has been updated

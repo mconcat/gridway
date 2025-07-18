@@ -215,20 +215,20 @@ The CI/CD system detects the current stage by reading the `CLAUDE.md` file conte
 
 ## Implementation Guidelines
 
-### SUMMARY.md Process
+### SCRATCHPAD.md Process
 
-**MANDATORY**: All feature branch work must maintain a `SUMMARY.md` file as a scratchpad for current work.
+**MANDATORY**: All feature branch work must maintain a `SCRATCHPAD.md` file as a scratchpad for current work.
 
 #### Process Flow
-1. **Start of work**: Create `SUMMARY.md` with branch objectives
+1. **Start of work**: Create `SCRATCHPAD.md` with branch objectives
 2. **During work**: Continuously update with progress, decisions, and issues
-3. **PR creation**: Create PR as DRAFT while `SUMMARY.md` exists
+3. **PR creation**: Create PR as DRAFT while `SCRATCHPAD.md` exists
 4. **CI verification**: Ensure all CI checks pass
-5. **Ready for review**: Delete `SUMMARY.md` and mark PR as ready for review
+5. **Ready for review**: Delete `SCRATCHPAD.md` and mark PR as ready for review
 
-#### SUMMARY.md Template
+#### SCRATCHPAD.md Template
 
-**IMPORTANT**: The SUMMARY.md file is meant to be a verbose, detailed scratchpad that can span hundreds of lines. Do not worry about formatting or structure - focus on capturing all activities, thoughts, decisions, and progress. This is NOT a refined document - it's a working notebook that will be distilled later.
+**IMPORTANT**: The SCRATCHPAD.md file is meant to be a verbose, detailed scratchpad that can span hundreds of lines. Do not worry about formatting or structure - focus on capturing all activities, thoughts, decisions, and progress. This is NOT a refined document - it's a working notebook that will be distilled later.
 
 ```markdown
 # Branch Work Summary
@@ -264,20 +264,20 @@ Detailed notes on testing approaches, findings, and validation results.
 Any observations, ideas, or technical debt that should be addressed in future work.
 ```
 
-### CHANGELOG.md Process
+### HISTORY.md Process
 
-**MANDATORY**: When deleting the `SUMMARY.md` file and marking a PR as ready for review, you MUST distill the SUMMARY.md content and append it to the `CHANGELOG.md` file.
+**MANDATORY**: When deleting the `SCRATCHPAD.md` file and marking a PR as ready for review, you MUST distill the SCRATCHPAD.md content and append it to the `HISTORY.md` file.
 
-#### CHANGELOG.md Requirements
-- **Distill from SUMMARY.md**: Transform the verbose work log into concise, meaningful entries
+#### HISTORY.md Requirements
+- **Distill from SCRATCHPAD.md**: Transform the verbose work log into concise, meaningful entries
 - **Include developmental progress**: Unlike typical changelogs, include significant development activities and decisions
-- **Rough ratio**: Approximately 1 line of CHANGELOG entry per 50 lines of diff (this is a heuristic, not a strict rule)
+- **Rough ratio**: Approximately 1 line of HISTORY entry per 50 lines of diff (this is a heuristic, not a strict rule)
 - **Chronological order**: Newest entries at the top
 - **Include context**: Provide enough context to understand the changes and their impact
 
-#### CHANGELOG.md Format
+#### HISTORY.md Format
 ```markdown
-# CHANGELOG
+# HISTORY
 
 ## [Unreleased]
 
@@ -304,11 +304,11 @@ Any observations, ideas, or technical debt that should be addressed in future wo
 ```
 
 #### Process Flow
-1. **Before deleting SUMMARY.md**: Review the entire work log and technical decisions
+1. **Before deleting SCRATCHPAD.md**: Review the entire work log and technical decisions
 2. **Distill key changes**: Extract the most important developments, decisions, and fixes
-3. **Append to CHANGELOG.md**: Add new entries under the `[Unreleased]` section
+3. **Append to HISTORY.md**: Add new entries under the `[Unreleased]` section
 4. **Include developmental context**: Unlike typical changelogs, include significant development activities and architectural decisions
-5. **Delete SUMMARY.md**: Only after the changelog has been updated
+5. **Delete SCRATCHPAD.md**: Only after the history has been updated
 
 ### Initial Setup
 1. Choose starting stage based on current codebase state

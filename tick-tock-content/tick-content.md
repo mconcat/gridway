@@ -56,7 +56,7 @@ cargo fmt --all
 - **Content**: Record all work activities, decisions, workarounds, and feedback
 - **Style**: Practical, concise, focused on "what was done and why"
 - **Examples**: 
-  - Work logs in SUMMARY.md
+  - Work logs in SCRATCHPAD.md
   - Decision records for implementation choices
   - Workaround documentation
   - Feedback from testing and debugging
