@@ -1,7 +1,7 @@
-//! Client library for interacting with the helium blockchain.
+//! Client library for interacting with the gridway blockchain.
 //!
 //! This crate provides HTTP client implementations for communicating
-//! with helium blockchain nodes via RPC and REST API, as well as
+//! with gridway blockchain nodes via RPC and REST API, as well as
 //! CLI framework for blockchain operations.
 
 pub mod cli;
@@ -201,7 +201,7 @@ impl Config {
     }
 }
 
-/// Helium blockchain client
+/// Gridway blockchain client
 pub struct Client {
     config: Config,
     http_client: HttpClient,

@@ -1,15 +1,15 @@
 [package]
-name = "helium-keyring"
+name = "gridway-keyring"
 version = "0.1.0"
 edition = "2021"
 authors = ["mconcat"]
 license = "AGPL-3.0"
-description = "Key management for helium"
-repository = "https://github.com/mconcat/helium"
+description = "Key management for gridway"
+repository = "https://github.com/mconcat/gridway"
 
 [dependencies]
-helium-crypto = { path = "../helium-crypto" }
-helium-types = { path = "../helium-types" }
+gridway-crypto = { path = "../gridway-crypto" }
+gridway-types = { path = "../gridway-types" }
 bip39 = "2.0"
 async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }

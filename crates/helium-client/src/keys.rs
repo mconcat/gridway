@@ -1,4 +1,4 @@
-//! Key management commands implementation for helium CLI
+//! Key management commands implementation for gridway CLI
 //!
 //! This module provides the implementation for all key management operations
 //! including key creation, listing, import/export, and deletion.
@@ -7,8 +7,8 @@ use crate::cli::{
     AddKeyCmd, DeleteKeyCmd, ExportKeyCmd, ImportKeyCmd, KeysAction, KeysCmd, ListKeysCmd,
     ShowKeyCmd,
 };
-use helium_keyring::{file::FileKeyring, Keyring, KeyringError};
-use helium_log::{debug, info, warn};
+use gridway_keyring::{file::FileKeyring, Keyring, KeyringError};
+use gridway_log::{debug, info, warn};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use thiserror::Error;

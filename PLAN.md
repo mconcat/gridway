@@ -1,8 +1,8 @@
-# Helium: A WASI Microkernel Architecture for Blockchain
+# Gridway: A WASI Microkernel Architecture for Blockchain
 
 ## Project Context and Architectural Vision
 
-This document provides a comprehensive technical assessment of the Helium Rust Cosmos SDK implementation, evaluating its readiness for production and its fidelity to the project's architectural vision. The primary goal of this initiative is to re-architect the Cosmos SDK in Rust as a next-generation **microkernel**. This is not a line-by-line translation of the Go implementation but a fundamental re-evaluation of blockchain architecture, designed to be more performant, more secure, and vastly more flexible.
+This document provides a comprehensive technical assessment of the Gridway Rust Cosmos SDK implementation, evaluating its readiness for production and its fidelity to the project's architectural vision. The primary goal of this initiative is to re-architect the Cosmos SDK in Rust as a next-generation **microkernel**. This is not a line-by-line translation of the Go implementation but a fundamental re-evaluation of blockchain architecture, designed to be more performant, more secure, and vastly more flexible.
 
 The architectural vision is centered on four core innovations:
 

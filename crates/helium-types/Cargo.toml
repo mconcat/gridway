@@ -1,16 +1,16 @@
 [package]
-name = "helium-types"
+name = "gridway-types"
 version = "0.1.0"
 edition = "2021"
-authors = ["helium Contributors"]
+authors = ["gridway Contributors"]
 license = "Apache-2.0"
-description = "Core types for helium"
-repository = "https://github.com/cosmos/helium-rust"
+description = "Core types for gridway"
+repository = "https://github.com/cosmos/gridway-rust"
 
 [dependencies]
-helium-math = { path = "../helium-math" }
-helium-store = { path = "../helium-store" }
-helium-proto = { path = "../helium-proto" }
+gridway-math = { path = "../gridway-math" }
+gridway-store = { path = "../gridway-store" }
+gridway-proto = { path = "../gridway-proto" }
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

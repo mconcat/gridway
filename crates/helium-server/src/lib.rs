@@ -1,7 +1,7 @@
-//! Server components and utilities for the helium blockchain.
+//! Server components and utilities for the gridway blockchain.
 //!
 //! This crate provides HTTP/RPC server implementations and utilities
-//! for helium blockchain applications.
+//! for gridway blockchain applications.
 
 #![recursion_limit = "256"]
 
@@ -159,8 +159,8 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRespon
     Json(StatusResponse {
         node_info: NodeInfo {
             id: "node123".to_string(),
-            moniker: "helium-node".to_string(),
-            network: "helium-testnet".to_string(),
+            moniker: "gridway-node".to_string(),
+            network: "gridway-testnet".to_string(),
             version: state.version.clone(),
         },
         sync_info: SyncInfo {
@@ -208,7 +208,7 @@ async fn rpc_handler(
     }
 }
 
-/// HTTP server for helium applications
+/// HTTP server for gridway applications
 pub struct Server {
     config: Config,
     state: Arc<AppState>,

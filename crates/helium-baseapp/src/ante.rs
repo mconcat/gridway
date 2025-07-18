@@ -4,8 +4,8 @@
 //! All transaction validation logic resides in the WASI module itself.
 
 use crate::wasi_host::WasiHost;
-use helium_proto::cometbft::abci::v1::{Event, EventAttribute, ExecTxResult as TxResponse};
-use helium_types::RawTx;
+use gridway_proto::cometbft::abci::v1::{Event, EventAttribute, ExecTxResult as TxResponse};
+use gridway_types::RawTx;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -200,8 +200,8 @@ impl Default for WasiAnteHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use helium_types::tx::{ModeInfo, ModeInfoSingle};
-    use helium_types::{AuthInfo, Fee, FeeAmount, SignerInfo, TxBody, TxMessage};
+    use gridway_types::tx::{ModeInfo, ModeInfoSingle};
+    use gridway_types::{AuthInfo, Fee, FeeAmount, SignerInfo, TxBody, TxMessage};
 
     fn create_test_context() -> AnteContext {
         AnteContext {

@@ -1,4 +1,4 @@
-//! Core types for helium
+//! Core types for gridway
 //!
 //! This crate provides fundamental data structures and traits used throughout
 //! the SDK, including address types, error handling, and transaction context.

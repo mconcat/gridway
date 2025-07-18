@@ -1,11 +1,11 @@
 [package]
-name = "helium-server"
+name = "gridway-server"
 version = "0.1.0"
 edition = "2021"
 authors = ["mconcat"]
 license = "AGPL-3.0"
-repository = "https://github.com/mconcat/helium"
-description = "Server components and utilities for the helium blockchain"
+repository = "https://github.com/mconcat/gridway"
+description = "Server components and utilities for the gridway blockchain"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
@@ -29,20 +29,20 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.8"
 
 # Local crate dependencies
-helium-store = { path = "../helium-store" }
-helium-types = { path = "../helium-types" }
-helium-baseapp = { path = "../helium-baseapp" }
-helium-math = { path = "../helium-math" }
-helium-log = { path = "../helium-log" }
-helium-telemetry = { path = "../helium-telemetry" }
-helium-proto = { path = "../helium-proto" }
+gridway-store = { path = "../gridway-store" }
+gridway-types = { path = "../gridway-types" }
+gridway-baseapp = { path = "../gridway-baseapp" }
+gridway-math = { path = "../gridway-math" }
+gridway-log = { path = "../gridway-log" }
+gridway-telemetry = { path = "../gridway-telemetry" }
+gridway-proto = { path = "../gridway-proto" }
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
 
 [[bin]]
-name = "helium-server"
-path = "src/bin/helium-server.rs"
+name = "gridway-server"
+path = "src/bin/gridway-server.rs"
 
 [build-dependencies]
 tonic-build = "0.12"

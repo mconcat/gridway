@@ -1,7 +1,7 @@
-//! Base application framework for the helium blockchain.
+//! Base application framework for the gridway blockchain.
 //!
 //! This crate provides the core application interface and ABCI implementation
-//! for helium blockchain applications.
+//! for gridway blockchain applications.
 
 pub mod abi;
 pub mod ante;
@@ -31,8 +31,8 @@ mod test_wasi;
 #[cfg(test)]
 mod test_wasi_modules;
 
-use helium_store::{KVStore, MemStore};
-use helium_telemetry::metrics::{
+use gridway_store::{KVStore, MemStore};
+use gridway_telemetry::metrics:{
     observe_block_time, observe_transaction_time, BLOCK_HEIGHT, TOTAL_TRANSACTIONS,
 };
 use std::collections::HashMap;
@@ -94,7 +94,7 @@ pub enum BaseAppError {
 pub type Result<T> = std::result::Result<T, BaseAppError>;
 
 // Re-export proto types
-pub use helium_proto::cometbft::abci::v1::{
+pub use gridway_proto::cometbft::abci::v1:{
     Event, EventAttribute as Attribute, ExecTxResult as TxResponse,
 };
 
@@ -757,7 +757,7 @@ impl BaseApp {
             .unwrap_or_else(|| AnteContext {
                 block_height: 0,
                 block_time: 0,
-                chain_id: "helium-1".to_string(),
+                chain_id: "gridway-1".to_string(),
                 gas_limit: raw_tx.auth_info.fee.gas_limit,
                 min_gas_price: 1,
             });
@@ -1001,8 +1001,8 @@ impl BaseApp {
     }
 
     /// Convert decoded JSON transaction to RawTx
-    fn convert_to_raw_tx(&self, decoded_tx: &serde_json::Value) -> Result<helium_types::RawTx> {
-        use helium_types::{
+    fn convert_to_raw_tx(&self, decoded_tx: &serde_json::Value) -> Result<gridway_types::RawTx> {
+        use gridway_types:{
             tx::{ModeInfo, ModeInfoSingle},
             AuthInfo, Fee, FeeAmount, SignerInfo, TxBody, TxMessage,
         };
@@ -1104,7 +1104,7 @@ impl BaseApp {
                 denom: coin
                     .get("denom")
                     .and_then(|d| d.as_str())
-                    .unwrap_or("uhelium")
+                    .unwrap_or("ugridway")
                     .to_string(),
                 amount: coin
                     .get("amount")
@@ -1148,7 +1148,7 @@ impl BaseApp {
             })
             .collect();
 
-        Ok(helium_types::RawTx {
+        Ok(gridway_types::RawTx {
             body: tx_body,
             auth_info: tx_auth_info,
             signatures,
@@ -1289,7 +1289,7 @@ impl BaseApp {
         let block_start = Instant::now();
 
         // Begin block processing
-        self.begin_block(height, time, "helium-1".to_string())?;
+        self.begin_block(height, time, "gridway-1".to_string())?;
 
         let mut responses = Vec::new();
 
@@ -1344,7 +1344,7 @@ impl BaseApp {
 
             // Handle governance messages
             match type_url {
-                "/helium.baseapp.v1.MsgStoreCode" => {
+                "/gridway.baseapp.v1.MsgStoreCode" => {
                     let msg: MsgStoreCode =
                         serde_json::from_value(msg_value.clone()).map_err(|e| {
                             BaseAppError::InvalidTx(format!("failed to decode MsgStoreCode: {e}"))
@@ -1376,7 +1376,7 @@ impl BaseApp {
                         }
                     }
                 }
-                "/helium.baseapp.v1.MsgInstallModule" => {
+                "/gridway.baseapp.v1.MsgInstallModule" => {
                     let msg: MsgInstallModule =
                         serde_json::from_value(msg_value.clone()).map_err(|e| {
                             BaseAppError::InvalidTx(format!(
@@ -1417,7 +1417,7 @@ impl BaseApp {
                         }
                     }
                 }
-                "/helium.baseapp.v1.MsgUpgradeModule" => {
+                "/gridway.baseapp.v1.MsgUpgradeModule" => {
                     let msg: MsgUpgradeModule =
                         serde_json::from_value(msg_value.clone()).map_err(|e| {
                             BaseAppError::InvalidTx(format!(
@@ -1838,7 +1838,7 @@ mod tests {
             "body": {
                 "messages": [
                     {
-                        "@type": "/helium.baseapp.v1.MsgStoreCode",
+                        "@type": "/gridway.baseapp.v1.MsgStoreCode",
                         "authority": "cosmos10d07y265gmmuvt4z0w9aw880jnsr700j6zn9kn",
                         "wasm_code": "AGFzbQEAAAABBAABfwBgAX8BCwCgARFgAX8AYAt/AX4BY2AABH8BQQAQQBx+YWRkGxAYEAQQAAA=",
                         "metadata": {

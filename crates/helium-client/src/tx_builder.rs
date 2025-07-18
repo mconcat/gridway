@@ -1,12 +1,12 @@
 //! Transaction builder for constructing and signing transactions
 
 use crate::{Client, ClientError, Result};
-use helium_crypto::verify::create_sign_bytes_direct;
-use helium_crypto::{
+use gridway_crypto::verify::create_sign_bytes_direct;
+use gridway_crypto::{
     create_sign_doc, sign_message, verify_signature, PrivateKey, PublicKey, SignMode,
 };
-use helium_math::Coins;
-use helium_types::{
+use gridway_math::Coins;
+use gridway_types::{
     address::AccAddress,
     tx::{
         AuthInfo, Fee, FeeAmount, ModeInfo, ModeInfoSingle, RawTx, SdkMsg, SignerInfo, TxBody,
@@ -285,7 +285,7 @@ impl TxBuilder {
         let fee_amount = (gas_price_amount * gas_limit as f64).ceil() as u64;
 
         // Create fee coins
-        use helium_math::{Coin, Int};
+        use gridway_math::{Coin, Int};
         let fee_coin = Coin::new(denom, Int::from_u64(fee_amount))
             .map_err(|e| ClientError::InvalidResponse(format!("failed to create fee coin: {e}")))?;
 
@@ -457,7 +457,7 @@ impl TxBuilder {
 
         // Serialize body and auth info to protobuf bytes
         let body_bytes = {
-            use helium_types::tx::TxBodyProto;
+            use gridway_types::tx::TxBodyProto;
             let body_proto = TxBodyProto::from(&raw_tx.body);
             let mut buf = Vec::new();
             prost::Message::encode(&body_proto, &mut buf)
@@ -465,7 +465,7 @@ impl TxBuilder {
             buf
         };
         let auth_info_bytes = {
-            use helium_types::tx::AuthInfoProto;
+            use gridway_types::tx::AuthInfoProto;
             let auth_info_proto = AuthInfoProto::from(&raw_tx.auth_info);
             let mut buf = Vec::new();
             prost::Message::encode(&auth_info_proto, &mut buf).map_err(|e| {
@@ -539,7 +539,7 @@ impl TxBuilder {
 
     /// Encode transaction to protobuf bytes
     fn encode_tx(&self, tx: &RawTx) -> Result<Vec<u8>> {
-        use helium_types::tx::TxDecoder;
+        use gridway_types::tx::TxDecoder;
         let decoder = TxDecoder::new();
         decoder
             .encode_tx(tx)
@@ -586,7 +586,7 @@ impl TxBuilder {
         amount: Coins,
         config: Config,
     ) -> Self {
-        use helium_types::msgs::bank::MsgSend;
+        use gridway_types::msgs::bank::MsgSend;
 
         let msg = MsgSend::new(from_address, to_address, amount);
 
@@ -602,8 +602,8 @@ impl TxBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use helium_math::{Coin, Int};
-    use helium_types::{address::AccAddress, msgs::bank::MsgSend};
+    use gridway_math::{Coin, Int};
+    use gridway_types::{address::AccAddress, msgs::bank::MsgSend};
 
     fn create_test_addresses() -> (AccAddress, AccAddress) {
         let from_pubkey = [1u8; 33];
@@ -836,7 +836,7 @@ mod tests {
         assert!(!tx_bytes.is_empty());
 
         // Verify we can decode the protobuf transaction
-        use helium_types::tx::TxDecoder;
+        use gridway_types::tx::TxDecoder;
         let decoder = TxDecoder::new();
         let decoded_tx = decoder.decode_tx(&tx_bytes).unwrap();
 

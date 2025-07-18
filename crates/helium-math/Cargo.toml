@@ -1,11 +1,11 @@
 [package]
-name = "helium-math"
+name = "gridway-math"
 version = "0.1.0"
 edition = "2021"
 authors = ["mconcat"]
 license = "AGPL-3.0"
-description = "Mathematical types for helium"
-repository = "https://github.com/mconcat/helium"
+description = "Mathematical types for gridway"
+repository = "https://github.com/mconcat/gridway"
 
 [dependencies]
 num-bigint = "0.4"

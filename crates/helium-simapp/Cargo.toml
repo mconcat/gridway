@@ -1,11 +1,11 @@
 [package]
-name = "helium-simapp"
+name = "gridway-simapp"
 version = "0.1.0"
 edition = "2021"
 authors = ["mconcat"]
 license = "AGPL-3.0"
-repository = "https://github.com/mconcat/helium"
-description = "Simulation application framework for the helium blockchain"
+repository = "https://github.com/mconcat/gridway"
+description = "Simulation application framework for the gridway blockchain"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
@@ -14,5 +14,5 @@ clap = { version = "4.0", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 fastrand = "2.0"
-helium-types = { path = "../helium-types" }
+gridway-types = { path = "../gridway-types" }
 tracing = "0.1"

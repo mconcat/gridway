@@ -1,8 +1,8 @@
-//! CLI framework for the helium blockchain client
+//! CLI framework for the gridway blockchain client
 
 use clap::{Args, Parser, Subcommand};
-use helium_log::{debug, info, warn};
-use helium_types::Config;
+use gridway_log::{debug, info, warn};
+use gridway_types::Config;
 use std::path::PathBuf;
 
 /// Implementation block for GlobalOpts to resolve values from Config

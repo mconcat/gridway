@@ -11,32 +11,32 @@ services:
       - CMTHOME=/cometbft
     volumes:
       - ./testnet/node0:/cometbft
-    command: ["node", "--proxy_app=tcp://helium:26658"]
+    command: ["node", "--proxy_app=tcp://gridway:26658"]
     depends_on:
-      helium:
+      gridway:
         condition: service_healthy
     networks:
-      - helium-network
+      - gridway-network
     restart: unless-stopped
 
-  helium:
-    image: ${HELIUM_IMAGE:-helium:test}
+  gridway:
+    image: ${GRIDWAY_IMAGE:-gridway:test}
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: helium-app
+    container_name: gridway-app
     ports:
       - "26658:26658"  # ABCI port
       - "9090:9090"    # gRPC port
       - "1317:1317"    # REST API port (Cosmos SDK standard)
     environment:
       - RUST_LOG=info
-      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
-      - HELIUM_HOME=/helium
+      - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
+      - GRIDWAY_HOME=/gridway
     volumes:
-      - ./testnet/helium:/helium
+      - ./testnet/gridway:/gridway
     networks:
-      - helium-network
+      - gridway-network
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "26658"]
       interval: 5s
@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
 
 networks:
-  helium-network:
+  gridway-network:
     driver: bridge
     ipam:
       config:
@@ -54,4 +54,4 @@ networks:
 
 volumes:
   cometbft-data:
-  helium-data:
+  gridway-data:

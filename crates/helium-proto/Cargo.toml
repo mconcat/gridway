@@ -1,10 +1,10 @@
 [package]
-name = "helium-proto"
+name = "gridway-proto"
 version = "0.1.0"
 edition = "2021"
 authors = ["mconcat"]
-description = "Protocol Buffer definitions for Helium blockchain"
-repository = "https://github.com/mconcat/helium"
+description = "Protocol Buffer definitions for Gridway blockchain"
+repository = "https://github.com/mconcat/gridway"
 license = "AGPL-3.0"
 
 [dependencies]

@@ -2,9 +2,9 @@
 name = "ante-handler"
 version = "0.1.0"
 edition = "2021"
-authors = ["Helium Blockchain <contact@helium.zone>"]
+authors = ["Gridway Blockchain <contact@gridway.zone>"]
 license = "Apache-2.0"
-description = "WASI Ante Handler component for Helium blockchain"
+description = "WASI Ante Handler component for Gridway blockchain"
 
 [dependencies]
 wit-bindgen = { version = "0.36", features = ["default"] }
@@ -23,6 +23,6 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [package.metadata.component]
-package = "helium:framework"
+package = "gridway:framework"
 target = { path = "../../../wit", world = "ante-handler-world" }
 

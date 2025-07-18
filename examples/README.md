@@ -1,6 +1,6 @@
-# Helium Examples
+# Gridway Examples
 
-This directory contains examples demonstrating how to build applications on Helium's WASI microkernel architecture.
+This directory contains examples demonstrating how to build applications on Gridway's WASI microkernel architecture.
 
 ## Counter Module Example
 
@@ -11,7 +11,7 @@ Shows how to write a blockchain module that:
 - Manages state through the Virtual Filesystem (VFS)
 - Handles different message types (increment, decrement, reset, query)
 - Emits events for blockchain explorers and indexers
-- Follows Helium's security model with capability-based access
+- Follows Gridway's security model with capability-based access
 
 **Key concepts demonstrated:**
 - State stored at VFS paths like `/home/counter/state`
@@ -34,7 +34,7 @@ Shows how to build client applications that:
 
 ## Architecture Overview
 
-In Helium's architecture:
+In Gridway's architecture:
 
 1. **Modules are WASI Components**: Compiled to WebAssembly and stored in the blockchain's merkle tree
 2. **Dynamic Loading**: Modules are loaded from paths like `/bin/counter` or `/home/myapp/bin/counter`
@@ -55,12 +55,12 @@ cat counter_module.rs
 cat counter_client.rs
 
 # Run the tests to see example outputs
-cargo test -p helium --examples -- --nocapture
+cargo test -p gridway --examples -- --nocapture
 ```
 
 ## Next Steps
 
-For developers interested in building on Helium:
+For developers interested in building on Gridway:
 
 1. **Study the Architecture**: Read `/PLAN.md` for the complete architectural vision
 2. **Understand Components**: Learn about the three component types (SDK-style, chain-in-chain, shell-like)

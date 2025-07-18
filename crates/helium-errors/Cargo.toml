@@ -1,11 +1,11 @@
 [package]
-name = "helium-errors"
+name = "gridway-errors"
 version = "0.1.0"
 edition = "2021"
 authors = ["mconcat"]
 license = "AGPL-3.0"
-repository = "https://github.com/mconcat/helium"
-description = "Error handling types and utilities for the helium blockchain framework"
+repository = "https://github.com/mconcat/gridway"
+description = "Error handling types and utilities for the gridway blockchain framework"
 
 [dependencies]
 thiserror = "1.0"
