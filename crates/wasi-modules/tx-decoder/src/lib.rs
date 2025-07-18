@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 // cargo-component generates bindings
 mod bindings;
 
-use bindings::exports::helium::framework::tx_decoder::{DecodeRequest, DecodeResponse, Guest};
+use bindings::exports::gridway::framework::tx_decoder::{DecodeRequest, DecodeResponse, Guest};
 
 /// Decoded transaction structure (kept from old implementation)
 #[derive(Debug, Clone, Serialize, Deserialize)]

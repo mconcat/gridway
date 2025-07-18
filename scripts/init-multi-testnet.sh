@@ -1,5 +1,5 @@
 #!/bin/bash
-# Initialize a 4-node CometBFT testnet with Helium application
+# Initialize a 4-node CometBFT testnet with Gridway application
 
 set -e
 
@@ -11,7 +11,7 @@ else
 fi
 
 # Set defaults if not provided
-CHAIN_ID=${CHAIN_ID:-"helium-testnet"}
+CHAIN_ID=${CHAIN_ID:-"gridway-testnet"}
 TESTNET_DIR=${TESTNET_DIR:-"./testnet"}
 NUM_NODES=4
 
@@ -42,7 +42,7 @@ for i in $(seq 0 $((NUM_NODES-1))); do
     echo "Configuring node ${i}..."
     
     # Update proxy_app to point to corresponding Helium instance
-    sed -i.bak "s|proxy_app = \"kvstore\"|proxy_app = \"tcp://helium-${i}:26658\"|g" "${CONFIG_FILE}"
+    sed -i.bak "s|proxy_app = \"kvstore\"|proxy_app = \"tcp://gridway-${i}:26658\"|g" "${CONFIG_FILE}"
     
     # Update RPC and P2P listen addresses
     sed -i.bak "s|laddr = \"tcp://0.0.0.0:26657\"|laddr = \"tcp://0.0.0.0:26657\"|g" "${CONFIG_FILE}"
@@ -65,13 +65,13 @@ for i in $(seq 0 $((NUM_NODES-1))); do
     rm -f "${CONFIG_FILE}.bak"
     
     # Create Helium directories
-    HELIUM_DIR="${TESTNET_DIR}/helium-${i}"
-    mkdir -p "${HELIUM_DIR}/config"
-    mkdir -p "${HELIUM_DIR}/data"
+    GRIDWAY_DIR="${TESTNET_DIR}/gridway-${i}"
+    mkdir -p "${GRIDWAY_DIR}/config"
+    mkdir -p "${GRIDWAY_DIR}/data"
     
     # Create Helium configuration
-    cat > "${HELIUM_DIR}/config/config.toml" << EOF
-# Helium Application Configuration for Node ${i}
+    cat > "${GRIDWAY_DIR}/config/config.toml" << EOF
+# Gridway Application Configuration for Node ${i}
 listen_address = "tcp://0.0.0.0:26658"
 grpc_address = "0.0.0.0:9090"
 max_connections = 10
@@ -82,7 +82,7 @@ chain_id = "${CHAIN_ID}"
 EOF
 
     # Create app genesis state
-    cat > "${HELIUM_DIR}/genesis.json" << EOF
+    cat > "${GRIDWAY_DIR}/genesis.json" << EOF
 {
   "chain_id": "${CHAIN_ID}",
   "app_state": {
@@ -134,9 +134,9 @@ for i in $(seq 0 $((NUM_NODES-1))); do
     echo "  Node ${i}:"
     echo "    CometBFT RPC: http://localhost:$((26657 + i*10))"
     echo "    CometBFT P2P: http://localhost:$((26656 + i*10))"
-    echo "    Helium ABCI:  tcp://localhost:$((26658 + i*10))"
-    echo "    Helium gRPC:  http://localhost:$((9090 + i))"
-    echo "    Helium REST:  http://localhost:$((1317 + i))"
+    echo "    Gridway ABCI:  tcp://localhost:$((26658 + i*10))"
+    echo "    Gridway gRPC:  http://localhost:$((9090 + i))"
+    echo "    Gridway REST:  http://localhost:$((1317 + i))"
 done
 echo ""
 echo "To start the multi-node testnet, run:"

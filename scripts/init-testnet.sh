@@ -1,5 +1,5 @@
 #!/bin/bash
-# Initialize a single-node CometBFT testnet with Helium application
+# Initialize a single-node CometBFT testnet with Gridway application
 
 set -e
 
@@ -11,11 +11,11 @@ else
 fi
 
 # Set defaults if not provided
-CHAIN_ID=${CHAIN_ID:-"helium-testnet"}
+CHAIN_ID=${CHAIN_ID:-"gridway-testnet"}
 TESTNET_DIR=${TESTNET_DIR:-"./testnet"}
 COMETBFT_HOME=${COMETBFT_HOME:-"${TESTNET_DIR}/node0"}
-HELIUM_HOME=${HELIUM_HOME:-"${TESTNET_DIR}/helium"}
-MONIKER=${MONIKER:-"helium-node-0"}
+GRIDWAY_HOME=${GRIDWAY_HOME:-"${TESTNET_DIR}/gridway"}
+MONIKER=${MONIKER:-"gridway-node-0"}
 VALIDATOR_KEY_ALGO=${VALIDATOR_KEY_ALGO:-"secp256k1"}
 
 echo "Initializing testnet..."
@@ -32,8 +32,8 @@ fi
 echo "Creating testnet directories..."
 mkdir -p "${COMETBFT_HOME}/config"
 mkdir -p "${COMETBFT_HOME}/data"
-mkdir -p "${HELIUM_HOME}/config"
-mkdir -p "${HELIUM_HOME}/data"
+mkdir -p "${GRIDWAY_HOME}/config"
+mkdir -p "${GRIDWAY_HOME}/data"
 
 # Set permissions for Docker access
 chmod -R 777 "${TESTNET_DIR}"
@@ -53,7 +53,7 @@ cat > "${COMETBFT_HOME}/config/config.toml" << EOF
 # This is a TOML config file for CometBFT.
 # For more information, see https://docs.cometbft.com/
 
-proxy_app = "tcp://helium:26658"
+proxy_app = "tcp://gridway:26658"
 moniker = "${MONIKER}"
 
 [rpc]
@@ -143,10 +143,10 @@ jq --arg pubkey "$VALIDATOR_PUBKEY" \
     }]' "${COMETBFT_HOME}/config/genesis.json" > "$TEMP_GENESIS"
 mv "$TEMP_GENESIS" "${COMETBFT_HOME}/config/genesis.json"
 
-# Initialize Helium application
+# Initialize Gridway application
 echo "Initializing Helium application..."
-cat > "${HELIUM_HOME}/config/config.toml" << EOF
-# Helium Application Configuration
+cat > "${GRIDWAY_HOME}/config/config.toml" << EOF
+# Gridway Application Configuration
 listen_address = "tcp://0.0.0.0:26658"
 grpc_address = "0.0.0.0:9090"
 max_connections = 10
@@ -158,7 +158,7 @@ EOF
 
 # Create app genesis state
 echo "Creating application genesis state..."
-cat > "${HELIUM_HOME}/genesis.json" << EOF
+cat > "${GRIDWAY_HOME}/genesis.json" << EOF
 {
   "chain_id": "${CHAIN_ID}",
   "app_state": {
@@ -185,5 +185,5 @@ echo "Node information:"
 echo "  Chain ID: ${CHAIN_ID}"
 echo "  Moniker: ${MONIKER}"
 echo "  CometBFT Home: ${COMETBFT_HOME}"
-echo "  Helium Home: ${HELIUM_HOME}"
+echo "  Gridway Home: ${GRIDWAY_HOME}"
 echo "  Validator Pubkey: ${VALIDATOR_PUBKEY}"

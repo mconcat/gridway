@@ -13,7 +13,7 @@ fi
 # Set defaults if not provided
 TESTNET_DIR=${TESTNET_DIR:-"./testnet"}
 COMETBFT_HOME=${COMETBFT_HOME:-"${TESTNET_DIR}/node0"}
-HELIUM_HOME=${HELIUM_HOME:-"${TESTNET_DIR}/helium"}
+GRIDWAY_HOME=${GRIDWAY_HOME:-"${TESTNET_DIR}/gridway"}
 
 echo "Resetting testnet..."
 
@@ -40,9 +40,9 @@ if [ -d "${COMETBFT_HOME}/config" ]; then
 fi
 
 # Backup Helium config
-if [ -d "${HELIUM_HOME}/config" ]; then
-    cp -r "${HELIUM_HOME}/config" "${BACKUP_DIR}/helium_config"
-    echo "Helium configuration backed up to ${BACKUP_DIR}/helium_config"
+if [ -d "${GRIDWAY_HOME}/config" ]; then
+    cp -r "${GRIDWAY_HOME}/config" "${BACKUP_DIR}/gridway_config"
+    echo "Gridway configuration backed up to ${BACKUP_DIR}/gridway_config"
 fi
 
 # Clean data directories
@@ -56,10 +56,10 @@ if [ -d "${COMETBFT_HOME}/data" ]; then
 fi
 
 # Clean Helium data
-if [ -d "${HELIUM_HOME}/data" ]; then
-    rm -rf "${HELIUM_HOME}/data"
-    mkdir -p "${HELIUM_HOME}/data"
-    echo "Helium data cleaned"
+if [ -d "${GRIDWAY_HOME}/data" ]; then
+    rm -rf "${GRIDWAY_HOME}/data"
+    mkdir -p "${GRIDWAY_HOME}/data"
+    echo "Gridway data cleaned"
 fi
 
 # Reset CometBFT state
@@ -70,7 +70,7 @@ fi
 
 # Remove any Docker volumes
 echo "Removing Docker volumes..."
-docker volume rm helium-worktrees_cometbft-data helium-worktrees_helium-data 2>/dev/null || true
+docker volume rm gridway-worktrees_cometbft-data gridway-worktrees_gridway-data 2>/dev/null || true
 
 echo ""
 echo "Testnet reset complete!"
@@ -82,4 +82,4 @@ echo "  ./scripts/init-testnet.sh"
 echo ""
 echo "To restore from backup configuration:"
 echo "  cp -r ${BACKUP_DIR}/cometbft_config/* ${COMETBFT_HOME}/config/"
-echo "  cp -r ${BACKUP_DIR}/helium_config/* ${HELIUM_HOME}/config/"
+echo "  cp -r ${BACKUP_DIR}/gridway_config/* ${GRIDWAY_HOME}/config/"

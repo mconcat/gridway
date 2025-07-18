@@ -7,7 +7,7 @@
 //! - Handling responses
 //!
 //! This represents what a developer would write when building a client
-//! application that interacts with modules on the Helium blockchain.
+//! application that interacts with modules on the Gridway blockchain.
 
 use serde::{Deserialize, Serialize};
 
@@ -161,7 +161,7 @@ mod examples {
 /// // 2. Build a transaction
 /// let tx = client.increment(42);
 ///
-/// // 3. Sign the transaction (using helium-keyring or similar)
+/// // 3. Sign the transaction (using gridway-keyring or similar)
 /// let signed_tx = sign_transaction(tx, private_key);
 ///
 /// // 4. Broadcast to the network
@@ -184,7 +184,7 @@ fn main() {
 
 // Example showing module composition
 //
-// In Helium, modules can call other modules. Here's how a governance
+// In Gridway, modules can call other modules. Here's how a governance
 // module might interact with our counter:
 //
 // ```ignore

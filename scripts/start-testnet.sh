@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start the CometBFT testnet with Helium application
+# Start the CometBFT testnet with Gridway application
 
 set -e
 
@@ -13,7 +13,7 @@ fi
 # Set defaults if not provided
 TESTNET_DIR=${TESTNET_DIR:-"./testnet"}
 COMETBFT_HOME=${COMETBFT_HOME:-"${TESTNET_DIR}/node0"}
-HELIUM_HOME=${HELIUM_HOME:-"${TESTNET_DIR}/helium"}
+GRIDWAY_HOME=${GRIDWAY_HOME:-"${TESTNET_DIR}/gridway"}
 
 # Check if testnet is initialized
 if [ ! -d "${TESTNET_DIR}" ]; then
@@ -30,20 +30,20 @@ fi
 check_services() {
     echo "Checking service health..."
     
-    # Check Helium ABCI
+    # Check Gridway ABCI
     HELIUM_READY=false
     for i in {1..30}; do
         if nc -z localhost 26658 2>/dev/null; then
             HELIUM_READY=true
-            echo "✓ Helium ABCI is ready"
+            echo "✓ Gridway ABCI is ready"
             break
         fi
-        echo "  Waiting for Helium ABCI to be ready... ($i/30)"
+        echo "  Waiting for Gridway ABCI to be ready... ($i/30)"
         sleep 2
     done
     
     if [ "$HELIUM_READY" = false ]; then
-        echo "✗ Helium ABCI failed to start"
+        echo "✗ Gridway ABCI failed to start"
         return 1
     fi
     
@@ -85,11 +85,11 @@ cleanup() {
 # Set up signal handler
 trap cleanup INT TERM
 
-echo "Starting CometBFT testnet with Helium application..."
+echo "Starting CometBFT testnet with Gridway application..."
 echo ""
 echo "Configuration:"
 echo "  CometBFT Home: ${COMETBFT_HOME}"
-echo "  Helium Home: ${HELIUM_HOME}"
+echo "  Gridway Home: ${GRIDWAY_HOME}"
 echo ""
 
 # Copy .env file if it exists
@@ -109,9 +109,9 @@ if check_services; then
     echo "Service endpoints:"
     echo "  CometBFT RPC:  http://localhost:26657"
     echo "  CometBFT P2P:  http://localhost:26656"
-    echo "  Helium ABCI:   tcp://localhost:26658"
-    echo "  Helium gRPC:   http://localhost:9090"
-    echo "  Helium REST:   http://localhost:1317"
+    echo "  Gridway ABCI:   tcp://localhost:26658"
+    echo "  Gridway gRPC:   http://localhost:9090"
+    echo "  Gridway REST:   http://localhost:1317"
     echo ""
     echo "Useful commands:"
     echo "  Check status:     curl http://localhost:26657/status"

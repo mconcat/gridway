@@ -1,6 +1,6 @@
 //! Counter Module Example
 //!
-//! This example demonstrates how to write a simple counter module for Helium.
+//! This example demonstrates how to write a simple counter module for Gridway.
 //! In the actual system, this would be compiled to WASI and stored in the merkle
 //! tree at a path like `/bin/counter` or `/home/myapp/bin/counter`.
 //!
@@ -11,7 +11,7 @@
 //! - Error handling
 //!
 //! This is what developers would write when creating blockchain applications
-//! on Helium's WASI microkernel architecture.
+//! on Gridway's WASI microkernel architecture.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -78,7 +78,7 @@ pub struct EventAttribute {
 /// Entry point for the counter module
 ///
 /// In a real WASI component, this would be exported as the main handler function.
-/// The Helium runtime would call this function with serialized messages.
+/// The Gridway runtime would call this function with serialized messages.
 pub fn handle_message(msg_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // Deserialize the incoming message
     let msg: CounterMsg =
@@ -95,7 +95,7 @@ pub fn handle_message(msg_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Load counter state from VFS
 ///
-/// In Helium, modules access their state through the Virtual Filesystem.
+/// In Gridway, modules access their state through the Virtual Filesystem.
 /// This module's state would be stored at `/home/counter/state`
 fn load_state() -> Result<CounterState, String> {
     // In a real WASI component, this would use WASI file operations
@@ -265,7 +265,7 @@ pub fn init() -> Result<(), String> {
 }
 
 // In a real WASI component, these would be the exported functions
-// that the Helium runtime would call
+// that the Gridway runtime would call
 
 #[cfg(feature = "wasi")]
 mod wasi_exports {
@@ -334,7 +334,7 @@ mod tests {
 // Documentation for developers
 /// # Counter Module Development Guide
 ///
-/// This example shows how to develop a module for Helium's WASI microkernel.
+/// This example shows how to develop a module for Gridway's WASI microkernel.
 ///
 /// ## Key Concepts:
 ///
@@ -374,7 +374,7 @@ fn main() {
     println!("Counter Module Example");
     println!("=====================");
     println!();
-    println!("This example demonstrates how to write a WASI module for Helium.");
+    println!("This example demonstrates how to write a WASI module for Gridway.");
     println!("In a real deployment, this would be compiled to WebAssembly and");
     println!("stored in the blockchain at a path like /bin/counter.");
     println!();

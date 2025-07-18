@@ -10,7 +10,7 @@ use signature::Verifier;
 // Include generated bindings
 mod bindings;
 
-use bindings::exports::helium::framework::ante_handler::{
+use bindings::exports::gridway::framework::ante_handler::{
     AnteResponse, Event, EventAttribute, Guest, TxContext,
 };
 
