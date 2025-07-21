@@ -406,3 +406,46 @@ Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
 ALWAYS prefer editing an existing file to creating a new one.
 NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+
+## Writing Style and Tone Guidelines
+
+When writing documentation, proposals, or technical explanations, maintain a neutral, professional tone that focuses on technical substance rather than dramatic language.
+
+### Language to Avoid
+
+**Avoid overly dramatic or hyperbolic language**:
+- "revolutionary" 
+- "fundamentally changes"
+- "groundbreaking"
+- "paradigm shift"
+- "transforms everything"
+- "game-changing"
+
+**Instead, use neutral, descriptive language**:
+- "introduces"
+- "enables"
+- "provides"
+- "implements"
+- "allows"
+- "supports"
+
+### Writing Principles
+
+**Keep it chill and neutral**:
+- Focus on technical facts and benefits
+- Avoid marketing-style language
+- Use precise, descriptive terms
+- Let the technical merit speak for itself
+
+**Be concise**:
+- Get to the point quickly
+- Use clear, direct language
+- Remove redundant phrasing
+- However be sure not to oversimplify
+
+
+**Stay technical**:
+- Emphasize implementation details over grand visions
+- Discuss concrete benefits rather than abstract concepts
+- Focus on how things work, not how amazing they are
+- Include all technical details and implicit context
