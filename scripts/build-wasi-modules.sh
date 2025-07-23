@@ -28,7 +28,7 @@ mkdir -p "$MODULES_DIR"
 
 # List of modules to build
 MODULES=(
-    "ante-handler:wasi_ante_handler:ante_handler"
+    "ante-handler:ante_handler:ante_handler"
     "begin-blocker:begin_blocker:begin_blocker"
     "end-blocker:end_blocker:end_blocker"
     "tx-decoder:tx_decoder:tx_decoder"
