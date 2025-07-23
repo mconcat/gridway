@@ -370,7 +370,7 @@ fn verify_signature_crypto(
         }
         _ => Err(AnteError {
             error_type: "InvalidSignature".to_string(),
-            message: format!("unsupported public key type: {}", public_key.type_url),
+            message: format!("unsupported public key type:: {}", public_key.type_url),
         }),
     }
 }
@@ -416,12 +416,12 @@ fn verify_secp256k1_signature(
 
     let verifying_key = VerifyingKey::from_sec1_bytes(public_key).map_err(|e| AnteError {
         error_type: "InvalidSignature".to_string(),
-        message: format!("invalid secp256k1 public key: {e}"),
+        message: format!("invalid secp256k1 public key:: {e}"),
     })?;
 
     let signature = Signature::from_bytes(signature.into()).map_err(|e| AnteError {
         error_type: "InvalidSignature".to_string(),
-        message: format!("invalid secp256k1 signature: {e}"),
+        message: format!("invalid secp256k1 signature:: {e}"),
     })?;
 
     verifying_key
@@ -447,7 +447,7 @@ fn verify_ed25519_signature(
     })?)
     .map_err(|e| AnteError {
         error_type: "InvalidSignature".to_string(),
-        message: format!("invalid ed25519 public key: {e}"),
+        message: format!("invalid ed25519 public key:: {e}"),
     })?;
 
     let signature = Signature::from_bytes(signature.try_into().map_err(|_| AnteError {

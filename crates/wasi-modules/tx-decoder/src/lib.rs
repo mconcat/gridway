@@ -130,10 +130,10 @@ fn decode_transaction_impl(req: &DecodeRequest) -> Result<String, String> {
         "raw" => req.tx_bytes.as_bytes().to_vec(),
         "base64" => {
             base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &req.tx_bytes)
-                .map_err(|e| format!("Invalid base64: {e}"))?
+                .map_err(|e| format!("Invalid base64:: {e}"))?
         }
-        "hex" => hex::decode(&req.tx_bytes).map_err(|e| format!("Invalid hex: {e}"))?,
-        _ => return Err(format!("Unsupported encoding: {}", req.encoding)),
+        "hex" => hex::decode(&req.tx_bytes).map_err(|e| format!("Invalid hex:: {e}"))?,
+        _ => return Err(format!("Unsupported encoding:: {}", req.encoding)),
     };
 
     // Calculate transaction hash
@@ -152,7 +152,7 @@ fn decode_transaction_impl(req: &DecodeRequest) -> Result<String, String> {
     };
 
     // Serialize to JSON string
-    serde_json::to_string(&result).map_err(|e| format!("Failed to serialize result: {e}"))
+    serde_json::to_string(&result).map_err(|e| format!("Failed to serialize result:: {e}"))
 }
 
 fn decode_cosmos_tx(bytes: &[u8]) -> Result<DecodedTx, String> {

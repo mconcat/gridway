@@ -39,7 +39,7 @@ if [ -d "${COMETBFT_HOME}/config" ]; then
     echo "CometBFT configuration backed up to ${BACKUP_DIR}/cometbft_config"
 fi
 
-# Backup Helium config
+# Backup Gridway config
 if [ -d "${GRIDWAY_HOME}/config" ]; then
     cp -r "${GRIDWAY_HOME}/config" "${BACKUP_DIR}/gridway_config"
     echo "Gridway configuration backed up to ${BACKUP_DIR}/gridway_config"
@@ -55,7 +55,7 @@ if [ -d "${COMETBFT_HOME}/data" ]; then
     echo "CometBFT data cleaned"
 fi
 
-# Clean Helium data
+# Clean Gridway data
 if [ -d "${GRIDWAY_HOME}/data" ]; then
     rm -rf "${GRIDWAY_HOME}/data"
     mkdir -p "${GRIDWAY_HOME}/data"

@@ -41,7 +41,7 @@ for i in $(seq 0 $((NUM_NODES-1))); do
     
     echo "Configuring node ${i}..."
     
-    # Update proxy_app to point to corresponding Helium instance
+    # Update proxy_app to point to corresponding Gridway instance
     sed -i.bak "s|proxy_app = \"kvstore\"|proxy_app = \"tcp://gridway-${i}:26658\"|g" "${CONFIG_FILE}"
     
     # Update RPC and P2P listen addresses
@@ -64,12 +64,12 @@ for i in $(seq 0 $((NUM_NODES-1))); do
     # Remove backup files
     rm -f "${CONFIG_FILE}.bak"
     
-    # Create Helium directories
+    # Create Gridway directories
     GRIDWAY_DIR="${TESTNET_DIR}/gridway-${i}"
     mkdir -p "${GRIDWAY_DIR}/config"
     mkdir -p "${GRIDWAY_DIR}/data"
     
-    # Create Helium configuration
+    # Create Gridway configuration
     cat > "${GRIDWAY_DIR}/config/config.toml" << EOF
 # Gridway Application Configuration for Node ${i}
 listen_address = "tcp://0.0.0.0:26658"

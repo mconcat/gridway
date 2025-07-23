@@ -48,7 +48,7 @@ impl Guest for Component {
                     success: false,
                     events: vec![],
                     validator_updates: vec![],
-                    error: Some(format!("Failed to open kvstore: {e}")),
+                    error: Some(format!("Failed to open kvstore:: {e}")),
                 }
             }
         };

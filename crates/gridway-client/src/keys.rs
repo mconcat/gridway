@@ -50,12 +50,12 @@ impl KeysHandler {
     /// Create a new keys handler
     pub fn new(home_dir: Option<PathBuf>) -> Self {
         let keyring_dir = if let Some(home) = home_dir {
-            home.join(".helium").join("keyring")
+            home.join(".gridway").join("keyring")
         } else {
             FileKeyring::default_dir().unwrap_or_else(|_| {
                 dirs::home_dir()
                     .unwrap_or_else(|| PathBuf::from("."))
-                    .join(".helium")
+                    .join(".gridway")
                     .join("keyring")
             })
         };
@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn test_keys_handler_creation() {
         let (handler, _temp_dir) = create_test_handler().await;
-        assert!(handler.keyring_dir.to_string_lossy().contains(".helium"));
+        assert!(handler.keyring_dir.to_string_lossy().contains(".gridway"));
     }
 
     #[tokio::test]

@@ -65,7 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mempool_count = rand::random::<u8>() % 50;
         MEMPOOL_SIZE.set(mempool_count as i64);
 
-        println!("Block {height}: {total_txs} txs ({failed_txs} failed), mempool: {mempool_count}");
+        println!(
+            "Block {height}: {total_txs} txs ({failed_txs} failed), mempool:: {mempool_count}"
+        );
 
         height += 1;
         sleep(Duration::from_secs(5)).await;

@@ -142,9 +142,9 @@ mod examples {
         println!("Batch of {} transactions:", transactions.len());
         for (i, tx) in transactions.iter().enumerate() {
             println!("\nTransaction {}:", i + 1);
-            println!("  To: {}", tx.to);
-            println!("  Message: {}", tx.msg);
-            println!("  Nonce: {}", tx.nonce);
+            println!("  To:: {}", tx.to);
+            println!("  Message:: {}", tx.msg);
+            println!("  Nonce:: {}", tx.nonce);
         }
     }
 }
@@ -169,13 +169,13 @@ mod examples {
 ///
 /// // 5. Check the response
 /// match response.code {
-///     0 => println!("Success! Events: {:?}", response.events),
-///     _ => println!("Failed: {}", response.log),
+///     0 => println!("Success! Events:: {:?}", response.events),
+///     _ => println!("Failed:: {}", response.log),
 /// }
 ///
 /// // 6. Query the current state
 /// let query_response = query_module("/bin/counter", client.query()).await?;
-/// println!("Current counter value: {}", query_response["value"]);
+/// println!("Current counter value:: {}", query_response["value"]);
 /// ```
 fn main() {
     // Example entry point - in practice, these would be library functions

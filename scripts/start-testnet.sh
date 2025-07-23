@@ -31,10 +31,10 @@ check_services() {
     echo "Checking service health..."
     
     # Check Gridway ABCI
-    HELIUM_READY=false
+    GRIDWAY_READY=false
     for i in {1..30}; do
         if nc -z localhost 26658 2>/dev/null; then
-            HELIUM_READY=true
+            GRIDWAY_READY=true
             echo "✓ Gridway ABCI is ready"
             break
         fi
@@ -42,7 +42,7 @@ check_services() {
         sleep 2
     done
     
-    if [ "$HELIUM_READY" = false ]; then
+    if [ "$GRIDWAY_READY" = false ]; then
         echo "✗ Gridway ABCI failed to start"
         return 1
     fi

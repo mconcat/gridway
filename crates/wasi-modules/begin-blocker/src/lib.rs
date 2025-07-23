@@ -63,7 +63,7 @@ impl Guest for Component {
                 return BeginBlockResponse {
                     success: false,
                     events: vec![],
-                    error: Some(format!("Failed to open kvstore: {e}")),
+                    error: Some(format!("Failed to open kvstore:: {e}")),
                 }
             }
         };
