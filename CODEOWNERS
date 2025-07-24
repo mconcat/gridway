@@ -1,0 +1,32 @@
+# CODEOWNERS file for Helium project
+# This file defines code ownership for automatic PR review requests
+# and protection of security-sensitive files
+
+# Default owners for everything in the repo
+* @mconcat
+
+# Security-sensitive files and directories
+/.github/workflows/ @mconcat
+/scripts/ @mconcat
+/CODEOWNERS @mconcat
+/CLAUDE.md @mconcat
+/CLAUDE.md.template @mconcat
+
+# CI/CD and automation files
+/workflow-files/ @mconcat
+*.yml @mconcat
+*.yaml @mconcat
+
+# Build and deployment scripts
+/scripts/build-wasi-modules.sh @mconcat
+/scripts/tick-command.sh @mconcat
+/scripts/tock-command.sh @mconcat
+/scripts/generate-claude-md.py @mconcat
+
+# Documentation that affects development process
+/TICK_TOCK_METHODOLOGY.md @mconcat
+/WORKFLOW_SETUP.md @mconcat
+/TEMPLATE_USAGE.md @mconcat
+
+# Tick-tock content templates
+/tick-tock-content/ @mconcat

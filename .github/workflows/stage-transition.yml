@@ -1,0 +1,364 @@
+name: Stage Transition Monitor
+
+on:
+  schedule:
+    # Run every 6 hours to monitor stage transition criteria
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_analysis:
+        description: 'Force run transition analysis'
+        required: false
+        default: 'false'
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  detect-current-stage:
+    runs-on: ubuntu-latest
+    outputs:
+      current_stage: ${{ steps.detect.outputs.stage }}
+      stage_branch: ${{ steps.detect.outputs.branch }}
+      stage_duration: ${{ steps.detect.outputs.duration }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect current development stage
+        id: detect
+        run: |
+          # Check CLAUDE.md content for stage detection
+          if [[ -f "CLAUDE.md" ]] && grep -q "You are currently in TICK STAGE" CLAUDE.md; then
+            echo "stage=tick" >> $GITHUB_OUTPUT
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            
+            # Calculate stage duration from CLAUDE.md modification time
+            # Use portable stat command that works on both Linux and macOS
+            if command -v gstat >/dev/null 2>&1; then
+              stage_start=$(gstat -c %Y CLAUDE.md)
+            else
+              stage_start=$(stat -f %m CLAUDE.md 2>/dev/null || stat -c %Y CLAUDE.md)
+            fi
+            current_time=$(date +%s)
+            duration_days=$(( (current_time - stage_start) / 86400 ))
+            echo "duration=$duration_days" >> $GITHUB_OUTPUT
+            
+          elif [[ -f "CLAUDE.md" ]] && grep -q "You are currently in TOCK STAGE" CLAUDE.md; then
+            echo "stage=tock" >> $GITHUB_OUTPUT
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            
+            # Calculate stage duration from CLAUDE.md modification time
+            # Use portable stat command that works on both Linux and macOS
+            if command -v gstat >/dev/null 2>&1; then
+              stage_start=$(gstat -c %Y CLAUDE.md)
+            else
+              stage_start=$(stat -f %m CLAUDE.md 2>/dev/null || stat -c %Y CLAUDE.md)
+            fi
+            current_time=$(date +%s)
+            duration_days=$(( (current_time - stage_start) / 86400 ))
+            echo "duration=$duration_days" >> $GITHUB_OUTPUT
+            
+          else
+            echo "stage=none" >> $GITHUB_OUTPUT
+            echo "branch=none" >> $GITHUB_OUTPUT
+            echo "duration=0" >> $GITHUB_OUTPUT
+          fi
+
+  analyze-tick-transition:
+    needs: detect-current-stage
+    runs-on: ubuntu-latest
+    if: needs.detect-current-stage.outputs.current_stage == 'tick'
+    outputs:
+      should_transition: ${{ steps.analysis.outputs.should_transition }}
+      transition_reasons: ${{ steps.analysis.outputs.reasons }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect-current-stage.outputs.stage_branch }}
+      - name: Analyze tick to tock transition criteria
+        id: analysis
+        run: |
+          echo "🔍 Analyzing TICK → TOCK transition criteria"
+          
+          # Initialize transition score
+          transition_score=0
+          reasons=""
+          
+          # Check stage duration (target: ~30 days)
+          duration=${{ needs.detect-current-stage.outputs.stage_duration }}
+          echo "Stage duration: $duration days"
+          
+          if [ "$duration" -ge 30 ]; then
+            transition_score=$((transition_score + 2))
+            reasons="$reasons\n- Stage duration reached 30 days"
+          elif [ "$duration" -ge 25 ]; then
+            transition_score=$((transition_score + 1))
+            reasons="$reasons\n- Stage duration approaching 30 days"
+          fi
+          
+          # Check recent build failures (simulate CI failure rate)
+          recent_failures=$(git log --oneline --since="3 days ago" ${{ needs.detect-current-stage.outputs.stage_branch }} | wc -l)
+          if [ "$recent_failures" -gt 10 ]; then
+            transition_score=$((transition_score + 2))
+            reasons="$reasons\n- High commit frequency suggesting potential issues"
+          fi
+          
+          # Check for code complexity indicators
+          large_files=$(find crates/ -name "*.rs" -exec wc -l {} \; | awk '$1 > 500' | wc -l)
+          if [ "$large_files" -gt 10 ]; then
+            transition_score=$((transition_score + 1))
+            reasons="$reasons\n- Code complexity saturation detected ($large_files files >500 lines)"
+          fi
+          
+          # Check for TODO/FIXME accumulation (should be minimal in tick)
+          todo_count=$(grep -r "TODO\|FIXME\|XXX" --include="*.rs" --exclude-dir=target crates/ | wc -l)
+          if [ "$todo_count" -gt 5 ]; then
+            transition_score=$((transition_score + 1))
+            reasons="$reasons\n- TODO accumulation detected ($todo_count items)"
+          fi
+          
+          # Check for mock implementations (prohibited in tick)
+          mock_count=$(grep -r "todo!\|unimplemented!\|panic!" --include="*.rs" --exclude-dir=target crates/ | wc -l)
+          if [ "$mock_count" -gt 0 ]; then
+            transition_score=$((transition_score + 2))
+            reasons="$reasons\n- Mock implementations found ($mock_count items) - PROHIBITED in tick"
+          fi
+          
+          # Decision threshold
+          if [ "$transition_score" -ge 4 ]; then
+            echo "should_transition=true" >> $GITHUB_OUTPUT
+            echo "reasons=$reasons" >> $GITHUB_OUTPUT
+            echo "✅ RECOMMENDATION: Transition to TOCK stage (score: $transition_score)"
+          else
+            echo "should_transition=false" >> $GITHUB_OUTPUT
+            echo "reasons=$reasons" >> $GITHUB_OUTPUT
+            echo "⏳ RECOMMENDATION: Continue TICK stage (score: $transition_score)"
+          fi
+
+  analyze-tock-transition:
+    needs: detect-current-stage
+    runs-on: ubuntu-latest
+    if: needs.detect-current-stage.outputs.current_stage == 'tock'
+    outputs:
+      should_transition: ${{ steps.analysis.outputs.should_transition }}
+      transition_reasons: ${{ steps.analysis.outputs.reasons }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect-current-stage.outputs.stage_branch }}
+      - name: Analyze tock to tick transition criteria
+        id: analysis
+        run: |
+          echo "🔍 Analyzing TOCK → TICK transition criteria"
+          
+          # Initialize transition score
+          transition_score=0
+          reasons=""
+          
+          # Check stage duration (target: ~30 days)
+          duration=${{ needs.detect-current-stage.outputs.stage_duration }}
+          echo "Stage duration: $duration days"
+          
+          if [ "$duration" -ge 30 ]; then
+            transition_score=$((transition_score + 2))
+            reasons="$reasons\n- Stage duration reached 30 days"
+          elif [ "$duration" -ge 25 ]; then
+            transition_score=$((transition_score + 1))
+            reasons="$reasons\n- Stage duration approaching 30 days"
+          fi
+          
+          # Check documentation coverage
+          public_items=$(grep -r "pub " --include="*.rs" crates/ | wc -l)
+          documented_items=$(grep -r "///" --include="*.rs" crates/ | wc -l)
+          
+          if [ "$public_items" -gt 0 ]; then
+            coverage=$((documented_items * 100 / public_items))
+            echo "Documentation coverage: $coverage%"
+            
+            if [ "$coverage" -ge 90 ]; then
+              transition_score=$((transition_score + 2))
+              reasons="$reasons\n- Documentation coverage meets 90% threshold"
+            elif [ "$coverage" -ge 80 ]; then
+              transition_score=$((transition_score + 1))
+              reasons="$reasons\n- Documentation coverage approaching 90%"
+            fi
+          fi
+          
+          # Check for interface completeness
+          trait_count=$(grep -r "pub trait" --include="*.rs" crates/ | wc -l)
+          struct_count=$(grep -r "pub struct" --include="*.rs" crates/ | wc -l)
+          enum_count=$(grep -r "pub enum" --include="*.rs" crates/ | wc -l)
+          
+          total_interfaces=$((trait_count + struct_count + enum_count))
+          documented_interfaces=$(grep -r -A 1 "pub trait\|pub struct\|pub enum" --include="*.rs" crates/ | grep "///" | wc -l)
+          
+          if [ "$total_interfaces" -gt 0 ]; then
+            interface_coverage=$((documented_interfaces * 100 / total_interfaces))
+            echo "Interface documentation coverage: $interface_coverage%"
+            
+            if [ "$interface_coverage" -ge 90 ]; then
+              transition_score=$((transition_score + 1))
+              reasons="$reasons\n- Interface documentation complete"
+            fi
+          fi
+          
+          # Check for architectural documentation
+          if [ -f "PLAN.md" ] && [ -f "TICK_TOCK_METHODOLOGY.md" ]; then
+            transition_score=$((transition_score + 1))
+            reasons="$reasons\n- Architectural documentation present"
+          fi
+          
+          # Check for reduced complexity (compare with baseline)
+          large_files=$(find crates/ -name "*.rs" -exec wc -l {} \; | awk '$1 > 500' | wc -l)
+          if [ "$large_files" -lt 5 ]; then
+            transition_score=$((transition_score + 1))
+            reasons="$reasons\n- Code complexity reduced (only $large_files files >500 lines)"
+          fi
+          
+          # Decision threshold
+          if [ "$transition_score" -ge 4 ]; then
+            echo "should_transition=true" >> $GITHUB_OUTPUT
+            echo "reasons=$reasons" >> $GITHUB_OUTPUT
+            echo "✅ RECOMMENDATION: Transition to TICK stage (score: $transition_score)"
+          else
+            echo "should_transition=false" >> $GITHUB_OUTPUT
+            echo "reasons=$reasons" >> $GITHUB_OUTPUT
+            echo "⏳ RECOMMENDATION: Continue TOCK stage (score: $transition_score)"
+          fi
+
+  create-transition-issue:
+    needs: [detect-current-stage, analyze-tick-transition, analyze-tock-transition]
+    runs-on: ubuntu-latest
+    if: |
+      (needs.analyze-tick-transition.outputs.should_transition == 'true') ||
+      (needs.analyze-tock-transition.outputs.should_transition == 'true')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create transition recommendation issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const currentStage = '${{ needs.detect-current-stage.outputs.current_stage }}';
+            const targetStage = currentStage === 'tick' ? 'tock' : 'tick';
+            const duration = '${{ needs.detect-current-stage.outputs.stage_duration }}';
+            const reasons = '${{ needs.analyze-tick-transition.outputs.transition_reasons || needs.analyze-tock-transition.outputs.transition_reasons }}';
+            
+            const issueBody = `
+            ## Stage Transition Recommendation
+            
+            **Current Stage**: ${currentStage.toUpperCase()}
+            **Recommended Transition**: ${currentStage.toUpperCase()} → ${targetStage.toUpperCase()}
+            **Stage Duration**: ${duration} days
+            
+            ### Transition Criteria Analysis
+            ${reasons}
+            
+            ### Next Steps
+            1. Review the transition recommendation
+            2. Complete any remaining ${currentStage} stage objectives
+            3. Archive current stage branch: \`${currentStage}/archive/${new Date().toISOString().slice(0, 7)}\`
+            4. Create new stage branch: \`${targetStage}/current\`
+            5. Update stage marker file
+            6. Switch CI pipeline configuration
+            
+            ### Manual Transition Commands
+            \`\`\`bash
+            # Archive current stage
+            git checkout ${currentStage}/current
+            git checkout -b ${currentStage}/archive/${new Date().toISOString().slice(0, 7)}
+            git push origin ${currentStage}/archive/${new Date().toISOString().slice(0, 7)}
+            
+            # Create new stage
+            git checkout main
+            git checkout -b ${targetStage}/current
+            git push origin ${targetStage}/current
+            
+            # Update stage marker
+            echo "**Stage**: ${targetStage}" > STAGE_MARKER.md
+            echo "**Started**: ${new Date().toISOString().slice(0, 10)}" >> STAGE_MARKER.md
+            git add STAGE_MARKER.md
+            git commit -m "Transition to ${targetStage} stage"
+            git push origin ${targetStage}/current
+            \`\`\`
+            
+            **Note**: This is an automated recommendation. Please review before acting.
+            `;
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔄 Stage Transition Recommendation: ${currentStage.toUpperCase()} → ${targetStage.toUpperCase()}`,
+              body: issueBody,
+              labels: ['stage-transition', 'automation']
+            });
+
+  generate-stage-report:
+    needs: [detect-current-stage, analyze-tick-transition, analyze-tock-transition]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate stage analysis report
+        run: |
+          echo "# Stage Transition Analysis Report" > stage-report.md
+          echo "" >> stage-report.md
+          echo "**Generated**: $(date)" >> stage-report.md
+          echo "**Current Stage**: ${{ needs.detect-current-stage.outputs.current_stage }}" >> stage-report.md
+          echo "**Stage Duration**: ${{ needs.detect-current-stage.outputs.stage_duration }} days" >> stage-report.md
+          echo "" >> stage-report.md
+          
+          if [ "${{ needs.detect-current-stage.outputs.current_stage }}" == "tick" ]; then
+            echo "## TICK Stage Analysis" >> stage-report.md
+            echo "**Transition Recommended**: ${{ needs.analyze-tick-transition.outputs.should_transition }}" >> stage-report.md
+            echo "**Reasons**: ${{ needs.analyze-tick-transition.outputs.transition_reasons }}" >> stage-report.md
+          elif [ "${{ needs.detect-current-stage.outputs.current_stage }}" == "tock" ]; then
+            echo "## TOCK Stage Analysis" >> stage-report.md
+            echo "**Transition Recommended**: ${{ needs.analyze-tock-transition.outputs.should_transition }}" >> stage-report.md
+            echo "**Reasons**: ${{ needs.analyze-tock-transition.outputs.transition_reasons }}" >> stage-report.md
+          else
+            echo "## No Active Stage Detected" >> stage-report.md
+            echo "Please create either tick/current or tock/current branch to start development cycle." >> stage-report.md
+          fi
+          
+          echo "" >> stage-report.md
+          echo "---" >> stage-report.md
+          echo "Generated by Stage Transition Monitor" >> stage-report.md
+          
+          cat stage-report.md
+      
+      - name: Upload stage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-transition-report
+          path: stage-report.md
+
+  notify-completion:
+    needs: [detect-current-stage, analyze-tick-transition, analyze-tock-transition]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Notify analysis completion
+        run: |
+          echo "🎯 STAGE TRANSITION ANALYSIS COMPLETE"
+          echo ""
+          echo "Current Stage: ${{ needs.detect-current-stage.outputs.current_stage }}"
+          echo "Stage Duration: ${{ needs.detect-current-stage.outputs.stage_duration }} days"
+          echo ""
+          
+          if [ "${{ needs.detect-current-stage.outputs.current_stage }}" == "tick" ]; then
+            echo "TICK → TOCK Transition: ${{ needs.analyze-tick-transition.outputs.should_transition }}"
+          elif [ "${{ needs.detect-current-stage.outputs.current_stage }}" == "tock" ]; then
+            echo "TOCK → TICK Transition: ${{ needs.analyze-tock-transition.outputs.should_transition }}"
+          else
+            echo "No active development stage detected"
+          fi
+          
+          echo ""
+          echo "📊 Analysis runs every 6 hours automatically"
+          echo "🔄 Manual trigger available via workflow dispatch"
+          echo "📋 Detailed report available in artifacts"

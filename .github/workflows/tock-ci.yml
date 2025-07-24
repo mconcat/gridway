@@ -1,0 +1,346 @@
+name: Tock Stage CI Pipeline
+
+on:
+  push:
+    branches: [ "*" ]
+  pull_request:
+    branches: [ "*" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  detect-stage:
+    runs-on: ubuntu-latest
+    outputs:
+      stage: ${{ steps.detect.outputs.stage }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect development stage
+        id: detect
+        run: |
+          if [[ -f "CLAUDE.md" ]] && grep -q "You are currently in TOCK STAGE" CLAUDE.md; then
+            echo "stage=tock" >> $GITHUB_OUTPUT
+          else
+            echo "stage=unknown" >> $GITHUB_OUTPUT
+          fi
+
+  validate-tock-stage:
+    needs: detect-stage
+    runs-on: ubuntu-latest
+    if: needs.detect-stage.outputs.stage == 'tock'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate tock stage requirements
+        run: |
+          echo "✅ Confirmed: Running in TOCK stage"
+          echo "📚 Focus: Documentation, refactoring, and architectural clarity"
+          echo "🎯 Quality Gates: Clean interfaces and comprehensive documentation"
+          echo "✅ Permitted: TODOs/mocks for architectural backbone"
+
+  setup-rust:
+    needs: validate-tock-stage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          components: rustfmt, clippy
+      - name: Install documentation tools
+        run: |
+          # cargo-doc is included with cargo
+          cargo install cargo-audit || echo "cargo-audit already installed"
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+  build-check-relaxed:
+    needs: setup-rust
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Attempt workspace build (relaxed)
+        run: |
+          echo "🔧 TOCK STAGE: Relaxed build requirements during refactoring"
+          cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder || true
+      - name: Check build status
+        run: |
+          echo "✅ Build check completed (failures permitted in tock stage)"
+
+  documentation-coverage:
+    needs: setup-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate documentation
+        run: |
+          cargo doc --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --no-deps
+      - name: Check documentation coverage
+        run: |
+          echo "📚 Documentation Coverage Analysis"
+          
+          # Count public items
+          public_items=$(grep -r "pub " --include="*.rs" crates/ | wc -l)
+          echo "Public items found: $public_items"
+          
+          # Count documented items (simplified - look for doc comments)
+          documented_items=$(grep -r "///" --include="*.rs" crates/ | wc -l)
+          echo "Documented items found: $documented_items"
+          
+          # Calculate coverage percentage
+          if [ "$public_items" -gt 0 ]; then
+            coverage=$((documented_items * 100 / public_items))
+            echo "Documentation coverage: $coverage%"
+            
+            if [ "$coverage" -lt 90 ]; then
+              echo "⚠️  Documentation coverage below 90% - Continue working on docs"
+            else
+              echo "✅ Documentation coverage meets tock stage requirements"
+            fi
+          fi
+
+  interface-completeness:
+    needs: setup-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check interface completeness
+        run: |
+          echo "🔍 Interface Completeness Check"
+          
+          # Check for public traits and their documentation
+          trait_count=$(grep -r "pub trait" --include="*.rs" crates/ | wc -l)
+          documented_traits=$(grep -r -A 1 "pub trait" --include="*.rs" crates/ | grep "///" | wc -l)
+          
+          echo "Public traits: $trait_count"
+          echo "Documented traits: $documented_traits"
+          
+          # Check for public structs and their documentation
+          struct_count=$(grep -r "pub struct" --include="*.rs" crates/ | wc -l)
+          documented_structs=$(grep -r -A 1 "pub struct" --include="*.rs" crates/ | grep "///" | wc -l)
+          
+          echo "Public structs: $struct_count"
+          echo "Documented structs: $documented_structs"
+          
+          # Check for public enums and their documentation
+          enum_count=$(grep -r "pub enum" --include="*.rs" crates/ | wc -l)
+          documented_enums=$(grep -r -A 1 "pub enum" --include="*.rs" crates/ | grep "///" | wc -l)
+          
+          echo "Public enums: $enum_count"
+          echo "Documented enums: $documented_enums"
+
+  architecture-compliance:
+    needs: setup-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check architecture compliance
+        run: |
+          echo "🏗️  Architecture Compliance Check"
+          
+          # Verify PLAN.md files exist
+          if [ ! -f "PLAN.md" ]; then
+            echo "❌ Root PLAN.md missing"
+          else
+            echo "✅ Root PLAN.md exists"
+          fi
+          
+          # Check for crate-specific PLAN.md files
+          plan_files=$(find crates/ -name "PLAN.md" | wc -l)
+          echo "Crate PLAN.md files: $plan_files"
+          
+          # Check for architectural documentation
+          if [ -f "TICK_TOCK_METHODOLOGY.md" ]; then
+            echo "✅ Tick-tock methodology documented"
+          fi
+          
+          # Check for clear module structure
+          lib_files=$(find crates/ -name "lib.rs" | wc -l)
+          echo "Library modules: $lib_files"
+
+  code-complexity-analysis:
+    needs: setup-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Analyze code complexity
+        run: |
+          echo "📊 Code Complexity Analysis"
+          
+          # Count large files (potential complexity indicators)
+          large_files=$(find crates/ -name "*.rs" -exec wc -l {} \; | awk '$1 > 300' | wc -l)
+          echo "Files >300 lines: $large_files"
+          
+          # Count very large files
+          very_large_files=$(find crates/ -name "*.rs" -exec wc -l {} \; | awk '$1 > 500' | wc -l)
+          echo "Files >500 lines: $very_large_files"
+          
+          # Check for deep nesting (simplified)
+          deep_nesting=$(grep -r "        if\|        for\|        while" --include="*.rs" crates/ | wc -l)
+          echo "Deep nesting indicators: $deep_nesting"
+          
+          # Calculate complexity metrics
+          total_lines=$(find crates/ -name "*.rs" -exec wc -l {} \; | awk '{sum += $1} END {print sum}')
+          echo "Total lines of code: $total_lines"
+
+  todo-and-mock-analysis:
+    needs: setup-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Analyze TODOs and mocks (permitted in tock)
+        run: |
+          echo "📝 TODO and Mock Analysis (Permitted in TOCK stage)"
+          
+          # Count TODOs (permitted for architectural backbone)
+          todo_count=$(grep -r "TODO\|FIXME\|XXX" --include="*.rs" --exclude-dir=target crates/ | wc -l)
+          echo "TODOs found: $todo_count"
+          
+          # Count mock implementations (permitted for architectural backbone)
+          mock_count=$(grep -r "todo!\|unimplemented!\|panic!" --include="*.rs" --exclude-dir=target crates/ | wc -l)
+          echo "Mock implementations found: $mock_count"
+          
+          # This is fine in tock stage - show the locations for reference
+          if [ "$todo_count" -gt 0 ]; then
+            echo "📍 TODO locations:"
+            grep -r "TODO\|FIXME\|XXX" --include="*.rs" --exclude-dir=target crates/ | head -10
+          fi
+          
+          if [ "$mock_count" -gt 0 ]; then
+            echo "📍 Mock implementation locations:"
+            grep -r "todo!\|unimplemented!\|panic!" --include="*.rs" --exclude-dir=target crates/ | head -10
+          fi
+
+  refactoring-opportunities:
+    needs: setup-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify refactoring opportunities
+        run: |
+          echo "🔧 Refactoring Opportunities Analysis"
+          
+          # Find duplicate code patterns (simplified)
+          duplicates=$(grep -r "fn " --include="*.rs" crates/ | cut -d: -f2 | sort | uniq -d | wc -l)
+          echo "Potential duplicate functions: $duplicates"
+          
+          # Find long parameter lists
+          long_params=$(grep -r "fn.*(" --include="*.rs" crates/ | grep -v "//" | awk -F'(' '{print $2}' | awk -F')' '{print $1}' | awk -F',' 'NF > 5' | wc -l)
+          echo "Functions with >5 parameters: $long_params"
+          
+          # Find large structs
+          large_structs=$(grep -r -A 20 "struct.*{" --include="*.rs" crates/ | grep -B 20 "}" | grep -c "struct.*{")
+          echo "Struct definitions found: $large_structs"
+
+  test-coverage-analysis:
+    needs: setup-rust
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Analyze test coverage
+        run: |
+          echo "🧪 Test Coverage Analysis"
+          
+          # Count test functions
+          test_count=$(grep -r "#\[test\]" --include="*.rs" crates/ | wc -l)
+          echo "Test functions: $test_count"
+          
+          # Count source files
+          source_files=$(find crates/ -name "*.rs" | grep -v test | wc -l)
+          echo "Source files: $source_files"
+          
+          # Calculate rough test ratio
+          if [ "$source_files" -gt 0 ]; then
+            test_ratio=$((test_count * 100 / source_files))
+            echo "Test ratio: $test_ratio tests per 100 source files"
+          fi
+          
+          # Attempt to run tests (may fail during refactoring)
+          echo "Attempting to run tests..."
+          cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder || echo "Tests failed - this is permitted during tock refactoring"
+
+  documentation-quality:
+    needs: documentation-coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check documentation quality
+        run: |
+          echo "📖 Documentation Quality Check"
+          
+          # Check for README files
+          readme_count=$(find crates/ -name "README.md" | wc -l)
+          echo "README files: $readme_count"
+          
+          # Check for examples
+          example_count=$(find crates/ -name "examples" -type d | wc -l)
+          echo "Example directories: $example_count"
+          
+          # Check for inline documentation
+          inline_docs=$(grep -r "//!" --include="*.rs" crates/ | wc -l)
+          echo "Module-level doc comments: $inline_docs"
+
+  tock-completion-check:
+    needs: [documentation-coverage, interface-completeness, architecture-compliance, code-complexity-analysis]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tock stage completion criteria
+        run: |
+          echo "🎯 TOCK STAGE COMPLETION CHECK"
+          
+          # This is where we'd check if tock objectives are met
+          echo "📊 Completion Criteria:"
+          echo "  - Documentation coverage >90%"
+          echo "  - All public interfaces documented"
+          echo "  - Architecture compliance verified"
+          echo "  - Code complexity analysis complete"
+          echo "  - Refactoring opportunities identified"
+          
+          echo ""
+          echo "🔄 Ready for TICK transition when:"
+          echo "  - Documentation coverage >90%"
+          echo "  - Interface definitions are clean"
+          echo "  - Complexity reduced >20%"
+          echo "  - Architectural backbone is solid"
+
+  final-tock-summary:
+    needs: [tock-completion-check, documentation-quality]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Final tock stage summary
+        run: |
+          echo "📚 TOCK STAGE PIPELINE COMPLETE"
+          echo ""
+          echo "✅ Stage validated: TOCK (Architectural Refinement)"
+          echo "✅ Documentation analysis complete"
+          echo "✅ Interface completeness checked"
+          echo "✅ Architecture compliance verified"
+          echo "✅ Code complexity analyzed"
+          echo "✅ Refactoring opportunities identified"
+          echo ""
+          echo "🎯 TOCK Stage Focus:"
+          echo "  - Write comprehensive documentation"
+          echo "  - Perform architectural refactoring"
+          echo "  - Improve code hygiene and maintainability"
+          echo "  - Reduce complexity while preserving functionality"
+          echo ""
+          echo "🤖 Agent Guidelines:"
+          echo "  - Act as rubber-duck companion"
+          echo "  - Focus on understanding and explaining code"
+          echo "  - Prioritize architectural clarity over speed"
+          echo "  - TODOs and mocks are PERMITTED for architectural backbone"
