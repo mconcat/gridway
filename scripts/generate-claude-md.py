@@ -39,8 +39,15 @@ def write_file(filepath, content):
 
 def generate_claude_md(stage):
     """Generate CLAUDE.md for the specified stage."""
-    if stage not in ['tick', 'tock']:
-        print("Error: Stage must be 'tick' or 'tock'")
+    # Validate stage input to prevent any injection
+    valid_stages = ['tick', 'tock']
+    if stage not in valid_stages:
+        print(f"Error: Stage must be one of: {', '.join(valid_stages)}")
+        sys.exit(1)
+    
+    # Additional validation to ensure no path traversal characters
+    if any(char in stage for char in ['/', '\\', '..', '~']):
+        print("Error: Invalid characters in stage name")
         sys.exit(1)
     
     # Get the root directory (where this script is located)
@@ -74,7 +81,12 @@ def main():
         print("       where <stage> is 'tick' or 'tock'")
         sys.exit(1)
     
-    stage = sys.argv[1].lower()
+    stage = sys.argv[1].lower().strip()
+    
+    # Sanitize input to prevent any malicious input
+    if len(stage) > 10:  # stage names should be short
+        print("Error: Stage name too long")
+        sys.exit(1)
     generate_claude_md(stage)
 
 if __name__ == '__main__':
