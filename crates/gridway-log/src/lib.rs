@@ -1,6 +1,6 @@
-//! Logging utilities and abstractions for the helium blockchain framework.
+//! Logging utilities and abstractions for the gridway blockchain framework.
 //!
-//! This crate provides a unified logging interface for helium applications,
+//! This crate provides a unified logging interface for gridway applications,
 //! supporting structured logging, log levels, and integration with tracing framework
 //! as specified in PLAN.md.
 

@@ -1,10 +1,10 @@
-# Helium Server Architecture
+# Gridway Server Architecture
 
-This document details the architectural vision of the Helium Server crate, which orchestrates the blockchain node's external interfaces—ABCI 2.0 for consensus integration, and dynamically generated REST/gRPC APIs for client interactions—while seamlessly bridging the WASI component architecture with the broader blockchain ecosystem.
+This document details the architectural vision of the Gridway Server crate, which orchestrates the blockchain node's external interfaces—ABCI 2.0 for consensus integration, and dynamically generated REST/gRPC APIs for client interactions—while seamlessly bridging the WASI component architecture with the broader blockchain ecosystem.
 
 ## Dynamic Service Generation Philosophy
 
-Unlike traditional blockchain frameworks that hard-code module services, Helium embraces a revolutionary approach: all client-facing APIs are dynamically generated from WASI component interfaces. This design eliminates the maintenance burden of manually updating service definitions and ensures perfect consistency between component capabilities and exposed APIs.
+Unlike traditional blockchain frameworks that hard-code module services, Gridway embraces a revolutionary approach: all client-facing APIs are dynamically generated from WASI component interfaces. This design eliminates the maintenance burden of manually updating service definitions and ensures perfect consistency between component capabilities and exposed APIs.
 
 ### Component Interface Discovery
 
@@ -169,7 +169,7 @@ The server crate provides a comprehensive CLI for node operators, following fami
 pub enum Commands {
     /// Initialize node configuration and genesis state
     Init {
-        #[arg(long, default_value = "~/.helium")]
+        #[arg(long, default_value = "~/.gridway")]
         home: PathBuf,
         #[arg(long)]
         chain_id: String,
@@ -179,7 +179,7 @@ pub enum Commands {
     
     /// Start the node and all services
     Start {
-        #[arg(long, default_value = "~/.helium")]
+        #[arg(long, default_value = "~/.gridway")]
         home: PathBuf,
         #[arg(long)]
         with_components: Vec<PathBuf>, // WASI component paths
@@ -206,7 +206,7 @@ pub enum Commands {
 
 ### Component Management
 
-Unique to Helium, the CLI provides component management capabilities:
+Unique to Gridway, the CLI provides component management capabilities:
 
 ```rust
 pub enum ComponentCmd {
@@ -337,6 +337,6 @@ The server architecture accommodates future enhancements:
 
 ## See Also
 
-- [BaseApp Architecture](../helium-baseapp/PLAN.md) - Transaction processing and routing
-- [WASI Security Model](../helium-baseapp/PLAN.md#security-and-capability-system-implementation) - Capability-based security
+- [BaseApp Architecture](../gridway-baseapp/PLAN.md) - Transaction processing and routing
+- [WASI Security Model](../gridway-baseapp/PLAN.md#security-and-capability-system-implementation) - Capability-based security
 - [Project Overview](../../PLAN.md) - High-level architectural vision

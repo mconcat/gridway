@@ -30,13 +30,13 @@ pub struct SwaggerInfo {
     pub version: String,
 }
 
-/// Generate OpenAPI specification for Helium
+/// Generate OpenAPI specification for Gridway
 pub fn generate_swagger_spec() -> SwaggerSpec {
     SwaggerSpec {
         swagger: "2.0".to_string(),
         info: SwaggerInfo {
-            title: "Helium REST API".to_string(),
-            description: "REST API for Helium blockchain (Cosmos SDK compatible)".to_string(),
+            title: "Gridway REST API".to_string(),
+            description: "REST API for Gridway blockchain (Cosmos SDK compatible)".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
         },
         host: "localhost:1317".to_string(),
@@ -559,7 +559,7 @@ pub async fn swagger_ui_handler() -> Result<Html<String>, StatusCode> {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Helium API - Swagger UI</title>
+    <title>Gridway API - Swagger UI</title>
     <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
     <style>
         html {

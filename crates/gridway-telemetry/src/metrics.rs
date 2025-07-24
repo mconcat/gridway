@@ -1,6 +1,6 @@
 //! Core blockchain metrics definitions.
 //!
-//! This module defines the standard metrics collected by the Helium blockchain
+//! This module defines the standard metrics collected by the Gridway blockchain
 //! for monitoring health and performance.
 
 use lazy_static::lazy_static;

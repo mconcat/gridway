@@ -1,4 +1,4 @@
-//! Key management for helium
+//! Key management for gridway
 //!
 //! This crate provides secure key storage and management functionality
 //! including HD wallet derivation and multiple backend support.

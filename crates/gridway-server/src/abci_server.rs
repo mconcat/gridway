@@ -1,7 +1,7 @@
 //! ABCI++ Server Implementation for CometBFT Integration
 //!
 //! This module implements the ABCI++ protocol server that allows CometBFT
-//! to communicate with the Helium blockchain application. It provides all
+//! to communicate with the Gridway blockchain application. It provides all
 //! the necessary ABCI++ methods including the new PrepareProposal and
 //! ProcessProposal for block proposal handling.
 
@@ -74,7 +74,7 @@ impl AbciError {
 
 pub type Result<T> = std::result::Result<T, AbciError>;
 
-// Use protobuf types from helium-proto
+// Use protobuf types from gridway-proto
 use gridway_proto::cometbft::abci::v1::{
     abci_service_server::{AbciService, AbciServiceServer},
     *,
@@ -224,7 +224,7 @@ impl AbciService for AbciServer {
         let app_hash = app.get_last_app_hash().to_vec();
 
         Ok(Response::new(InfoResponse {
-            data: "helium".to_string(),
+            data: "gridway".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             app_version: 1,
             last_block_height: height as i64,
@@ -290,7 +290,7 @@ impl AbciService for AbciServer {
         }
 
         // Route query based on path structure
-        let response = if req.path.starts_with("/cosmos.") || req.path.starts_with("/helium.") {
+        let response = if req.path.starts_with("/cosmos.") || req.path.starts_with("/gridway.") {
             // gRPC-style query paths for modules
             match app.query(req.path.clone(), &req.data, req.height as u64, req.prove) {
                 Ok(result) => result,
@@ -769,7 +769,7 @@ mod tests {
         let response = server.info(request).await.unwrap();
         let info = response.into_inner();
 
-        assert_eq!(info.data, "helium");
+        assert_eq!(info.data, "gridway");
         assert_eq!(info.app_version, 1);
         assert_eq!(info.last_block_height, 0);
     }

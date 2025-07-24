@@ -34,7 +34,7 @@ impl Default for IntegratedServerConfig {
         Self {
             address: "127.0.0.1:9090".to_string(),
             initialize_test_data: true,
-            chain_id: "helium-testnet".to_string(),
+            chain_id: "gridway-testnet".to_string(),
             enable_metrics: true,
             metrics_address: "127.0.0.1:1317".to_string(),
         }
@@ -69,7 +69,7 @@ impl IntegratedServer {
 
         let state_manager = Arc::new(RwLock::new(state_manager));
         let base_app = Arc::new(RwLock::new(
-            BaseApp::new("helium".to_string()).expect("Failed to create BaseApp"),
+            BaseApp::new("gridway".to_string()).expect("Failed to create BaseApp"),
         ));
 
         Self {
@@ -316,7 +316,7 @@ pub async fn run_integrated_server() -> Result<(), Box<dyn std::error::Error + S
     let config = IntegratedServerConfig {
         address: "127.0.0.1:9090".to_string(),
         initialize_test_data: true,
-        chain_id: "helium-testnet".to_string(),
+        chain_id: "gridway-testnet".to_string(),
         enable_metrics: true,
         metrics_address: "127.0.0.1:1317".to_string(),
     };

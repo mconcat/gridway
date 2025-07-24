@@ -27,7 +27,7 @@ pub struct Coin {
 impl Coin {
     /// Create a new coin, validating denomination and amount
     pub fn new(denom: String, amount: Int) -> Result<Self, CoinError> {
-        // Validate denom matches helium format
+        // Validate denom matches gridway format
         if !is_valid_denom(&denom) {
             return Err(CoinError::InvalidDenom(denom));
         }
@@ -135,7 +135,7 @@ impl fmt::Display for Coins {
     }
 }
 
-/// Validate denomination format according to helium rules
+/// Validate denomination format according to gridway rules
 fn is_valid_denom(denom: &str) -> bool {
     if denom.is_empty() || denom.len() > 127 {
         return false;

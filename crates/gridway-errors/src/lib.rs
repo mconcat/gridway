@@ -1,11 +1,11 @@
-//! Error handling types and utilities for the helium blockchain framework.
+//! Error handling types and utilities for the gridway blockchain framework.
 //!
-//! This crate provides a comprehensive error handling system for helium applications,
+//! This crate provides a comprehensive error handling system for gridway applications,
 //! including standard error types, error codes, and utilities for error propagation.
 
 use thiserror::Error;
 
-/// Core error type for helium applications
+/// Core error type for gridway applications
 #[derive(Error, Debug)]
 pub enum Error {
     /// Invalid request error
@@ -33,10 +33,10 @@ pub enum Error {
     Custom { code: u32, message: String },
 }
 
-/// Result type alias for helium operations
+/// Result type alias for gridway operations
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Error codes following helium conventions
+/// Error codes following gridway conventions
 pub mod codes {
     /// Success
     pub const OK: u32 = 0;

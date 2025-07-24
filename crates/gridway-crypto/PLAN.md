@@ -1,6 +1,6 @@
-# Helium Crypto Architecture
+# Gridway Crypto Architecture
 
-This document details the architectural vision of the Helium Crypto crate, which provides cryptographic utility functions maintaining strict compatibility with Cosmos SDK standards. This crate serves as a foundational library for cryptographic operations, remaining independent of the WASI component architecture while providing essential primitives for the blockchain.
+This document details the architectural vision of the Gridway Crypto crate, which provides cryptographic utility functions maintaining strict compatibility with Cosmos SDK standards. This crate serves as a foundational library for cryptographic operations, remaining independent of the WASI component architecture while providing essential primitives for the blockchain.
 
 ## Design Philosophy
 
@@ -8,7 +8,7 @@ The crypto crate embraces simplicity and correctness over complex abstractions. 
 
 ## Supported Key Types
 
-Following Cosmos SDK compatibility requirements, Helium supports two primary key types with distinct purposes:
+Following Cosmos SDK compatibility requirements, Gridway supports two primary key types with distinct purposes:
 
 ### Secp256k1 - User Accounts
 The primary key type for user accounts and transaction signing, maintaining compatibility with the broader blockchain ecosystem:
@@ -167,6 +167,6 @@ The crypto crate maintains several key principles:
 
 ## See Also
 
-- [Keyring Architecture](../helium-keyring/PLAN.md) - Key management, storage, and HSM integration
-- [BaseApp Component Model](../helium-baseapp/PLAN.md) - How components access crypto functions
+- [Keyring Architecture](../gridway-keyring/PLAN.md) - Key management, storage, and HSM integration
+- [BaseApp Component Model](../gridway-baseapp/PLAN.md) - How components access crypto functions
 - [Project Overview](../../PLAN.md) - High-level architectural vision

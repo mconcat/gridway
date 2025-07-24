@@ -1,8 +1,8 @@
-# Helium SimApp Architecture
+# Gridway SimApp Architecture
 
 ## Overview
 
-The helium-simapp crate provides a simulation and testing framework for Helium blockchain applications. It enables property-based testing, benchmarking, and integration testing of applications built on the Helium WASI microkernel architecture.
+The gridway-simapp crate provides a simulation and testing framework for Gridway blockchain applications. It enables property-based testing, benchmarking, and integration testing of applications built on the Gridway WASI microkernel architecture.
 
 ## Design Philosophy
 
@@ -179,10 +179,10 @@ SimApp provides utilities for continuous testing:
 
 ```bash
 # Run quick simulation
-cargo test --package helium-simapp
+cargo test --package gridway-simapp
 
 # Run extended simulation (1000 blocks)
-cargo test --package helium-simapp --features extended-sim
+cargo test --package gridway-simapp --features extended-sim
 
 # Run with specific seed for reproducibility
 SIMULATION_SEED=42 cargo test

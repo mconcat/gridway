@@ -302,9 +302,9 @@ impl OsKeyring {
         }
     }
 
-    /// Get the default service name for helium keys
+    /// Get the default service name for gridway keys
     pub fn default_service_name() -> String {
-        "helium-keyring".to_string()
+        "gridway-keyring".to_string()
     }
 
     /// Store a key in the OS secure storage
@@ -959,7 +959,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "OS keyring tests require system keychain access"]
     async fn test_os_keyring_basic_operations() {
-        let mut keyring = OsKeyring::new("helium-test-service");
+        let mut keyring = OsKeyring::new("gridway-test-service");
 
         // Test key creation
         let key_info = keyring.create_key("test_key").await.unwrap();
@@ -995,7 +995,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "OS keyring tests require system keychain access"]
     async fn test_os_keyring_import_mnemonic() {
-        let mut keyring = OsKeyring::new("helium-test-mnemonic");
+        let mut keyring = OsKeyring::new("gridway-test-mnemonic");
 
         let mnemonic = "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius";
 
@@ -1013,7 +1013,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "OS keyring tests require system keychain access"]
     async fn test_os_keyring_import_private_key() {
-        let mut keyring = OsKeyring::new("helium-test-privkey");
+        let mut keyring = OsKeyring::new("gridway-test-privkey");
 
         // Create a secp256k1 private key
         let mut rng = rand::thread_rng();
@@ -1044,7 +1044,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "OS keyring tests require system keychain access"]
     async fn test_os_keyring_duplicate_key() {
-        let mut keyring = OsKeyring::new("helium-test-duplicate");
+        let mut keyring = OsKeyring::new("gridway-test-duplicate");
 
         keyring.create_key("duplicate_key").await.unwrap();
 
@@ -1059,8 +1059,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "OS keyring tests require system keychain access"]
     async fn test_os_keyring_registry_persistence() {
-        let mut keyring1 = OsKeyring::new("helium-test-registry");
-        let keyring2 = OsKeyring::new("helium-test-registry");
+        let mut keyring1 = OsKeyring::new("gridway-test-registry");
+        let keyring2 = OsKeyring::new("gridway-test-registry");
 
         // Create key with first instance
         keyring1.create_key("registry_test").await.unwrap();

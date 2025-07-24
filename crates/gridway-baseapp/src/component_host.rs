@@ -6,7 +6,8 @@
 use crate::component_bindings::ante_handler::AnteHandlerWorld;
 use crate::component_bindings::tx_decoder::TxDecoderWorld;
 use crate::component_bindings::SimpleKVStoreManager;
-use crate::kvstore_resource::KVStoreResourceHost;
+// TODO: Remove kvstore interface (temporary implementation)
+// use crate::kvstore_resource::KVStoreResourceHost;
 use hex;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,33 +16,33 @@ use thiserror::Error;
 use tracing::{debug, error, info};
 use wasmtime::component::*;
 use wasmtime::{Config, Engine, Store};
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::p2::{WasiCtx, WasiCtxBuilder, WasiView};
 
 /// Component Host errors
 #[derive(Error, Debug)]
 pub enum ComponentHostError {
-    #[error("Engine configuration error:: {0}")]
+    #[error("Engine configuration error: {0}")]
     EngineConfig(String),
 
-    #[error("Component compilation error:: {0}")]
+    #[error("Component compilation error: {0}")]
     ComponentCompilation(String),
 
-    #[error("Component instantiation error:: {0}")]
+    #[error("Component instantiation error: {0}")]
     ComponentInstantiation(String),
 
-    #[error("Component execution error:: {0}")]
+    #[error("Component execution error: {0}")]
     ComponentExecution(String),
 
-    #[error("Component not found:: {0}")]
+    #[error("Component not found: {0}")]
     ComponentNotFound(String),
 
-    #[error("Invalid component:: {0}")]
+    #[error("Invalid component: {0}")]
     InvalidComponent(String),
 
-    #[error("WASI setup error:: {0}")]
+    #[error("WASI setup error: {0}")]
     WasiSetup(String),
 
-    #[error("Resource error:: {0}")]
+    #[error("Resource error: {0}")]
     ResourceError(String),
 }
 
@@ -97,22 +98,27 @@ pub struct ComponentState {
     component_name: String,
     #[allow(dead_code)]
     kvstore_manager: SimpleKVStoreManager,
-    kvstore_host: KVStoreResourceHost,
+    // TODO: Remove kvstore interface (temporary implementation)
+    // kvstore_host: KVStoreResourceHost,
 }
 
-impl WasiView for ComponentState {
+impl wasmtime_wasi::p2::IoView for ComponentState {
     fn table(&mut self) -> &mut wasmtime_wasi::ResourceTable {
         &mut self.table
     }
+}
 
+impl WasiView for ComponentState {
     fn ctx(&mut self) -> &mut WasiCtx {
         &mut self.wasi
     }
 }
 
 // Import the generated kvstore bindings
-use crate::component_bindings::ante_handler::gridway::framework::kvstore;
+// TODO: Remove kvstore interface (temporary implementation)
+// use crate::component_bindings::ante_handler::gridway::framework::kvstore;
 
+/* Commenting out kvstore implementation - to be removed
 impl kvstore::HostStore for ComponentState {
     fn get(
         &mut self,
@@ -229,6 +235,7 @@ impl kvstore::Host for ComponentState {
         }
     }
 }
+*/
 
 /// WASI Component Host
 pub struct ComponentHost {
@@ -242,8 +249,9 @@ pub struct ComponentHost {
     default_gas_limit: u64,
     /// KVStore manager (legacy)
     kvstore_manager: SimpleKVStoreManager,
-    /// KVStore resource host for prefix-based access
-    kvstore_host: KVStoreResourceHost,
+    // KVStore resource host for prefix-based access
+    // TODO: Remove kvstore interface (temporary implementation)
+    // kvstore_host: KVStoreResourceHost,
 }
 
 impl ComponentHost {
@@ -258,7 +266,7 @@ impl ComponentHost {
     /// Create a new component host with custom configuration and a base store
     pub fn with_config_and_store(
         mut config: Config,
-        base_store: Arc<Mutex<dyn gridway_store::KVStore>>,
+        _base_store: Arc<Mutex<dyn gridway_store::KVStore>>,
     ) -> Result<Self> {
         // Ensure component model is enabled
         config.wasm_component_model(true);
@@ -274,22 +282,23 @@ impl ComponentHost {
 
         info!("Component host initialized with secure configuration");
 
-        let kvstore_host = KVStoreResourceHost::new(base_store);
-
-        // Register default component prefixes
-        // These can be overridden by calling register_component_prefix
-        kvstore_host
-            .register_component_prefix("ante-handler".to_string(), "/ante/".to_string())
-            .map_err(ComponentHostError::ResourceError)?;
-        kvstore_host
-            .register_component_prefix("begin-blocker".to_string(), "/begin/".to_string())
-            .map_err(ComponentHostError::ResourceError)?;
-        kvstore_host
-            .register_component_prefix("end-blocker".to_string(), "/end/".to_string())
-            .map_err(ComponentHostError::ResourceError)?;
-        kvstore_host
-            .register_component_prefix("tx-decoder".to_string(), "/decoder/".to_string())
-            .map_err(ComponentHostError::ResourceError)?;
+        // TODO: Remove kvstore interface (temporary implementation)
+        // let kvstore_host = KVStoreResourceHost::new(base_store);
+        //
+        // // Register default component prefixes
+        // // These can be overridden by calling register_component_prefix
+        // kvstore_host
+        //     .register_component_prefix("ante-handler".to_string(), "/ante/".to_string())
+        //     .map_err(ComponentHostError::ResourceError)?;
+        // kvstore_host
+        //     .register_component_prefix("begin-blocker".to_string(), "/begin/".to_string())
+        //     .map_err(ComponentHostError::ResourceError)?;
+        // kvstore_host
+        //     .register_component_prefix("end-blocker".to_string(), "/end/".to_string())
+        //     .map_err(ComponentHostError::ResourceError)?;
+        // kvstore_host
+        //     .register_component_prefix("tx-decoder".to_string(), "/decoder/".to_string())
+        //     .map_err(ComponentHostError::ResourceError)?;
 
         Ok(Self {
             engine,
@@ -297,13 +306,13 @@ impl ComponentHost {
             component_info: Arc::new(Mutex::new(HashMap::new())),
             default_gas_limit: 10_000_000, // 10 million units
             kvstore_manager: SimpleKVStoreManager::new(),
-            kvstore_host,
+            // kvstore_host,
         })
     }
 
     /// Load a component from bytes
     pub fn load_component(&self, name: &str, bytes: &[u8], info: ComponentInfo) -> Result<()> {
-        debug!("Loading component:: {}", name);
+        debug!("Loading component: {}", name);
 
         // Compile the component
         let component = Component::new(&self.engine, bytes)
@@ -312,14 +321,14 @@ impl ComponentHost {
         // Store component and metadata
         {
             let mut components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentCompilation(format!("Lock poisoned:: {e}"))
+                ComponentHostError::ComponentCompilation(format!("Lock poisoned: {e}"))
             })?;
             components.insert(name.to_string(), component);
         }
 
         {
             let mut component_info = self.component_info.lock().map_err(|e| {
-                ComponentHostError::ComponentCompilation(format!("Lock poisoned:: {e}"))
+                ComponentHostError::ComponentCompilation(format!("Lock poisoned: {e}"))
             })?;
             component_info.insert(name.to_string(), info);
         }
@@ -340,12 +349,12 @@ impl ComponentHost {
         sequence: u64,
         tx_bytes: Vec<u8>,
     ) -> Result<ComponentResult> {
-        debug!("Executing ante-handler component:: {}", component_name);
+        debug!("Executing ante-handler component: {}", component_name);
 
         // Get the component
         let component = {
             let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned:: {e}"))
+                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
             })?;
             components
                 .get(component_name)
@@ -361,7 +370,7 @@ impl ComponentHost {
             wasi,
             component_name: component_name.to_string(),
             kvstore_manager: SimpleKVStoreManager::new(),
-            kvstore_host: self.kvstore_host.clone(),
+            // kvstore_host: self.kvstore_host.clone(),
         };
 
         let mut store = Store::new(&self.engine, state);
@@ -369,7 +378,7 @@ impl ComponentHost {
         // Set fuel limit
         let component_gas_limit = {
             let info = self.component_info.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned:: {e}"))
+                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
             })?;
             info.get(component_name)
                 .map(|i| i.gas_limit)
@@ -381,13 +390,14 @@ impl ComponentHost {
 
         // Create linker and add WASI
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::add_to_linker_sync(&mut linker)
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
 
         // Add kvstore interface
-        self.add_kvstore_to_linker(&mut linker)?;
+        // TODO: Remove kvstore interface (temporary implementation)
+        // self.add_kvstore_to_linker(&mut linker)?;
 
         // Instantiate the component with bindings
         let bindings = AnteHandlerWorld::instantiate(&mut store, &component, &linker)
@@ -410,7 +420,7 @@ impl ComponentHost {
             .gridway_framework_ante_handler()
             .call_ante_handle(&mut store, &context, &tx_bytes)
             .map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Component execution failed:: {e}"))
+                ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
             })?;
 
         // Get remaining fuel for gas tracking
@@ -468,12 +478,12 @@ impl ComponentHost {
         encoding: &str,
         validate: bool,
     ) -> Result<ComponentResult> {
-        debug!("Executing tx-decoder component:: {}", component_name);
+        debug!("Executing tx-decoder component: {}", component_name);
 
         // Get the component
         let component = {
             let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned:: {e}"))
+                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
             })?;
             components
                 .get(component_name)
@@ -489,7 +499,7 @@ impl ComponentHost {
             wasi,
             component_name: component_name.to_string(),
             kvstore_manager: SimpleKVStoreManager::new(),
-            kvstore_host: self.kvstore_host.clone(),
+            // kvstore_host: self.kvstore_host.clone(),
         };
 
         let mut store = Store::new(&self.engine, state);
@@ -497,7 +507,7 @@ impl ComponentHost {
         // Set fuel limit
         let gas_limit = {
             let info = self.component_info.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned:: {e}"))
+                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
             })?;
             info.get(component_name)
                 .map(|i| i.gas_limit)
@@ -509,13 +519,14 @@ impl ComponentHost {
 
         // Create linker and add WASI
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::add_to_linker_sync(&mut linker)
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
 
         // Add kvstore interface
-        self.add_kvstore_to_linker(&mut linker)?;
+        // TODO: Remove kvstore interface (temporary implementation)
+        // self.add_kvstore_to_linker(&mut linker)?;
 
         // Instantiate the component with bindings
         let bindings = TxDecoderWorld::instantiate(&mut store, &component, &linker)
@@ -568,7 +579,7 @@ impl ComponentHost {
         // Get the component (assume "begin-blocker" as the component name)
         let component = {
             let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned:: {e}"))
+                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
             })?;
             components
                 .get("begin-blocker")
@@ -584,24 +595,25 @@ impl ComponentHost {
                 wasi: WasiCtxBuilder::new().inherit_stdio().build(),
                 component_name: "begin-blocker".to_string(),
                 kvstore_manager: self.kvstore_manager.clone(),
-                kvstore_host: self.kvstore_host.clone(),
+                // kvstore_host: self.kvstore_host.clone(),
             },
         );
 
         // Set fuel for gas limiting
         store.set_fuel(gas_limit).map_err(|e| {
-            ComponentHostError::ComponentExecution(format!("Failed to set fuel:: {e}"))
+            ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}"))
         })?;
 
         // Create linker and add WASI
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::add_to_linker_sync(&mut linker)
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
 
         // Add kvstore interface
-        self.add_kvstore_to_linker(&mut linker)?;
+        // TODO: Remove kvstore interface (temporary implementation)
+        // self.add_kvstore_to_linker(&mut linker)?;
 
         // Instantiate the component with bindings
         let bindings = crate::component_bindings::begin_blocker::BeginBlockerWorld::instantiate(
@@ -631,7 +643,7 @@ impl ComponentHost {
             .gridway_framework_begin_blocker()
             .call_begin_block(&mut store, &request)
             .map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Component execution failed:: {e}"))
+                ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
             })?;
 
         // Get remaining fuel for gas tracking
@@ -690,7 +702,7 @@ impl ComponentHost {
         // Get the component (assume "end-blocker" as the component name)
         let component = {
             let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned:: {e}"))
+                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
             })?;
             components
                 .get("end-blocker")
@@ -706,24 +718,25 @@ impl ComponentHost {
                 wasi: WasiCtxBuilder::new().inherit_stdio().build(),
                 component_name: "end-blocker".to_string(),
                 kvstore_manager: self.kvstore_manager.clone(),
-                kvstore_host: self.kvstore_host.clone(),
+                // kvstore_host: self.kvstore_host.clone(),
             },
         );
 
         // Set fuel for gas limiting
         store.set_fuel(gas_limit).map_err(|e| {
-            ComponentHostError::ComponentExecution(format!("Failed to set fuel:: {e}"))
+            ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}"))
         })?;
 
         // Create linker and add WASI
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::add_to_linker_sync(&mut linker)
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
         // Add module-state interface
 
         // Add kvstore interface
-        self.add_kvstore_to_linker(&mut linker)?;
+        // TODO: Remove kvstore interface (temporary implementation)
+        // self.add_kvstore_to_linker(&mut linker)?;
 
         // Instantiate the component with bindings
         let bindings = crate::component_bindings::end_blocker::EndBlockerWorld::instantiate(
@@ -742,7 +755,7 @@ impl ComponentHost {
             .gridway_framework_end_blocker()
             .call_end_block(&mut store, &request)
             .map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Component execution failed:: {e}"))
+                ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
             })?;
 
         // Get remaining fuel for gas tracking
@@ -816,24 +829,28 @@ impl ComponentHost {
             .map_err(ComponentHostError::ResourceError)
     }
 
+    /* TODO: Remove kvstore interface (temporary implementation)
     /// Register a component with its allowed KVStore prefix
     pub fn register_component_prefix(&self, component_name: &str, prefix: &str) -> Result<()> {
         self.kvstore_host
             .register_component_prefix(component_name.to_string(), prefix.to_string())
             .map_err(ComponentHostError::ResourceError)
     }
+    */
 
+    /* TODO: Remove kvstore interface (temporary implementation)
     /// Add kvstore interface to the component linker
     fn add_kvstore_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
         // Use the generated kvstore bindings
         kvstore::add_to_linker(linker, |state| state).map_err(|e| {
             ComponentHostError::ComponentInstantiation(format!(
-                "Failed to add kvstore interface:: {e}"
+                "Failed to add kvstore interface: {e}"
             ))
         })?;
         info!("KVStore interface added to linker");
         Ok(())
     }
+    */
 
     /// Get the gas consumed from the last execution
     pub fn get_gas_consumed(&self, store: &mut Store<ComponentState>) -> u64 {

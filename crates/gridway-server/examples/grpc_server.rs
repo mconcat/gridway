@@ -1,4 +1,4 @@
-//! Example of starting a gRPC server with helium services
+//! Example of starting a gRPC server with gridway services
 
 use gridway_baseapp::BaseApp;
 use gridway_server::grpc::services::*;

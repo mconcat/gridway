@@ -1,6 +1,6 @@
 # Cosmos SDK Telemetry Compatibility
 
-This document describes how the helium-telemetry crate implements Cosmos SDK compatible metrics and telemetry.
+This document describes how the gridway-telemetry crate implements Cosmos SDK compatible metrics and telemetry.
 
 ## Compatibility Features
 
@@ -43,7 +43,7 @@ Support for global labels as used in Cosmos SDK `app.toml`:
 ```rust
 MetricsServerConfig {
     global_labels: vec![
-        ("chain_id".to_string(), "helium-1".to_string()),
+        ("chain_id".to_string(), "gridway-1".to_string()),
         ("node_id".to_string(), "node123".to_string()),
     ],
 }
@@ -72,7 +72,7 @@ let config = MetricsServerConfig {
     metrics_path: "/metrics".to_string(),
     enable_health_check: true,
     global_labels: vec![
-        ("chain_id".to_string(), "helium-1".to_string()),
+        ("chain_id".to_string(), "gridway-1".to_string()),
     ],
 };
 

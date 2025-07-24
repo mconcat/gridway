@@ -71,7 +71,7 @@ pub struct MsgStoreCode {
 
 impl SdkMsg for MsgStoreCode {
     fn type_url(&self) -> &'static str {
-        "/helium.baseapp.v1.MsgStoreCode"
+        "/gridway.baseapp.v1.MsgStoreCode"
     }
 
     fn validate_basic(&self) -> std::result::Result<(), SdkError> {
@@ -125,7 +125,7 @@ pub struct MsgInstallModule {
 
 impl SdkMsg for MsgInstallModule {
     fn type_url(&self) -> &'static str {
-        "/helium.baseapp.v1.MsgInstallModule"
+        "/gridway.baseapp.v1.MsgInstallModule"
     }
 
     fn validate_basic(&self) -> std::result::Result<(), SdkError> {
@@ -179,7 +179,7 @@ pub struct MsgUpgradeModule {
 
 impl SdkMsg for MsgUpgradeModule {
     fn type_url(&self) -> &'static str {
-        "/helium.baseapp.v1.MsgUpgradeModule"
+        "/gridway.baseapp.v1.MsgUpgradeModule"
     }
 
     fn validate_basic(&self) -> std::result::Result<(), SdkError> {

@@ -1,7 +1,7 @@
-//! Mathematical types for helium
+//! Mathematical types for gridway
 //!
 //! This crate provides high-precision arithmetic types and coin handling
-//! functionality required by helium.
+//! functionality required by gridway.
 
 pub mod coin;
 pub mod decimal;

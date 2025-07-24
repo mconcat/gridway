@@ -1,4 +1,4 @@
-//! Address types for helium
+//! Address types for gridway
 
 use bech32::{Bech32, Hrp};
 use ripemd::Ripemd160;

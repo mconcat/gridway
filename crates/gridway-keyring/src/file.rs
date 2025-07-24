@@ -105,7 +105,7 @@ impl FileKeyring {
         let home = dirs::home_dir().ok_or_else(|| {
             KeyringError::BackendError("Could not determine home directory".to_string())
         })?;
-        Ok(home.join(".helium").join("keyring"))
+        Ok(home.join(".gridway").join("keyring"))
     }
 
     /// Load all keys from disk

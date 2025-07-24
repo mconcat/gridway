@@ -11,64 +11,64 @@ use thiserror::Error;
 use tracing::{debug, error, info};
 use wasmtime::*;
 use wasmtime_wasi::{
-    pipe::{MemoryInputPipe, MemoryOutputPipe},
+    p2::pipe::{MemoryInputPipe, MemoryOutputPipe},
+    p2::WasiCtxBuilder,
     preview1::{add_to_linker_sync as add_wasi_to_linker, WasiP1Ctx},
-    WasiCtxBuilder,
 };
 
 /// WASI Host errors
 #[derive(Error, Debug)]
 pub enum WasiHostError {
     /// WASM engine configuration failed
-    #[error("WASM engine configuration failed:: {0}")]
+    #[error("WASM engine configuration failed: {0}")]
     EngineConfig(String),
 
     /// Module compilation failed
-    #[error("module compilation failed:: {0}")]
+    #[error("module compilation failed: {0}")]
     ModuleCompilation(#[from] wasmtime::Error),
 
     /// Module instantiation failed
-    #[error("module instantiation failed:: {0}")]
+    #[error("module instantiation failed: {0}")]
     ModuleInstantiation(String),
 
     /// Module execution failed
-    #[error("module execution failed:: {0}")]
+    #[error("module execution failed: {0}")]
     ModuleExecution(String),
 
     /// WASM trap occurred
-    #[error("WASM trap:: {0}")]
+    #[error("WASM trap: {0}")]
     WasmTrap(#[from] wasmtime::Trap),
 
     /// Module panic during execution
-    #[error("module panic:: {0}")]
+    #[error("module panic: {0}")]
     ModulePanic(String),
 
     /// Out of gas/fuel error
-    #[error("out of gas:: {0}")]
+    #[error("out of gas: {0}")]
     OutOfGas(String),
 
     /// Memory limit exceeded
-    #[error("memory limit exceeded:: {0}")]
+    #[error("memory limit exceeded: {0}")]
     MemoryLimitExceeded(String),
 
     /// WASI context setup failed
-    #[error("WASI context setup failed:: {0}")]
+    #[error("WASI context setup failed: {0}")]
     WasiSetup(String),
 
     /// Module not found
-    #[error("module not found:: {0}")]
+    #[error("module not found: {0}")]
     ModuleNotFound(String),
 
     /// Invalid module format
-    #[error("invalid module format:: {0}")]
+    #[error("invalid module format: {0}")]
     InvalidModule(String),
 
     /// Memory allocation error
-    #[error("memory allocation error:: {0}")]
+    #[error("memory allocation error: {0}")]
     MemoryError(String),
 
     /// Host function error
-    #[error("host function error:: {0}")]
+    #[error("host function error: {0}")]
     HostFunction(String),
 }
 
@@ -213,7 +213,7 @@ impl WasiHost {
 
     /// Load a WASM module from bytes
     pub fn load_module(&self, name: String, wasm_bytes: &[u8]) -> Result<()> {
-        debug!("Loading WASM module:: {}", name);
+        debug!("Loading WASM module: {}", name);
 
         // Compile the module
         let module = Module::new(&self.engine, wasm_bytes)?;
@@ -231,11 +231,11 @@ impl WasiHost {
 
         // Store the module
         let mut modules = self.modules.lock().map_err(|e| {
-            WasiHostError::ModuleCompilation(anyhow::anyhow!("Lock poisoned:: {}", e))
+            WasiHostError::ModuleCompilation(anyhow::anyhow!("Lock poisoned: {}", e))
         })?;
         modules.insert(name.clone(), wasm_module);
 
-        info!("Successfully loaded WASM module:: {}", name);
+        info!("Successfully loaded WASM module: {}", name);
         Ok(())
     }
 
@@ -264,14 +264,14 @@ impl WasiHost {
 
     /// Initialize a loaded module (create WASI context and instance)
     pub fn initialize_module(&self, name: &str) -> Result<()> {
-        debug!("Initializing WASM module:: {}", name);
+        debug!("Initializing WASM module: {}", name);
 
         // Get module from registry
         let module = {
             let modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
             modules
                 .get(name)
                 .ok_or_else(|| WasiHostError::ModuleNotFound(name.to_string()))?
@@ -293,7 +293,7 @@ impl WasiHost {
             let modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
             modules
                 .get(name)
                 .map(|m| m.gas_limit)
@@ -308,7 +308,7 @@ impl WasiHost {
 
         // Add WASI to the linker
         add_wasi_to_linker(&mut linker, |ctx| ctx)
-            .map_err(|e| WasiHostError::WasiSetup(format!("Failed to add WASI to linker:: {e}")))?;
+            .map_err(|e| WasiHostError::WasiSetup(format!("Failed to add WASI to linker: {e}")))?;
 
         // Instantiate the module
         let instance = linker
@@ -325,7 +325,7 @@ impl WasiHost {
         let mut instances = self
             .instances
             .lock()
-            .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned:: {e}")))?;
+            .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
         instances.insert(name.to_string(), host_instance);
 
         // Update module state
@@ -333,13 +333,13 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleInstantiation(format!("Lock poisoned: {e}")))?;
             if let Some(module) = modules.get_mut(name) {
                 module.state = ModuleState::Initialized;
             }
         }
 
-        info!("Successfully initialized WASM module:: {}", name);
+        info!("Successfully initialized WASM module: {}", name);
         Ok(())
     }
 
@@ -360,7 +360,7 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             if let Some(module) = modules.get_mut(module_name) {
                 if !module.is_ready() {
                     return Err(WasiHostError::ModuleExecution(format!(
@@ -378,7 +378,7 @@ impl WasiHost {
             let mut instances = self
                 .instances
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
             let host_instance = instances
                 .get_mut(module_name)
@@ -444,7 +444,7 @@ impl WasiHost {
                 let mut modules = self
                     .modules
                     .lock()
-                    .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+                    .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
                 if let Some(module) = modules.get_mut(module_name) {
                     module.state = ModuleState::Initialized;
                 }
@@ -458,7 +458,7 @@ impl WasiHost {
                 match e {
                     WasiHostError::OutOfGas(_) | WasiHostError::MemoryLimitExceeded(_) => {
                         let mut modules = self.modules.lock().map_err(|e| {
-                            WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}"))
+                            WasiHostError::ModuleExecution(format!("Lock poisoned: {e}"))
                         })?;
                         if let Some(module) = modules.get_mut(module_name) {
                             module.state = ModuleState::Initialized;
@@ -478,14 +478,14 @@ impl WasiHost {
 
     /// Cleanup and remove a module
     pub fn cleanup_module(&self, name: &str) -> Result<()> {
-        debug!("Cleaning up WASM module:: {}", name);
+        debug!("Cleaning up WASM module: {}", name);
 
         // Remove instance
         {
             let mut instances = self
                 .instances
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             instances.remove(name);
         }
 
@@ -494,11 +494,11 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             modules.remove(name);
         }
 
-        info!("Successfully cleaned up WASM module:: {}", name);
+        info!("Successfully cleaned up WASM module: {}", name);
         Ok(())
     }
 
@@ -507,7 +507,7 @@ impl WasiHost {
         let modules = self
             .modules
             .lock()
-            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
         modules
             .get(name)
@@ -520,21 +520,21 @@ impl WasiHost {
         let modules = self
             .modules
             .lock()
-            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
         Ok(modules.keys().cloned().collect())
     }
 
     /// Recover a module from error state by reinitializing it
     pub fn recover_module(&self, name: &str) -> Result<()> {
-        debug!("Attempting to recover module:: {}", name);
+        debug!("Attempting to recover module: {}", name);
 
         // Check if module exists and is in error state
         {
             let modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
             let module = modules
                 .get(name)
@@ -552,7 +552,7 @@ impl WasiHost {
             let mut instances = self
                 .instances
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             instances.remove(name);
         }
 
@@ -561,7 +561,7 @@ impl WasiHost {
             let mut modules = self
                 .modules
                 .lock()
-                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+                .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
             if let Some(module) = modules.get_mut(name) {
                 module.state = ModuleState::Loaded;
             }
@@ -570,7 +570,7 @@ impl WasiHost {
         // Reinitialize the module
         self.initialize_module(name)?;
 
-        info!("Successfully recovered module:: {}", name);
+        info!("Successfully recovered module: {}", name);
         Ok(())
     }
 
@@ -579,11 +579,11 @@ impl WasiHost {
         let mut modules = self
             .modules
             .lock()
-            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned:: {e}")))?;
+            .map_err(|e| WasiHostError::ModuleExecution(format!("Lock poisoned: {e}")))?;
 
         if let Some(module) = modules.get_mut(name) {
             module.state = ModuleState::Error(error.clone());
-            error!("Module {} entered error state:: {}", name, error);
+            error!("Module {} entered error state: {}", name, error);
         }
 
         Ok(())
@@ -593,7 +593,7 @@ impl WasiHost {
     fn validate_module_exports(&self, module: &Module) -> Result<()> {
         let exports: Vec<_> = module.exports().collect();
         debug!(
-            "Module exports:: {:?}",
+            "Module exports: {:?}",
             exports.iter().map(|e| e.name()).collect::<Vec<_>>()
         );
 
@@ -626,7 +626,7 @@ impl WasiHost {
         // Host function for memory allocation
         linker
             .func_wrap("env", "host_alloc", |size: i32| -> i32 {
-                debug!("WASM requested memory allocation:: {} bytes", size);
+                debug!("WASM requested memory allocation: {} bytes", size);
                 // Return a mock pointer - in real implementation, this would manage WASM memory
                 if size > 0 && size < 1024 * 1024 {
                     // 1MB limit for safety
@@ -640,7 +640,7 @@ impl WasiHost {
         // Host function for memory deallocation
         linker
             .func_wrap("env", "host_free", |ptr: i32| {
-                debug!("WASM freed memory at:: {}", ptr);
+                debug!("WASM freed memory at: {}", ptr);
                 // In real implementation, this would free WASM memory
             })
             .map_err(|e| WasiHostError::HostFunction(e.to_string()))?;
@@ -687,7 +687,7 @@ impl WasiHost {
 
         // Add WASI to the linker
         add_wasi_to_linker(&mut linker, |ctx| ctx)
-            .map_err(|e| WasiHostError::WasiSetup(format!("Failed to add WASI to linker:: {e}")))?;
+            .map_err(|e| WasiHostError::WasiSetup(format!("Failed to add WASI to linker: {e}")))?;
 
         // Instantiate the module
         let instance = linker
@@ -722,15 +722,15 @@ impl WasiHost {
             // Test simple entry point
             debug!("Calling test_simple function");
             func.call(&mut store, ()).map_err(|e| {
-                error!("test_simple failed:: {}", e);
-                WasiHostError::ModuleExecution(format!("test_simple failed:: {e}"))
+                error!("test_simple failed: {}", e);
+                WasiHostError::ModuleExecution(format!("test_simple failed: {e}"))
             })?
         } else if let Ok(func) = instance.get_typed_func::<(), i32>(&mut store, "test_decode") {
             // Test decode entry point
             debug!("Calling test_decode function");
             func.call(&mut store, ()).map_err(|e| {
-                error!("test_decode failed:: {}", e);
-                WasiHostError::ModuleExecution(format!("test_decode failed:: {e}"))
+                error!("test_decode failed: {}", e);
+                WasiHostError::ModuleExecution(format!("test_decode failed: {e}"))
             })?
         } else {
             return Err(WasiHostError::ModuleExecution(

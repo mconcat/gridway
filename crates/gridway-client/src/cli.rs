@@ -57,10 +57,10 @@ impl AddKeyCmd {
     }
 }
 
-/// Helium blockchain client CLI
+/// Gridway blockchain client CLI
 #[derive(Parser, Debug)]
-#[command(name = "helium")]
-#[command(about = "A client for the helium blockchain")]
+#[command(name = "gridway")]
+#[command(about = "A client for the gridway blockchain")]
 #[command(version = "0.1.0")]
 #[command(long_about = None)]
 pub struct Cli {
@@ -586,7 +586,7 @@ impl CliHandler {
     /// Handle init command
     #[tracing::instrument(skip(self))]
     async fn handle_init(&self, cmd: InitCmd) -> crate::Result<()> {
-        info!("Initializing helium node...");
+        info!("Initializing gridway node...");
         info!(moniker = %cmd.get_moniker(&self.config), "Setting node moniker");
         let chain_id = cmd
             .chain_id
@@ -605,7 +605,7 @@ impl CliHandler {
     /// Handle start command
     #[tracing::instrument(skip(self))]
     async fn handle_start(&self, cmd: StartCmd) -> crate::Result<()> {
-        info!("Starting helium node...");
+        info!("Starting gridway node...");
 
         if cmd.grpc {
             info!(port = %cmd.get_grpc_port(&self.config), "GRPC server enabled");
@@ -838,13 +838,13 @@ mod tests {
     fn test_help_generation() {
         let mut cmd = Cli::command();
         let help = cmd.render_help();
-        assert!(help.to_string().contains("helium"));
+        assert!(help.to_string().contains("gridway"));
         assert!(help.to_string().contains("blockchain"));
     }
 
     #[test]
     fn test_subcommand_help() {
-        let _cli = Cli::parse_from(["helium", "keys", "--help"]);
+        let _cli = Cli::parse_from(["gridway", "keys", "--help"]);
         // This test will fail during parsing since --help exits the process,
         // but we can test that the command structure is valid
     }
@@ -852,7 +852,7 @@ mod tests {
     #[test]
     fn test_global_options() {
         let cli = Cli::parse_from([
-            "helium",
+            "gridway",
             "--node",
             "http://localhost:8080",
             "--chain-id",
@@ -873,7 +873,7 @@ mod tests {
     #[test]
     fn test_keys_add_command() {
         let cli = Cli::parse_from([
-            "helium",
+            "gridway",
             "keys",
             "add",
             "my-key",
@@ -897,7 +897,7 @@ mod tests {
     #[test]
     fn test_bank_send_command() {
         let cli = Cli::parse_from([
-            "helium",
+            "gridway",
             "tx",
             "bank",
             "send",
@@ -935,7 +935,7 @@ mod tests {
     #[test]
     fn test_query_balance_command() {
         let cli = Cli::parse_from([
-            "helium",
+            "gridway",
             "query",
             "bank",
             "balance",

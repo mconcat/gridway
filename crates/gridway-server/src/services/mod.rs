@@ -1,4 +1,4 @@
-//! Service implementations for helium blockchain
+//! Service implementations for gridway blockchain
 //!
 //! This module contains production-ready service implementations that integrate
 //! with the state store and provide complete functionality for blockchain operations.

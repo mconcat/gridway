@@ -1,8 +1,8 @@
-# Helium Keyring Architecture
+# Gridway Keyring Architecture
 
 ## Overview
 
-The helium-keyring crate provides secure key management functionality for the Helium blockchain, supporting multiple storage backends and HD wallet derivation. This crate must balance security, usability, and compatibility with both traditional environments and WASI components.
+The gridway-keyring crate provides secure key management functionality for the Gridway blockchain, supporting multiple storage backends and HD wallet derivation. This crate must balance security, usability, and compatibility with both traditional environments and WASI components.
 
 ## Design Philosophy
 
@@ -70,9 +70,9 @@ When running as a WASI component, the keyring:
 
 ## Integration Points
 
-### With helium-crypto
+### With gridway-crypto
 
-The keyring crate builds on helium-crypto primitives:
+The keyring crate builds on gridway-crypto primitives:
 - Uses PublicKey/PrivateKey types
 - Delegates signing operations
 - Shares algorithm support

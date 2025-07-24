@@ -1,4 +1,4 @@
-//! Genesis file structure and utilities for helium
+//! Genesis file structure and utilities for gridway
 //!
 //! This module provides types and functions for handling blockchain genesis files,
 //! including parsing, validation, and initialization.
@@ -51,7 +51,7 @@ pub struct AppGenesis {
 
 /// Default application name
 fn default_app_name() -> String {
-    "helium".to_string()
+    "gridway".to_string()
 }
 
 /// Default application version
@@ -731,7 +731,7 @@ mod tests {
     fn test_genesis_new() {
         let genesis = AppGenesis::new("my-chain".to_string());
         assert_eq!(genesis.chain_id, "my-chain");
-        assert_eq!(genesis.app_name, "helium");
+        assert_eq!(genesis.app_name, "gridway");
         assert_eq!(genesis.initial_height, 1);
         assert!(genesis.app_hash.is_empty());
     }

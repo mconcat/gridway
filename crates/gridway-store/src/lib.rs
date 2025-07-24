@@ -1,7 +1,7 @@
-//! Storage layer implementation for the helium blockchain framework.
+//! Storage layer implementation for the gridway blockchain framework.
 //!
 //! This crate provides key-value storage abstractions and implementations
-//! for helium applications, including multi-store support and caching layers.
+//! for gridway applications, including multi-store support and caching layers.
 
 pub mod global;
 pub mod jmt;

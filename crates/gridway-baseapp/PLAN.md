@@ -1,10 +1,10 @@
-# Helium BaseApp Architecture
+# Gridway BaseApp Architecture
 
-This document details the implementation architecture of the Helium BaseApp crate, which provides the WASI microkernel foundation, virtual filesystem abstraction, capability-based security model, and transaction processing engine for the Helium blockchain.
+This document details the implementation architecture of the Gridway BaseApp crate, which provides the WASI microkernel foundation, virtual filesystem abstraction, capability-based security model, and transaction processing engine for the Gridway blockchain.
 
 ## The WASI Component Model Foundation
 
-The core of Helium's microkernel architecture embraces the WASI 0.2 Component Model, a significant evolution from traditional module-based approaches. Implemented in `helium-baseapp/src/component_host.rs`, the component architecture establishes a type-safe, composable foundation for all blockchain elements. This architectural choice represents a fundamental commitment to the future of WebAssembly standards and provides unprecedented safety guarantees through interface-driven design.
+The core of Gridway's microkernel architecture embraces the WASI 0.2 Component Model, a significant evolution from traditional module-based approaches. Implemented in `gridway-baseapp/src/component_host.rs`, the component architecture establishes a type-safe, composable foundation for all blockchain elements. This architectural choice represents a fundamental commitment to the future of WebAssembly standards and provides unprecedented safety guarantees through interface-driven design.
 
 ```rust
 pub struct ComponentHost<T: ComponentContext> {
@@ -78,7 +78,7 @@ pub fn instantiate_component(&mut self, path: &str) -> Result<ComponentInstance,
 
 ### Dynamic Component Loading Architecture
 
-A revolutionary aspect of Helium's architecture is the storage of WASI components directly in the merkle tree, enabling dynamic program updates through governance. Rather than hard-coding critical blockchain components, the system loads them from well-known paths in the state store:
+A revolutionary aspect of Gridway's architecture is the storage of WASI components directly in the merkle tree, enabling dynamic program updates through governance. Rather than hard-coding critical blockchain components, the system loads them from well-known paths in the state store:
 
 ```rust
 // Core system components stored in merkle tree
@@ -188,7 +188,7 @@ This interface-first approach eliminates entire classes of bugs that plague manu
 
 ## Virtual Filesystem Design Philosophy
 
-The Virtual Filesystem represents the philosophical heart of Helium's capability system, embracing the profound simplicity of "everything is a file"—a principle that has guided Unix system design for decades and now finds new expression in blockchain architecture.
+The Virtual Filesystem represents the philosophical heart of Gridway's capability system, embracing the profound simplicity of "everything is a file"—a principle that has guided Unix system design for decades and now finds new expression in blockchain architecture.
 
 The VFS is not a traditional filesystem backed by disk storage—it is an abstraction layer over the blockchain's merkle tree state store. Each "file" in the VFS corresponds to a key-value pair in the underlying merkle store, with paths mapping to merkle tree keys and file contents to merkle tree values. This design provides a familiar interface while maintaining the cryptographic integrity and verification properties essential for blockchain consensus.
 
@@ -412,7 +412,7 @@ This canonicalization happens once at file open time, establishing a secure bind
 
 ## Component Types and Their Philosophies
 
-The WASI Component Model enables Helium to define distinct component types, each serving a specific role in the blockchain's operation. These components interact through well-defined interfaces, creating a system that is both modular and comprehensible.
+The WASI Component Model enables Gridway to define distinct component types, each serving a specific role in the blockchain's operation. These components interact through well-defined interfaces, creating a system that is both modular and comprehensible.
 
 ### Ante Handler Components
 
@@ -430,7 +430,7 @@ The philosophical importance of separating ante handling into its own component 
 
 ### Transaction Decoder Components
 
-Transaction decoding might seem like a simple technical necessity, but it represents a profound architectural decision. By isolating decoding logic into its own component, Helium enables:
+Transaction decoding might seem like a simple technical necessity, but it represents a profound architectural decision. By isolating decoding logic into its own component, Gridway enables:
 
 ```wit
 interface tx-decoder {
@@ -619,7 +619,7 @@ Capabilities become first-class citizens in the component ecosystem, with each c
 
 ## BaseApp and Transaction Processing
 
-The `BaseApp` implementation fundamentally reimagines transaction processing through the lens of dynamic component composition. Unlike traditional monolithic approaches, Helium's `BaseApp` orchestrates components loaded from the merkle tree, enabling runtime evolution of blockchain behavior.
+The `BaseApp` implementation fundamentally reimagines transaction processing through the lens of dynamic component composition. Unlike traditional monolithic approaches, Gridway's `BaseApp` orchestrates components loaded from the merkle tree, enabling runtime evolution of blockchain behavior.
 
 ```rust
 pub struct BaseApp<T: ComponentContext> {
@@ -867,6 +867,6 @@ While dynamic component loading provides unprecedented flexibility, it requires 
 
 ## See Also
 
-- [Virtual Filesystem Architecture](../helium-store/PLAN.md) - Details on the VFS and state storage
+- [Virtual Filesystem Architecture](../gridway-store/PLAN.md) - Details on the VFS and state storage
 - [Project Overview and Vision](../../PLAN.md) - High-level architectural vision
-- [Server Integration](../helium-server/PLAN.md) - How components integrate with ABCI 2.0
+- [Server Integration](../gridway-server/PLAN.md) - How components integrate with ABCI 2.0

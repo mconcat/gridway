@@ -1,6 +1,6 @@
-//! Protocol Buffer definitions for Helium blockchain
+//! Protocol Buffer definitions for Gridway blockchain
 //!
-//! This crate provides all protobuf-generated types used across the Helium
+//! This crate provides all protobuf-generated types used across the Gridway
 //! blockchain implementation, including ABCI types from CometBFT and Cosmos SDK types.
 
 /// CometBFT ABCI types

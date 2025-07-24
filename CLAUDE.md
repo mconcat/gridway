@@ -1,13 +1,13 @@
-# Claude Agent Guidelines for Helium Project
+# Claude Agent Guidelines for Gridway Project
 
-This document provides essential guidelines and best practices for AI agents working on the Helium blockchain project. Follow these guidelines to avoid common pitfalls and ensure smooth CI/CD operations.
+This document provides essential guidelines and best practices for AI agents working on the Gridway blockchain project. Follow these guidelines to avoid common pitfalls and ensure smooth CI/CD operations.
 
 ## MANDATORY: Read Architecture Documentation First
 
 **CRITICAL**: Before starting ANY task, you MUST:
 
 1. **Always read the root PLAN.md** (`/PLAN.md`) to understand the overall architecture and design philosophy
-2. **When working on a specific crate**, also read that crate's PLAN.md (e.g., `/crates/helium-baseapp/PLAN.md`)
+2. **When working on a specific crate**, also read that crate's PLAN.md (e.g., `/crates/gridway-baseapp/PLAN.md`)
 3. **These documents contain critical architectural decisions** that affect all implementation work
 
 The PLAN.md files contain:
@@ -195,13 +195,13 @@ opt-level = 3
 
 **Example Order**:
 ```
-helium-store (no workspace dependencies)
+gridway-store (no workspace dependencies)
   ↓
-helium-types (depends on store)
+gridway-types (depends on store)
   ↓
-helium-crypto (depends on types)
+gridway-crypto (depends on types)
   ↓
-helium-baseapp (depends on all above)
+gridway-baseapp (depends on all above)
 ```
 
 ### 3. Ask When Uncertain

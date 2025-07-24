@@ -49,12 +49,12 @@ The detailed implementation architecture is documented in component-specific PLA
 
 ### Core Components
 
-- **[BaseApp Architecture](crates/helium-baseapp/PLAN.md)**: WASI microkernel foundation, Virtual Filesystem (VFS), capability-based security model, and transaction processing engine
-- **[Store Architecture](crates/helium-store/PLAN.md)**: GlobalAppStore state management, JMT (Jellyfish Merkle Tree) implementation, and persistence layer
-- **[Crypto Architecture](crates/helium-crypto/PLAN.md)**: Cryptographic infrastructure, key management, and signature verification
-- **[Server Architecture](crates/helium-server/PLAN.md)**: Network layer, gRPC/REST APIs, and ABCI implementation
-- **[Client Architecture](crates/helium-client/PLAN.md)**: Wallet integration, transaction building, and developer tools
-- **[Types Architecture](crates/helium-types/PLAN.md)**: Core data structures and minimal protobuf utilities
+- **[BaseApp Architecture](crates/gridway-baseapp/PLAN.md)**: WASI microkernel foundation, Virtual Filesystem (VFS), capability-based security model, and transaction processing engine
+- **[Store Architecture](crates/gridway-store/PLAN.md)**: GlobalAppStore state management, JMT (Jellyfish Merkle Tree) implementation, and persistence layer
+- **[Crypto Architecture](crates/gridway-crypto/PLAN.md)**: Cryptographic infrastructure, key management, and signature verification
+- **[Server Architecture](crates/gridway-server/PLAN.md)**: Network layer, gRPC/REST APIs, and ABCI implementation
+- **[Client Architecture](crates/gridway-client/PLAN.md)**: Wallet integration, transaction building, and developer tools
+- **[Types Architecture](crates/gridway-types/PLAN.md)**: Core data structures and minimal protobuf utilities
 
 ### Architecture Decision Records
 
@@ -64,7 +64,7 @@ The detailed implementation architecture is documented in component-specific PLA
 
 ## Component Types and Execution Model
 
-Helium supports three distinct component types, enabling diverse development patterns:
+Gridway supports three distinct component types, enabling diverse development patterns:
 
 1. **SDK-Style Modules:** Traditional blockchain modules implementing specific interfaces (e.g., `bank`, `staking`)
 2. **Chain-in-Chain Modules:** Full ABCI 2.0 applications running as nested chains within transactions
@@ -82,7 +82,7 @@ Components are loaded from the merkle tree filesystem hierarchy:
 
 ## Current State Summary
 
-The Helium SDK has validated core concepts but remains a proof-of-concept. While WASI execution works and individual components exist, they are not integrated into the revolutionary architecture described in this document. The implementation demonstrates feasibility but lacks the persistence, security, and upgradeability required for production use.
+The Gridway SDK has validated core concepts but remains a proof-of-concept. While WASI execution works and individual components exist, they are not integrated into the revolutionary architecture described in this document. The implementation demonstrates feasibility but lacks the persistence, security, and upgradeability required for production use.
 
 The implementation status of key components:
 
@@ -115,7 +115,7 @@ The assessment places the project at **Technology Readiness Level 3-4**: Proof o
 
 ## Future Evolution Pathways
 
-The WASI microkernel architecture is not just an endpoint but a foundation for significant future evolution, positioning the Helium SDK to pioneer capabilities beyond those of traditional blockchain platforms.
+The WASI microkernel architecture is not just an endpoint but a foundation for significant future evolution, positioning the Gridway SDK to pioneer capabilities beyond those of traditional blockchain platforms.
 
 ### Evolving the Core Protocol
 
@@ -133,7 +133,7 @@ While already IBC-compatible, the modular design enables more advanced **cross-c
 
 ## Summary of Critical Architectural Decisions
 
-These are the architectural decisions that define Helium, though most remain unimplemented:
+These are the architectural decisions that define Gridway, though most remain unimplemented:
 
 1. **WASI Component Model Architecture:** The foundational choice to implement blockchain logic as dynamically loaded, sandboxed WebAssembly components using WASI 0.2, enabling modularity and multi-language support. *(Partially implemented - uses old WASI module approach)*
 

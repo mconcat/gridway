@@ -1,4 +1,4 @@
-//! Configuration management for the helium client
+//! Configuration management for the gridway client
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -40,7 +40,7 @@ impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             node: "http://localhost:26657".to_string(),
-            chain_id: "helium-chain".to_string(),
+            chain_id: "gridway-chain".to_string(),
             output: "text".to_string(),
             timeout: 30,
             keyring_backend: "file".to_string(),
@@ -66,9 +66,9 @@ impl ClientConfig {
     /// Get default configuration directory
     pub fn default_config_dir() -> PathBuf {
         if let Some(home) = dirs::home_dir() {
-            home.join(".helium")
+            home.join(".gridway")
         } else {
-            PathBuf::from(".helium")
+            PathBuf::from(".gridway")
         }
     }
 
@@ -144,7 +144,7 @@ mod tests {
     fn test_default_config() {
         let config = ClientConfig::default();
         assert_eq!(config.node, "http://localhost:26657");
-        assert_eq!(config.chain_id, "helium-chain");
+        assert_eq!(config.chain_id, "gridway-chain");
         assert_eq!(config.output, "text");
         assert_eq!(config.timeout, 30);
         assert_eq!(config.keyring_backend, "file");

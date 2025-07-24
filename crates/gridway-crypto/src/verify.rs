@@ -1,4 +1,4 @@
-//! Transaction signature verification for helium blockchain
+//! Transaction signature verification for gridway blockchain
 //!
 //! This module provides comprehensive transaction signature verification
 //! compatible with Cosmos SDK standards, supporting both Secp256k1 and Ed25519.

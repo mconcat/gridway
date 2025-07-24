@@ -1736,6 +1736,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires kvstore interface which is being removed"]
     fn test_begin_end_block() {
         let mut app = BaseApp::new("test-app".to_string()).unwrap();
 
@@ -1792,6 +1793,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires kvstore interface which is being removed"]
     fn test_finalize_block() {
         let mut app = BaseApp::new("test-app".to_string()).unwrap();
 

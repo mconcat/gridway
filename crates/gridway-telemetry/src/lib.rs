@@ -1,4 +1,4 @@
-//! Telemetry and metrics infrastructure for Helium blockchain.
+//! Telemetry and metrics infrastructure for Gridway blockchain.
 //!
 //! This crate provides a comprehensive metrics collection and exposition
 //! framework using Prometheus for monitoring blockchain health and performance.

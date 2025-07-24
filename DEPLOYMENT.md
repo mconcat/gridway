@@ -1,17 +1,17 @@
-# Helium Deployment Guide
+# Gridway Deployment Guide
 
-[![CI](https://github.com/mconcat/helium/actions/workflows/ci.yml/badge.svg)](https://github.com/mconcat/helium/actions/workflows/ci.yml)
-[![CometBFT Integration](https://github.com/mconcat/helium/actions/workflows/cometbft-integration.yml/badge.svg)](https://github.com/mconcat/helium/actions/workflows/cometbft-integration.yml)
-[![Docker](https://github.com/mconcat/helium/actions/workflows/docker.yml/badge.svg)](https://github.com/mconcat/helium/actions/workflows/docker.yml)
+[![CI](https://github.com/mconcat/gridway/actions/workflows/ci.yml/badge.svg)](https://github.com/mconcat/gridway/actions/workflows/ci.yml)
+[![CometBFT Integration](https://github.com/mconcat/gridway/actions/workflows/cometbft-integration.yml/badge.svg)](https://github.com/mconcat/gridway/actions/workflows/cometbft-integration.yml)
+[![Docker](https://github.com/mconcat/gridway/actions/workflows/docker.yml/badge.svg)](https://github.com/mconcat/gridway/actions/workflows/docker.yml)
 
-This guide covers deploying and operating Helium blockchain nodes with CometBFT consensus engine, including single-node testnets and multi-validator networks.
+This guide covers deploying and operating Gridway blockchain nodes with CometBFT consensus engine, including single-node testnets and multi-validator networks.
 
 ## 🚀 Quick Start
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/mconcat/helium.git
-cd helium
+git clone https://github.com/mconcat/gridway.git
+cd gridway
 
 # 2. Copy environment configuration
 cp .env.example .env
@@ -29,7 +29,7 @@ cp .env.example .env
 .
 ├── docker compose.yml          # Single-node Docker configuration
 ├── docker compose.multi.yml    # Multi-node Docker configuration
-├── Dockerfile                  # Helium application image
+├── Dockerfile                  # Gridway application image
 ├── .env.example               # Environment variables template
 ├── scripts/
 │   ├── init-testnet.sh        # Initialize single-node testnet
@@ -54,9 +54,9 @@ cp .env.example .env
 |---------|-------------|-------------|
 | CometBFT RPC | 26657 | Consensus engine RPC |
 | CometBFT P2P | 26656 | P2P network communication |
-| Helium ABCI | 26658 | ABCI protocol interface |
-| Helium gRPC | 9090 | gRPC API endpoint |
-| Helium REST | 1317 | REST API & Health endpoints |
+| Gridway ABCI | 26658 | ABCI protocol interface |
+| Gridway gRPC | 9090 | gRPC API endpoint |
+| Gridway REST | 1317 | REST API & Health endpoints |
 
 ## 🔧 Common Operations
 
@@ -99,9 +99,9 @@ docker compose -f docker compose.multi.yml up
 ## 🔍 Troubleshooting
 
 ### Connection Issues
-- Verify Helium is running: `docker compose ps`
+- Verify Gridway is running: `docker compose ps`
 - Check ABCI port: `nc -zv localhost 26658`
-- Review logs: `docker compose logs helium`
+- Review logs: `docker compose logs gridway`
 
 ### Build Issues
 - Ensure Docker is running

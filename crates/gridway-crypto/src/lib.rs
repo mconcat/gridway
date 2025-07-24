@@ -1,4 +1,4 @@
-//! Cryptographic primitives for helium
+//! Cryptographic primitives for gridway
 //!
 //! This crate provides core cryptographic types and operations using
 //! well-audited implementations from the RustCrypto project.

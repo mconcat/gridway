@@ -1,7 +1,7 @@
-//! Simulation application framework for the helium blockchain.
+//! Simulation application framework for the gridway blockchain.
 //!
 //! This crate provides a simulation environment for testing and benchmarking
-//! helium blockchain applications.
+//! gridway blockchain applications.
 
 use clap::{Parser, Subcommand};
 use gridway_types::Config;
@@ -301,8 +301,8 @@ impl Simulator {
 
 /// CLI for running simulations
 #[derive(Parser)]
-#[command(name = "helium-sim")]
-#[command(about = "Helium blockchain simulation tool")]
+#[command(name = "gridway-sim")]
+#[command(about = "Gridway blockchain simulation tool")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

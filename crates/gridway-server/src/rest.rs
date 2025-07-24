@@ -685,7 +685,7 @@ pub fn create_rest_router(state: Arc<RestGatewayState>) -> Router {
 async fn health_check() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "ok",
-        "service": "helium-rest-gateway",
+        "service": "gridway-rest-gateway",
         "version": "0.1.0"
     }))
 }
@@ -694,7 +694,7 @@ async fn health_check() -> Json<serde_json::Value> {
 async fn status_check(State(state): State<Arc<RestGatewayState>>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "running",
-        "service": "helium-rest-gateway",
+        "service": "gridway-rest-gateway",
         "version": "0.1.0",
         "grpc_endpoint": state.config.grpc_endpoint,
         "logging_enabled": state.config.enable_logging,

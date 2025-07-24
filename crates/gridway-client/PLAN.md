@@ -1,6 +1,6 @@
-# Helium Client Architecture
+# Gridway Client Architecture
 
-This document details the architectural vision of the Helium Client crate, which provides client-side infrastructure for interacting with Helium blockchain nodes. Following the Cosmos SDK client package design, this crate focuses on transaction building, broadcasting, key management, and CLI tools—making the underlying WASI component architecture transparent to end users.
+This document details the architectural vision of the Gridway Client crate, which provides client-side infrastructure for interacting with Gridway blockchain nodes. Following the Cosmos SDK client package design, this crate focuses on transaction building, broadcasting, key management, and CLI tools—making the underlying WASI component architecture transparent to end users.
 
 ## Design Philosophy
 
@@ -131,7 +131,7 @@ The CLI provides a comprehensive interface for all blockchain operations:
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "helium")]
+#[command(name = "gridway")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -176,20 +176,20 @@ Key features:
 
 ### Key Management
 
-The CLI integrates with helium-keyring for secure key operations:
+The CLI integrates with gridway-keyring for secure key operations:
 
 ```bash
 # Add a new key
-helium keys add alice
+gridway keys add alice
 
 # Import existing key
-helium keys import bob --recover
+gridway keys import bob --recover
 
 # List all keys
-helium keys list
+gridway keys list
 
 # Export for backup
-helium keys export alice --unarmored-hex --unsafe
+gridway keys export alice --unarmored-hex --unsafe
 ```
 
 ### Transaction Operations
@@ -198,16 +198,16 @@ Transaction commands follow Cosmos SDK patterns:
 
 ```bash
 # Send tokens
-helium tx bank send alice cosmos1... 1000uatom --fees 1000uatom
+gridway tx bank send alice cosmos1... 1000uatom --fees 1000uatom
 
 # Sign offline
-helium tx sign tx.json --from alice --offline
+gridway tx sign tx.json --from alice --offline
 
 # Broadcast pre-signed
-helium tx broadcast signed-tx.json
+gridway tx broadcast signed-tx.json
 
 # Multisig operations
-helium tx multisign tx.json alice bob --offline
+gridway tx multisign tx.json alice bob --offline
 ```
 
 ### Query Operations
@@ -216,16 +216,16 @@ Comprehensive query support for all modules:
 
 ```bash
 # Account queries
-helium query account cosmos1...
-helium query balance cosmos1... uatom
+gridway query account cosmos1...
+gridway query balance cosmos1... uatom
 
 # Transaction queries
-helium query tx <hash>
-helium query txs --events 'transfer.recipient=cosmos1...'
+gridway query tx <hash>
+gridway query txs --events 'transfer.recipient=cosmos1...'
 
 # Block queries
-helium query block <height>
-helium query block-results <height>
+gridway query block <height>
+gridway query block-results <height>
 ```
 
 ## Integration with Component Architecture
@@ -240,13 +240,13 @@ The client can discover available modules and their operations through the serve
 impl Client {
     pub async fn list_modules(&self) -> Result<Vec<ModuleInfo>, Error> {
         // Query server for dynamically generated module endpoints
-        let modules = self.query("/helium/modules/v1/list").await?;
+        let modules = self.query("/gridway/modules/v1/list").await?;
         Ok(modules)
     }
     
     pub async fn get_module_methods(&self, module: &str) -> Result<ModuleMethods, Error> {
         // Discover available queries and transactions for a module
-        let methods = self.query(&format!("/helium/modules/v1/{}/methods", module)).await?;
+        let methods = self.query(&format!("/gridway/modules/v1/{}/methods", module)).await?;
         Ok(methods)
     }
 }
@@ -262,15 +262,15 @@ This enables:
 The client manages configuration through a layered approach:
 
 ```toml
-# ~/.helium/config.toml
+# ~/.gridway/config.toml
 [client]
 node = "http://localhost:26657"
-chain_id = "helium-1"
+chain_id = "gridway-1"
 broadcast_mode = "sync"
 
 [keyring]
 backend = "file"
-dir = "~/.helium/keys"
+dir = "~/.gridway/keys"
 
 [gas]
 adjustment = 1.5
@@ -322,6 +322,6 @@ The client crate maintains several key principles:
 
 ## See Also
 
-- [Server Architecture](../helium-server/PLAN.md) - Dynamic service generation
-- [Keyring Management](../helium-keyring/PLAN.md) - Key storage and management
+- [Server Architecture](../gridway-server/PLAN.md) - Dynamic service generation
+- [Keyring Management](../gridway-keyring/PLAN.md) - Key storage and management
 - [Project Overview](../../PLAN.md) - High-level architectural vision

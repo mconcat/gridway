@@ -1,4 +1,4 @@
-//! gRPC service definitions for helium blockchain
+//! gRPC service definitions for gridway blockchain
 //!
 //! This module provides gRPC service interfaces compatible with Cosmos SDK,
 //! including Bank, Auth, and Tx services.

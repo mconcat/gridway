@@ -1,6 +1,6 @@
 //! Storage initialization and configuration module
 //!
-//! This module provides RocksDB-based storage initialization and management for Helium.
+//! This module provides RocksDB-based storage initialization and management for Gridway.
 //!
 //! # Example
 //!
@@ -14,7 +14,7 @@
 //! config.compression = Some("lz4".to_string());
 //!
 //! // Initialize storage
-//! let home_dir = Path::new("/path/to/helium/home");
+//! let home_dir = Path::new("/path/to/gridway/home");
 //! let storage = init_storage(home_dir, &config).unwrap();
 //!
 //! // Access different databases

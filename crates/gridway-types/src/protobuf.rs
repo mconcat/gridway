@@ -1,7 +1,7 @@
 //! Protobuf utilities for Cosmos SDK compatibility
 //!
 //! This module provides the Any type and MessageExt trait that were previously
-//! in helium-codec. Since we're using protobuf-only (no Amino), these minimal
+//! in gridway-codec. Since we're using protobuf-only (no Amino), these minimal
 //! utilities are all we need.
 
 use prost::Message;

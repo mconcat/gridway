@@ -36,7 +36,7 @@ impl Default for AbciConfig {
             flush_interval: 100,
             persist_interval: 1,
             retain_blocks: 0, // Keep all blocks by default
-            chain_id: "helium-1".to_string(),
+            chain_id: "gridway-1".to_string(),
         }
     }
 }

@@ -144,7 +144,7 @@ jq --arg pubkey "$VALIDATOR_PUBKEY" \
 mv "$TEMP_GENESIS" "${COMETBFT_HOME}/config/genesis.json"
 
 # Initialize Gridway application
-echo "Initializing Helium application..."
+echo "Initializing Gridway application..."
 cat > "${GRIDWAY_HOME}/config/config.toml" << EOF
 # Gridway Application Configuration
 listen_address = "tcp://0.0.0.0:26658"

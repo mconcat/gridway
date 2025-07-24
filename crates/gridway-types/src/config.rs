@@ -1,4 +1,4 @@
-//! Configuration management for Helium blockchain
+//! Configuration management for Gridway blockchain
 //!
 //! This module provides centralized configuration management to replace
 //! hardcoded values throughout the codebase.
@@ -146,9 +146,9 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             chain: ChainConfig {
-                id: "helium-mainnet".to_string(),
-                network: "helium".to_string(),
-                test_id: "helium-testnet".to_string(),
+                id: "gridway-mainnet".to_string(),
+                network: "gridway".to_string(),
+                test_id: "gridway-testnet".to_string(),
                 default_denom: "stake".to_string(),
                 test_denom: "uatom".to_string(),
                 min_gas_price: "0.001stake".to_string(),
@@ -197,7 +197,7 @@ impl Default for Config {
             },
             node: NodeConfig {
                 id: "node123".to_string(),
-                moniker: "helium-node".to_string(),
+                moniker: "gridway-node".to_string(),
             },
             genesis: GenesisConfig {
                 validator_address: "cosmos1syavy2npfyt9tcncdtsdzf7kny9lh777pahuux".to_string(),
@@ -270,7 +270,7 @@ impl Config {
     /// Get the default configuration file path
     pub fn default_config_path() -> Result<PathBuf, ConfigError> {
         let home = dirs::home_dir().ok_or(ConfigError::HomeDirectoryNotFound)?;
-        Ok(home.join(".helium").join("config.toml"))
+        Ok(home.join(".gridway").join("config.toml"))
     }
 
     /// Validate configuration values
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.chain.id, "helium-mainnet");
+        assert_eq!(config.chain.id, "gridway-mainnet");
         assert_eq!(config.gas.default_limit, 200_000);
         assert_eq!(config.server.grpc_port, 9090);
     }

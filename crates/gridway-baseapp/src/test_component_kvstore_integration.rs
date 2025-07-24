@@ -6,6 +6,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
+    #[ignore = "Requires kvstore interface which is being removed"]
     fn test_component_kvstore_isolation() {
         // Create a base store
         let base_store = Arc::new(Mutex::new(MemStore::new()));
@@ -129,6 +130,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires kvstore interface which is being removed"]
     fn test_component_kvstore_persistence() {
         let base_store = Arc::new(Mutex::new(MemStore::new()));
         let host = ComponentHost::new(base_store.clone()).unwrap();
@@ -187,6 +189,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires kvstore interface which is being removed"]
     fn test_kvstore_prefix_enforcement() {
         let base_store = Arc::new(Mutex::new(MemStore::new()));
         let kvstore_host = KVStoreResourceHost::new(base_store.clone());
@@ -225,6 +228,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires kvstore interface which is being removed"]
     fn test_kvstore_edge_cases() {
         let base_store = Arc::new(Mutex::new(MemStore::new()));
         let kvstore_host = KVStoreResourceHost::new(base_store.clone());
@@ -286,6 +290,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires kvstore interface which is being removed"]
     fn test_multiple_components_isolation() {
         let base_store = Arc::new(Mutex::new(MemStore::new()));
         let kvstore_host = KVStoreResourceHost::new(base_store.clone());

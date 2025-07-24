@@ -1,14 +1,14 @@
-# Helium Store Architecture
+# Gridway Store Architecture
 
-This document details the architectural vision of the Helium Store crate, which provides the unified state management foundation for the Helium blockchain through a single global merkle store accessed via Virtual Filesystem semantics.
+This document details the architectural vision of the Gridway Store crate, which provides the unified state management foundation for the Gridway blockchain through a single global merkle store accessed via Virtual Filesystem semantics.
 
 ## Unified State Store Philosophy
 
-Helium makes a fundamental departure from the traditional Cosmos SDK MultiStore architecture by adopting a single, unified merkle store.
+Gridway makes a fundamental departure from the traditional Cosmos SDK MultiStore architecture by adopting a single, unified merkle store.
 
 ### The Single Store Principle
 
-Instead of each module maintaining its own isolated merkle tree, Helium employs a single global merkle store where all state resides. This unified approach eliminates the artificial boundaries between module states while maintaining logical isolation through the Virtual Filesystem abstraction:
+Instead of each module maintaining its own isolated merkle tree, Gridway employs a single global merkle store where all state resides. This unified approach eliminates the artificial boundaries between module states while maintaining logical isolation through the Virtual Filesystem abstraction:
 
 ```rust
 // Conceptual view of state organization
@@ -33,7 +33,7 @@ The single store architecture delivers profound benefits:
 
 ## Transaction Isolation Through Snapshots
 
-Each transaction in Helium executes against its own isolated snapshot of the global merkle store. This design provides perfect isolation without the complexity of traditional locking mechanisms:
+Each transaction in Gridway executes against its own isolated snapshot of the global merkle store. This design provides perfect isolation without the complexity of traditional locking mechanisms:
 
 ```rust
 // Conceptual transaction execution model
@@ -141,7 +141,7 @@ The abstraction enables running the same blockchain with different backends, fac
 3. **State Sync Efficiency**: Measuring synchronization performance
 4. **Proof Generation Costs**: Comparing the overhead of merkle proof creation
 
-This data-driven approach ensures that the final choice optimizes for Helium's specific requirements rather than relying on generic assumptions.
+This data-driven approach ensures that the final choice optimizes for Gridway's specific requirements rather than relying on generic assumptions.
 
 ### Future Evolution
 
@@ -167,6 +167,6 @@ These enhancements will be guided by production experience and ecosystem needs.
 
 ## See Also
 
-- [Virtual Filesystem Architecture](../helium-baseapp/PLAN.md#virtual-filesystem-vfs-and-state-access) - How VFS interacts with the store
-- [BaseApp Transaction Processing](../helium-baseapp/PLAN.md#baseapp-and-transaction-processing) - Transaction context and atomicity
+- [Virtual Filesystem Architecture](../gridway-baseapp/PLAN.md#virtual-filesystem-vfs-and-state-access) - How VFS interacts with the store
+- [BaseApp Transaction Processing](../gridway-baseapp/PLAN.md#baseapp-and-transaction-processing) - Transaction context and atomicity
 - [Project Overview](../../PLAN.md) - High-level architectural vision

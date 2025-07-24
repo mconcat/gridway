@@ -1,6 +1,5 @@
 // Simple test to debug WASI execution
 use wasmtime::*;
-use wasmtime_wasi::{preview1::add_to_linker_sync, WasiCtxBuilder};
 
 #[test]
 fn test_simple_wasi_execution() {
@@ -17,14 +16,8 @@ fn test_simple_wasi_execution() {
 
     // Create engine and store
     let engine = Engine::default();
-    let mut linker = Linker::new(&engine);
-
-    // Create WASI context
-    let wasi = WasiCtxBuilder::new().build_p1();
-    let mut store = Store::new(&engine, wasi);
-
-    // Add WASI to linker
-    add_to_linker_sync(&mut linker, |ctx| ctx).unwrap();
+    let linker = Linker::new(&engine);
+    let mut store = Store::new(&engine, ());
 
     // Create module and instance
     let module = Module::new(&engine, &wasm).unwrap();

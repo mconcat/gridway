@@ -1,4 +1,4 @@
-//! State management layer for the helium blockchain.
+//! State management layer for the gridway blockchain.
 //!
 //! This module provides the StateManager that coordinates state access
 //! using GlobalAppStore pattern with namespace isolation.

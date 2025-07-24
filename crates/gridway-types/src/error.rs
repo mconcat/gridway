@@ -1,4 +1,4 @@
-//! Error handling for helium
+//! Error handling for gridway
 
 use thiserror::Error;
 
