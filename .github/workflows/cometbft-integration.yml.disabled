@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'crates/helium-server/**'
-      - 'crates/helium-baseapp/**'
+      - 'crates/gridway-server/**'
+      - 'crates/gridway-baseapp/**'
       - 'docker-compose*.yml'
       - 'Dockerfile'
       - 'scripts/*.sh'
@@ -13,15 +13,15 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - 'crates/helium-server/**'
-      - 'crates/helium-baseapp/**'
+      - 'crates/gridway-server/**'
+      - 'crates/gridway-baseapp/**'
       - 'docker-compose*.yml'
       - 'Dockerfile'
       - 'scripts/*.sh'
 
 env:
   CARGO_TERM_COLOR: always
-  CHAIN_ID: helium-testnet-ci
+  CHAIN_ID: gridway-testnet-ci
 
 jobs:
   integration-tests:
@@ -42,13 +42,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
       
-      - name: Build Helium Docker image
+      - name: Build Gridway Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: false
           load: true
-          tags: helium:test
+          tags: gridway:test
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
       
@@ -64,7 +64,7 @@ jobs:
           
       - name: Single Node - Start services
         run: |
-          export HELIUM_IMAGE=helium:test
+          export GRIDWAY_IMAGE=gridway:test
           docker compose up -d
           sleep 10
           
@@ -89,7 +89,7 @@ jobs:
           done
           if [ $attempt -eq $max_attempts ]; then
             echo "Health endpoint failed to become ready"
-            docker compose logs helium
+            docker compose logs gridway
             exit 1
           fi
           
@@ -121,7 +121,7 @@ jobs:
           
       - name: Multi-Node - Start all nodes
         run: |
-          export HELIUM_IMAGE=helium:test
+          export GRIDWAY_IMAGE=gridway:test
           docker compose -f docker-compose.multi.yml up -d
           sleep 15
           
@@ -132,7 +132,7 @@ jobs:
           # Check each node
           for i in 0 1 2 3; do
             echo "Checking node $i..."
-            docker compose -f docker-compose.multi.yml logs helium-$i --tail=20
+            docker compose -f docker-compose.multi.yml logs gridway-$i --tail=20
             docker compose -f docker-compose.multi.yml logs cometbft-$i --tail=20
           done
           
@@ -177,7 +177,7 @@ jobs:
             echo "Consensus failed to form"
             for node in 0 1 2 3; do
               echo "=== Logs for node $node ==="
-              docker compose -f docker-compose.multi.yml logs helium-$node cometbft-$node | tail -100
+              docker compose -f docker-compose.multi.yml logs gridway-$node cometbft-$node | tail -100
             done
             exit 1
           fi
@@ -212,14 +212,14 @@ jobs:
             attempt=$((attempt + 1))
           done
           
-          # Simulate connection failure by stopping helium
+          # Simulate connection failure by stopping gridway
           echo "Simulating connection failure..."
-          docker compose stop helium
+          docker compose stop gridway
           sleep 5
           
-          # Restart helium
-          echo "Restarting helium service..."
-          docker compose start helium
+          # Restart gridway
+          echo "Restarting gridway service..."
+          docker compose start gridway
           
           # Test recovery with exponential backoff
           echo "Testing connection recovery..."
@@ -241,7 +241,7 @@ jobs:
           
           if [ $recovery_attempt -eq $max_recovery_attempts ]; then
             echo "Connection failed to recover"
-            docker compose logs helium --tail=100
+            docker compose logs gridway --tail=100
             exit 1
           fi
           
@@ -249,7 +249,7 @@ jobs:
         run: |
           # Block ABCI port temporarily
           echo "Testing port blocking scenario..."
-          docker compose exec -T helium nc -l -p 26658 &
+          docker compose exec -T gridway nc -l -p 26658 &
           BLOCKER_PID=$!
           sleep 5
           
@@ -260,7 +260,7 @@ jobs:
           sleep 10
           curl -f http://localhost:1317/health || {
             echo "Failed to recover from port blocking"
-            docker compose logs helium --tail=50
+            docker compose logs gridway --tail=50
             exit 1
           }
           

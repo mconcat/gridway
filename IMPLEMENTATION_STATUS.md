@@ -1,4 +1,4 @@
-# Helium Implementation Status Report
+# Gridway Implementation Status Report
 
 This document provides an accurate assessment of the implementation status of features claimed in the root PLAN.md as of the current codebase state.
 
@@ -50,7 +50,7 @@ This document provides an accurate assessment of the implementation status of fe
 **Claimed**: "High-performance Jellyfish Merkle Tree replacing IAVL"
 
 **Actual Status**:
-- ✅ JMT implementation exists in helium-store
+- ✅ JMT implementation exists in gridway-store
 - ❌ BaseApp uses MemStore instead of JMT
 - ❌ No GlobalAppStore integration in BaseApp
 - ❌ Commit() returns placeholder hash without merkle computation
@@ -108,4 +108,4 @@ The project has built several isolated components (VFS, capabilities, JMT, WASI 
 4. **Components Not in Merkle Tree**: WASI components are loaded from filesystem, not merkle storage
 5. **VFS Not Connected to WASI**: Modules cannot actually use file operations for state access
 
-The revolutionary vision of a blockchain where core components live in the merkle tree and can be upgraded through governance remains unrealized. The current implementation is essentially a WASI execution proof-of-concept without the persistent, capability-secured, VFS-based state management that defines the Helium architecture.
+The revolutionary vision of a blockchain where core components live in the merkle tree and can be upgraded through governance remains unrealized. The current implementation is essentially a WASI execution proof-of-concept without the persistent, capability-secured, VFS-based state management that defines the Gridway architecture.

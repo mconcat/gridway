@@ -1,18 +1,18 @@
 # Cosmos SDK Compatibility Report
 
-This document analyzes the compatibility of Helium's implementation with the Cosmos SDK standards for ABCI++, gRPC/REST endpoints, and transaction processing.
+This document analyzes the compatibility of Gridway's implementation with the Cosmos SDK standards for ABCI++, gRPC/REST endpoints, and transaction processing.
 
 ## Executive Summary
 
 ✅ **Overall Compatibility**: HIGH
 
-The Helium implementation demonstrates strong compatibility with Cosmos SDK standards, implementing all required ABCI++ methods and following established patterns for service endpoints and transaction processing.
+The Gridway implementation demonstrates strong compatibility with Cosmos SDK standards, implementing all required ABCI++ methods and following established patterns for service endpoints and transaction processing.
 
 ## ABCI++ Protocol Compatibility
 
 ### Implemented Methods
 
-| Method | Cosmos SDK Spec | Helium Implementation | Status |
+| Method | Cosmos SDK Spec | Gridway Implementation | Status |
 |--------|----------------|----------------------|---------|
 | **Info** | Returns app info including version, height, app hash | ✅ Implemented with version, height, app_hash | ✅ Compatible |
 | **InitChain** | Initialize blockchain with genesis | ✅ Validates chain_id, initializes state | ✅ Compatible |
@@ -46,7 +46,7 @@ The Helium implementation demonstrates strong compatibility with Cosmos SDK stan
 
 ### Transaction Structure
 
-| Component | Cosmos SDK Standard | Helium Implementation | Status |
+| Component | Cosmos SDK Standard | Gridway Implementation | Status |
 |-----------|-------------------|----------------------|---------|
 | **Tx Encoding** | Protobuf | ✅ Uses protobuf via prost | ✅ Compatible |
 | **Ante Handler** | Pre-tx validation | ✅ WASI-based ante handler | ✅ Compatible |
@@ -71,7 +71,7 @@ The Helium implementation demonstrates strong compatibility with Cosmos SDK stan
 
 ### Endpoint Standards
 
-| Feature | Cosmos SDK Standard | Helium Implementation | Status |
+| Feature | Cosmos SDK Standard | Gridway Implementation | Status |
 |---------|-------------------|----------------------|---------|
 | **gRPC Port** | 9090 | ✅ Default 9090 | ✅ Compatible |
 | **REST Port** | 1317 | ✅ Default 1317 | ✅ Compatible |
@@ -108,7 +108,7 @@ enable = true
 address = "tcp://0.0.0.0:1317"
 swagger = false
 
-# Helium Implementation
+# Gridway Implementation
 [grpc]
 address = "0.0.0.0:9090"  # ✅ Compatible
 
@@ -117,7 +117,7 @@ address = "0.0.0.0:9090"  # ✅ Compatible
 
 ## Health & Monitoring Extensions
 
-Helium adds health check endpoints not in standard Cosmos SDK:
+Gridway adds health check endpoints not in standard Cosmos SDK:
 
 - ✅ `/health` - Liveness probe
 - ✅ `/ready` - Readiness probe
@@ -126,7 +126,7 @@ These are **additional features** that enhance operability without breaking comp
 
 ## Connection Resilience
 
-Helium implements connection resilience features beyond standard Cosmos SDK:
+Gridway implements connection resilience features beyond standard Cosmos SDK:
 
 - ✅ Exponential backoff for reconnections
 - ✅ Configurable retry policies
@@ -161,7 +161,7 @@ These enhancements improve reliability without breaking protocol compatibility.
 
 ## Conclusion
 
-The Helium implementation demonstrates **excellent compatibility** with Cosmos SDK standards:
+The Gridway implementation demonstrates **excellent compatibility** with Cosmos SDK standards:
 
 - ✅ **ABCI++ Protocol**: Fully implemented with all required methods
 - ✅ **Transaction Format**: Compatible structure and processing

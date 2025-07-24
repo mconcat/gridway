@@ -1,0 +1,35 @@
+[package]
+name = "gridway-client"
+version = "0.1.0"
+edition = "2021"
+authors = ["mconcat"]
+license = "AGPL-3.0"
+repository = "https://github.com/mconcat/gridway"
+description = "Client library for interacting with the gridway blockchain"
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+url = "2.4"
+base64 = "0.21"
+hex = "0.4"
+sha2 = "0.10"
+gridway-keyring = { path = "../gridway-keyring" }
+rpassword = "7.3"
+dirs = "5.0"
+
+# Add gridway dependencies for transaction building
+gridway-types = { path = "../gridway-types" }
+gridway-crypto = { path = "../gridway-crypto" }
+gridway-math = { path = "../gridway-math" }
+gridway-log = { path = "../gridway-log" }
+tracing = "0.1"
+toml = "0.8"
+prost = "0.12"
+
+[dev-dependencies]
+tempfile = "3.14"

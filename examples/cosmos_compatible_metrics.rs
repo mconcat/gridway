@@ -3,7 +3,7 @@
 //! This example shows how to start a metrics server that is compatible
 //! with Cosmos SDK telemetry standards.
 
-use helium_telemetry::{
+use gridway_telemetry::{
     http::MetricsServerConfig,
     metrics::{BLOCK_HEIGHT, MEMPOOL_SIZE, TOTAL_TRANSACTIONS, TX_FAILED},
     registry,
@@ -14,7 +14,7 @@ use tokio::time::sleep;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize telemetry
-    helium_telemetry::init()?;
+    gridway_telemetry::init()?;
 
     // Create a custom configuration matching Cosmos SDK defaults
     let config = MetricsServerConfig {
@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metrics_path: "/metrics".to_string(),
         enable_health_check: true,
         global_labels: vec![
-            ("chain_id".to_string(), "helium-1".to_string()),
+            ("chain_id".to_string(), "gridway-1".to_string()),
             ("node_id".to_string(), "node123".to_string()),
         ],
     };
@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = registry();
 
     // Spawn the metrics server
-    let server_handle = helium_telemetry::http::spawn_metrics_server(registry, config);
+    let server_handle = gridway_telemetry::http::spawn_metrics_server(registry, config);
 
     // Simulate blockchain activity
     let mut height = 1u64;
@@ -65,7 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mempool_count = rand::random::<u8>() % 50;
         MEMPOOL_SIZE.set(mempool_count as i64);
 
-        println!("Block {height}: {total_txs} txs ({failed_txs} failed), mempool: {mempool_count}");
+        println!(
+            "Block {height}: {total_txs} txs ({failed_txs} failed), mempool:: {mempool_count}"
+        );
 
         height += 1;
         sleep(Duration::from_secs(5)).await;

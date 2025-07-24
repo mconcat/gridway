@@ -156,7 +156,7 @@ build_project() {
     read -p "Build the project now? [Y/n] " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        print_info "Building Helium..."
+        print_info "Building Gridway..."
         cargo build --release
         print_success "Build complete"
     fi
@@ -165,13 +165,13 @@ build_project() {
 # Main setup flow
 main() {
     echo "======================================"
-    echo "  Helium Development Setup"
+    echo "  Gridway Development Setup"
     echo "======================================"
     echo
     
     # Check if we're in the right directory
     if [ ! -f "Cargo.toml" ]; then
-        print_error "This script must be run from the Helium project root directory"
+        print_error "This script must be run from the Gridway project root directory"
         exit 1
     fi
     

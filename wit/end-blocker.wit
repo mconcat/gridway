@@ -1,4 +1,4 @@
-package helium:framework@0.1.0;
+package gridway:framework@0.1.0;
 
 /// End blocker interface for block finalization
 interface end-blocker {

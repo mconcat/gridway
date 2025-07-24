@@ -9,10 +9,10 @@ use std::collections::HashMap;
 // Include generated bindings
 mod bindings;
 
-use bindings::exports::helium::framework::begin_blocker::{
+use bindings::exports::gridway::framework::begin_blocker::{
     BeginBlockRequest, BeginBlockResponse, Event, EventAttribute, Evidence, Guest,
 };
-use bindings::helium::framework::kvstore;
+use bindings::gridway::framework::kvstore;
 
 /// Validator information for updates (still needed for internal logic)
 #[derive(Debug, Clone)]
@@ -63,7 +63,7 @@ impl Guest for Component {
                 return BeginBlockResponse {
                     success: false,
                     events: vec![],
-                    error: Some(format!("Failed to open kvstore: {e}")),
+                    error: Some(format!("Failed to open kvstore:: {e}")),
                 }
             }
         };

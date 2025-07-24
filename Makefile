@@ -42,13 +42,13 @@ install-system-deps:
 
 # Build the project
 build:
-	@echo "Building Helium..."
+	@echo "Building Gridway..."
 	cargo build --release
 	@echo "✓ Build complete"
 
 # Build in debug mode
 build-debug:
-	@echo "Building Helium (debug mode)..."
+	@echo "Building Gridway (debug mode)..."
 	cargo build
 	@echo "✓ Debug build complete"
 
@@ -126,7 +126,7 @@ ci-setup:
 
 # Help
 help:
-	@echo "Helium Development Makefile"
+	@echo "Gridway Development Makefile"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""

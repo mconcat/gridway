@@ -20,7 +20,7 @@ RUN rustup target add wasm32-wasip1 && \
     rustup component add rustfmt
 
 # Create app directory
-WORKDIR /usr/src/helium
+WORKDIR /usr/src/gridway
 
 # Copy workspace files
 COPY . ./
@@ -29,7 +29,7 @@ COPY . ./
 RUN ./scripts/build-wasi-modules.sh
 
 # Build the application (now that WASI bindings exist)
-RUN cargo build --release -p helium-server --bin helium-server
+RUN cargo build --release -p gridway-server --bin gridway-server
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -41,32 +41,32 @@ RUN apt-get update && apt-get install -y \
     netcat-traditional \
     && rm -rf /var/lib/apt/lists/*
 
-# Create helium user
-RUN useradd -m -u 1000 -s /bin/bash helium
+# Create gridway user
+RUN useradd -m -u 1000 -s /bin/bash gridway
 
 # Copy binary from builder
-COPY --from=builder /usr/src/helium/target/release/helium-server /usr/local/bin/helium-server
+COPY --from=builder /usr/src/gridway/target/release/gridway-server /usr/local/bin/gridway-server
 
 # Copy WASI modules
-RUN mkdir -p /usr/local/lib/helium/wasi-modules
-COPY --from=builder /usr/src/helium/modules/*.wasm /usr/local/lib/helium/wasi-modules/
+RUN mkdir -p /usr/local/lib/gridway/wasi-modules
+COPY --from=builder /usr/src/gridway/modules/*.wasm /usr/local/lib/gridway/wasi-modules/
 
 # Create data directory
-RUN mkdir -p /helium && chown helium:helium /helium
+RUN mkdir -p /gridway && chown gridway:gridway /gridway
 
-# Switch to helium user
-USER helium
+# Switch to gridway user
+USER gridway
 
 # Set working directory
-WORKDIR /helium
+WORKDIR /gridway
 
 # Expose ports
 EXPOSE 26658 9090 1317
 
 # Set environment variables
 ENV RUST_LOG=info
-ENV HELIUM_HOME=/helium
-ENV WASI_MODULE_PATH=/usr/local/lib/helium/wasi-modules
+ENV GRIDWAY_HOME=/gridway
+ENV WASI_MODULE_PATH=/usr/local/lib/gridway/wasi-modules
 
 # Default command
-CMD ["helium-server", "start", "--home", "/helium"]
+CMD ["gridway-server", "start", "--home", "/gridway"]

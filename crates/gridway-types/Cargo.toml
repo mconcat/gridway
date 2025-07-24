@@ -1,0 +1,26 @@
+[package]
+name = "gridway-types"
+version = "0.1.0"
+edition = "2021"
+authors = ["gridway Contributors"]
+license = "Apache-2.0"
+description = "Core types for gridway"
+repository = "https://github.com/cosmos/gridway-rust"
+
+[dependencies]
+gridway-math = { path = "../gridway-math" }
+gridway-store = { path = "../gridway-store" }
+gridway-proto = { path = "../gridway-proto" }
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+prost = "0.12"
+bech32 = "0.11"
+sha2 = "0.10"
+ripemd = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+toml = "0.8"
+dirs = "5.0"
+
+[dev-dependencies]
+tempfile = "3.0"
