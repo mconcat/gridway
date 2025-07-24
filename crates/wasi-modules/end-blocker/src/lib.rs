@@ -8,11 +8,11 @@
 // Include generated bindings
 mod bindings;
 
-use bindings::exports::helium::framework::end_blocker::{
+use bindings::exports::gridway::framework::end_blocker::{
     EndBlockRequest, EndBlockResponse, Event, EventAttribute, Guest, ValidatorPubKey,
     ValidatorUpdate,
 };
-use bindings::helium::framework::kvstore;
+use bindings::gridway::framework::kvstore;
 
 // Using WIT-generated types instead of local structs
 
@@ -48,7 +48,7 @@ impl Guest for Component {
                     success: false,
                     events: vec![],
                     validator_updates: vec![],
-                    error: Some(format!("Failed to open kvstore: {e}")),
+                    error: Some(format!("Failed to open kvstore:: {e}")),
                 }
             }
         };

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The Helium SDK must integrate seamlessly with the array of services that support a modern blockchain ecosystem. By maintaining standard API interfaces, it ensures compatibility with existing tools while the microkernel architecture offers new, richer data streams for enhanced functionality.
+The Gridway SDK must integrate seamlessly with the array of services that support a modern blockchain ecosystem. By maintaining standard API interfaces, it ensures compatibility with existing tools while the microkernel architecture offers new, richer data streams for enhanced functionality.
 
 ## Decision
 
@@ -17,7 +17,7 @@ Maintain strict API compatibility while extending interfaces to expose the uniqu
 Standard REST and gRPC API layers provide familiar endpoints:
 
 ```rust
-// Block explorer endpoint compatibility in helium-server/src/rest.rs
+// Block explorer endpoint compatibility in gridway-server/src/rest.rs
 pub async fn get_block_by_height(
     State(state): State<RestState>,
     Path(height): Path<u64>,

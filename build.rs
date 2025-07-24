@@ -62,7 +62,7 @@ fn build_wasi_modules() {
     ];
 
     for (module_name, crate_name) in &wasi_modules {
-        println!("cargo:warning=Building WASI module: {module_name}");
+        println!("cargo:warning=Building WASI module:: {module_name}");
 
         let module_path = workspace_root
             .join("crates")

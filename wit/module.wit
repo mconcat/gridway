@@ -1,4 +1,4 @@
-package helium:framework@0.1.0;
+package gridway:framework@0.1.0;
 
 /// Generic module interface for application modules (bank, staking, etc.)
 interface module {

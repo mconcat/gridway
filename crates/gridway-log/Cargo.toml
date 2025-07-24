@@ -1,0 +1,13 @@
+[package]
+name = "gridway-log"
+version = "0.1.0"
+edition = "2021"
+authors = ["mconcat"]
+license = "AGPL-3.0"
+repository = "https://github.com/mconcat/gridway"
+description = "Logging utilities and abstractions for the gridway blockchain framework"
+
+[dependencies]
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

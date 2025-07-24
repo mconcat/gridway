@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-One of the most critical architectural challenges in the Helium implementation is the tension between providing developers with a familiar, Unix-like API surface via WASI and the absolute need for deterministic execution required for blockchain consensus.
+One of the most critical architectural challenges in the Gridway implementation is the tension between providing developers with a familiar, Unix-like API surface via WASI and the absolute need for deterministic execution required for blockchain consensus.
 
 ## Decision
 

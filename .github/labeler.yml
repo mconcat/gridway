@@ -28,8 +28,8 @@ wasm:
 crypto:
   - changed-files:
     - any-glob-to-any-file:
-      - 'crates/helium-crypto/**/*'
-      - 'crates/helium-keyring/**/*'
+      - 'crates/gridway-crypto/**/*'
+      - 'crates/gridway-keyring/**/*'
       - '**/*crypto*'
       - '**/*sign*'
 
@@ -37,7 +37,7 @@ crypto:
 storage:
   - changed-files:
     - any-glob-to-any-file:
-      - 'crates/helium-store/**/*'
+      - 'crates/gridway-store/**/*'
       - '**/*rocksdb*'
       - '**/*storage*'
       - '**/*database*'
@@ -48,13 +48,13 @@ abci:
     - any-glob-to-any-file:
       - '**/*abci*'
       - '**/*tendermint*'
-      - 'crates/helium-server/**/*'
+      - 'crates/gridway-server/**/*'
 
 # Add 'client' label to client-related changes
 client:
   - changed-files:
     - any-glob-to-any-file:
-      - 'crates/helium-client/**/*'
+      - 'crates/gridway-client/**/*'
 
 # Add 'ci' label to CI/CD changes
 ci:

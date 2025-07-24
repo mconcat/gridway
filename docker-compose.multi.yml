@@ -3,18 +3,18 @@ version: '3.8'
 x-cometbft-base: &cometbft-base
   image: cometbft/cometbft:v0.38.0
   networks:
-    - helium-network
+    - gridway-network
   restart: unless-stopped
 
-x-helium-base: &helium-base
+x-gridway-base: &gridway-base
   build:
     context: .
     dockerfile: Dockerfile
   environment:
     - RUST_LOG=info
-    - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
+    - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
   networks:
-    - helium-network
+    - gridway-network
   healthcheck:
     test: ["CMD", "nc", "-z", "localhost", "26658"]
     interval: 5s
@@ -25,15 +25,15 @@ x-helium-base: &helium-base
 
 services:
   # Node 0
-  helium-0:
-    <<: *helium-base
-    container_name: helium-app-0
+  gridway-0:
+    <<: *gridway-base
+    container_name: gridway-app-0
     environment:
       - RUST_LOG=info
-      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
-      - HELIUM_HOME=/helium
+      - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
+      - GRIDWAY_HOME=/gridway
     volumes:
-      - ./testnet/helium-0:/helium
+      - ./testnet/gridway-0:/gridway
     ports:
       - "26658:26658"
       - "9090:9090"
@@ -49,21 +49,21 @@ services:
       - CMTHOME=/cometbft
     volumes:
       - ./testnet/node0:/cometbft
-    command: ["node", "--proxy_app=tcp://helium-0:26658"]
+    command: ["node", "--proxy_app=tcp://gridway-0:26658"]
     depends_on:
-      helium-0:
+      gridway-0:
         condition: service_healthy
 
   # Node 1
-  helium-1:
-    <<: *helium-base
-    container_name: helium-app-1
+  gridway-1:
+    <<: *gridway-base
+    container_name: gridway-app-1
     environment:
       - RUST_LOG=info
-      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
-      - HELIUM_HOME=/helium
+      - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
+      - GRIDWAY_HOME=/gridway
     volumes:
-      - ./testnet/helium-1:/helium
+      - ./testnet/gridway-1:/gridway
     ports:
       - "26668:26658"
       - "9091:9090"
@@ -79,21 +79,21 @@ services:
       - CMTHOME=/cometbft
     volumes:
       - ./testnet/node1:/cometbft
-    command: ["node", "--proxy_app=tcp://helium-1:26658"]
+    command: ["node", "--proxy_app=tcp://gridway-1:26658"]
     depends_on:
-      helium-1:
+      gridway-1:
         condition: service_healthy
 
   # Node 2
-  helium-2:
-    <<: *helium-base
-    container_name: helium-app-2
+  gridway-2:
+    <<: *gridway-base
+    container_name: gridway-app-2
     environment:
       - RUST_LOG=info
-      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
-      - HELIUM_HOME=/helium
+      - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
+      - GRIDWAY_HOME=/gridway
     volumes:
-      - ./testnet/helium-2:/helium
+      - ./testnet/gridway-2:/gridway
     ports:
       - "26678:26658"
       - "9092:9090"
@@ -109,21 +109,21 @@ services:
       - CMTHOME=/cometbft
     volumes:
       - ./testnet/node2:/cometbft
-    command: ["node", "--proxy_app=tcp://helium-2:26658"]
+    command: ["node", "--proxy_app=tcp://gridway-2:26658"]
     depends_on:
-      helium-2:
+      gridway-2:
         condition: service_healthy
 
   # Node 3
-  helium-3:
-    <<: *helium-base
-    container_name: helium-app-3
+  gridway-3:
+    <<: *gridway-base
+    container_name: gridway-app-3
     environment:
       - RUST_LOG=info
-      - HELIUM_CHAIN_ID=${CHAIN_ID:-helium-testnet}
-      - HELIUM_HOME=/helium
+      - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
+      - GRIDWAY_HOME=/gridway
     volumes:
-      - ./testnet/helium-3:/helium
+      - ./testnet/gridway-3:/gridway
     ports:
       - "26688:26658"
       - "9093:9090"
@@ -139,13 +139,13 @@ services:
       - CMTHOME=/cometbft
     volumes:
       - ./testnet/node3:/cometbft
-    command: ["node", "--proxy_app=tcp://helium-3:26658"]
+    command: ["node", "--proxy_app=tcp://gridway-3:26658"]
     depends_on:
-      helium-3:
+      gridway-3:
         condition: service_healthy
 
 networks:
-  helium-network:
+  gridway-network:
     driver: bridge
     ipam:
       config:

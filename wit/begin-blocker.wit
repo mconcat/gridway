@@ -1,4 +1,4 @@
-package helium:framework@0.1.0;
+package gridway:framework@0.1.0;
 
 /// Begin blocker interface for block initialization
 interface begin-blocker {

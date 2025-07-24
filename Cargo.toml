@@ -1,18 +1,18 @@
 [workspace]
 members = [
-    "crates/helium-types",
-    "crates/helium-math",
-    "crates/helium-crypto", 
-    "crates/helium-keyring",
-    "crates/helium-errors",
-    "crates/helium-log",
-    "crates/helium-store",
-    "crates/helium-proto",
-    "crates/helium-baseapp",
-    "crates/helium-server",
-    "crates/helium-client",
-    "crates/helium-simapp",
-    "crates/helium-telemetry",
+    "crates/gridway-types",
+    "crates/gridway-math",
+    "crates/gridway-crypto", 
+    "crates/gridway-keyring",
+    "crates/gridway-errors",
+    "crates/gridway-log",
+    "crates/gridway-store",
+    "crates/gridway-proto",
+    "crates/gridway-baseapp",
+    "crates/gridway-server",
+    "crates/gridway-client",
+    "crates/gridway-simapp",
+    "crates/gridway-telemetry",
     "crates/wasi-modules/ante-handler",
     "crates/wasi-modules/begin-blocker",
     "crates/wasi-modules/end-blocker",
@@ -24,23 +24,23 @@ members = [
 authors = ["mconcat"]
 license = "AGPL-3.0"
 edition = "2021"
-repository = "https://github.com/mconcat/helium"
+repository = "https://github.com/mconcat/gridway"
 
 [workspace.dependencies]
 # Core crates
-helium-types = { path = "crates/helium-types" }
-helium-math = { path = "crates/helium-math" }
-helium-crypto = { path = "crates/helium-crypto" }
-helium-keyring = { path = "crates/helium-keyring" }
-helium-errors = { path = "crates/helium-errors" }
-helium-log = { path = "crates/helium-log" }
-helium-store = { path = "crates/helium-store" }
-helium-proto = { path = "crates/helium-proto" }
-helium-baseapp = { path = "crates/helium-baseapp" }
-helium-server = { path = "crates/helium-server" }
-helium-client = { path = "crates/helium-client" }
-helium-simapp = { path = "crates/helium-simapp" }
-helium-telemetry = { path = "crates/helium-telemetry" }
+gridway-types = { path = "crates/gridway-types" }
+gridway-math = { path = "crates/gridway-math" }
+gridway-crypto = { path = "crates/gridway-crypto" }
+gridway-keyring = { path = "crates/gridway-keyring" }
+gridway-errors = { path = "crates/gridway-errors" }
+gridway-log = { path = "crates/gridway-log" }
+gridway-store = { path = "crates/gridway-store" }
+gridway-proto = { path = "crates/gridway-proto" }
+gridway-baseapp = { path = "crates/gridway-baseapp" }
+gridway-server = { path = "crates/gridway-server" }
+gridway-client = { path = "crates/gridway-client" }
+gridway-simapp = { path = "crates/gridway-simapp" }
+gridway-telemetry = { path = "crates/gridway-telemetry" }
 
 # External dependencies
 thiserror = "1.0"
@@ -101,29 +101,29 @@ opt-level = 0
 debug = true
 
 [package]
-name = "helium"
+name = "gridway"
 version = "0.1.0"
 edition = "2021"
 authors = ["mconcat"]
-description = "Minimal Rust implementation of helium BaseApp"
+description = "Minimal Rust implementation of gridway BaseApp"
 license = "AGPL-3.0"
-repository = "https://github.com/mconcat/helium"
+repository = "https://github.com/mconcat/gridway"
 build = "build.rs"
 
 [dependencies]
 # Use workspace dependencies
-helium-types = { workspace = true }
-helium-math = { workspace = true }
-helium-crypto = { workspace = true }
-helium-keyring = { workspace = true }
-helium-errors = { workspace = true }
-helium-log = { workspace = true }
-helium-store = { workspace = true }
-helium-baseapp = { workspace = true }
-helium-server = { workspace = true }
-helium-client = { workspace = true }
-helium-simapp = { workspace = true }
-helium-telemetry = { workspace = true }
+gridway-types = { workspace = true }
+gridway-math = { workspace = true }
+gridway-crypto = { workspace = true }
+gridway-keyring = { workspace = true }
+gridway-errors = { workspace = true }
+gridway-log = { workspace = true }
+gridway-store = { workspace = true }
+gridway-baseapp = { workspace = true }
+gridway-server = { workspace = true }
+gridway-client = { workspace = true }
+gridway-simapp = { workspace = true }
+gridway-telemetry = { workspace = true }
 
 # ABCI interface
 cometbft = "0.1.0-alpha.2"

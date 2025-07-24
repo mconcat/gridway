@@ -1,6 +1,6 @@
 //! Counter Module Example
 //!
-//! This example demonstrates how to write a simple counter module for Helium.
+//! This example demonstrates how to write a simple counter module for Gridway.
 //! In the actual system, this would be compiled to WASI and stored in the merkle
 //! tree at a path like `/bin/counter` or `/home/myapp/bin/counter`.
 //!
@@ -11,17 +11,14 @@
 //! - Error handling
 //!
 //! This is what developers would write when creating blockchain applications
-//! on Helium's WASI microkernel architecture.
+//! on Gridway's WASI microkernel architecture.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{Read, Write};
 
 // In the real implementation, these would come from the WASI component interface
-mod helium {
-    pub mod types {
-        pub use super::super::{Event, EventAttribute};
-    }
+mod gridway {
+    pub mod types {}
 }
 
 /// The messages that this module can handle
@@ -78,11 +75,11 @@ pub struct EventAttribute {
 /// Entry point for the counter module
 ///
 /// In a real WASI component, this would be exported as the main handler function.
-/// The Helium runtime would call this function with serialized messages.
+/// The Gridway runtime would call this function with serialized messages.
 pub fn handle_message(msg_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // Deserialize the incoming message
     let msg: CounterMsg =
-        serde_json::from_slice(msg_bytes).map_err(|e| format!("Failed to parse message: {}", e))?;
+        serde_json::from_slice(msg_bytes).map_err(|e| format!("Failed to parse message:: {e}"))?;
 
     // Process the message
     match msg {
@@ -95,7 +92,7 @@ pub fn handle_message(msg_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Load counter state from VFS
 ///
-/// In Helium, modules access their state through the Virtual Filesystem.
+/// In Gridway, modules access their state through the Virtual Filesystem.
 /// This module's state would be stored at `/home/counter/state`
 fn load_state() -> Result<CounterState, String> {
     // In a real WASI component, this would use WASI file operations
@@ -104,9 +101,7 @@ fn load_state() -> Result<CounterState, String> {
 
     // Simulated VFS read
     match fs::read_to_string(state_path) {
-        Ok(data) => {
-            serde_json::from_str(&data).map_err(|e| format!("Failed to parse state: {}", e))
-        }
+        Ok(data) => serde_json::from_str(&data).map_err(|e| format!("Failed to parse state:: {e}")),
         Err(_) => {
             // If state doesn't exist, return default
             Ok(CounterState::default())
@@ -118,11 +113,11 @@ fn load_state() -> Result<CounterState, String> {
 fn save_state(state: &CounterState) -> Result<(), String> {
     let state_path = "/home/counter/state";
     let state_json =
-        serde_json::to_string(state).map_err(|e| format!("Failed to serialize state: {}", e))?;
+        serde_json::to_string(state).map_err(|e| format!("Failed to serialize state:: {e}"))?;
 
     // In a real WASI component, this would use WASI file operations
     // The runtime ensures atomic writes within a transaction
-    fs::write(state_path, state_json).map_err(|e| format!("Failed to write state: {}", e))
+    fs::write(state_path, state_json).map_err(|e| format!("Failed to write state:: {e}"))
 }
 
 /// Emit an event that will be included in the block
@@ -130,11 +125,11 @@ fn save_state(state: &CounterState) -> Result<(), String> {
 /// Events are written to a special VFS path that the runtime monitors
 fn emit_event(event: Event) -> Result<(), String> {
     let event_json =
-        serde_json::to_vec(&event).map_err(|e| format!("Failed to serialize event: {}", e))?;
+        serde_json::to_vec(&event).map_err(|e| format!("Failed to serialize event:: {e}"))?;
 
     // In the real system, events would be written to `/sys/events/`
     // and collected by the runtime
-    println!("Event emitted: {:?}", event);
+    println!("Event emitted:: {event:?}");
     Ok(())
 }
 
@@ -168,7 +163,7 @@ fn handle_increment(amount: u64) -> Result<Vec<u8>, String> {
         message: format!("Counter incremented by {} to {}", amount, state.value),
     };
 
-    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response:: {e}"))
 }
 
 /// Handle decrement message
@@ -201,7 +196,7 @@ fn handle_decrement(amount: u64) -> Result<Vec<u8>, String> {
         message: format!("Counter decremented by {} to {}", amount, state.value),
     };
 
-    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response:: {e}"))
 }
 
 /// Handle reset message
@@ -228,7 +223,7 @@ fn handle_reset() -> Result<Vec<u8>, String> {
         message: "Counter reset to 0".to_string(),
     };
 
-    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response:: {e}"))
 }
 
 /// Handle query message
@@ -240,7 +235,7 @@ fn handle_query() -> Result<Vec<u8>, String> {
         total_operations: state.total_operations,
     };
 
-    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+    serde_json::to_vec(&response).map_err(|e| format!("Failed to serialize response:: {e}"))
 }
 
 /// Module initialization
@@ -265,7 +260,7 @@ pub fn init() -> Result<(), String> {
 }
 
 // In a real WASI component, these would be the exported functions
-// that the Helium runtime would call
+// that the Gridway runtime would call
 
 #[cfg(feature = "wasi")]
 mod wasi_exports {
@@ -276,7 +271,7 @@ mod wasi_exports {
         match super::init() {
             Ok(()) => 0,
             Err(e) => {
-                eprintln!("Init failed: {}", e);
+                eprintln!("Init failed:: {}", e);
                 1
             }
         }
@@ -293,7 +288,7 @@ mod wasi_exports {
                 0
             }
             Err(e) => {
-                eprintln!("Message handling failed: {}", e);
+                eprintln!("Message handling failed:: {}", e);
                 1
             }
         }
@@ -311,7 +306,7 @@ mod tests {
         let msg = CounterMsg::Increment { amount: 5 };
         let msg_bytes = serde_json::to_vec(&msg).unwrap();
         let msg_str = String::from_utf8(msg_bytes.clone()).unwrap();
-        println!("Increment message JSON: {}", msg_str);
+        println!("Increment message JSON:: {}", msg_str);
 
         // Show the message format that would be sent to the module
         assert!(msg_str.contains("counter/Increment"));
@@ -334,7 +329,7 @@ mod tests {
 // Documentation for developers
 /// # Counter Module Development Guide
 ///
-/// This example shows how to develop a module for Helium's WASI microkernel.
+/// This example shows how to develop a module for Gridway's WASI microkernel.
 ///
 /// ## Key Concepts:
 ///
@@ -374,7 +369,7 @@ fn main() {
     println!("Counter Module Example");
     println!("=====================");
     println!();
-    println!("This example demonstrates how to write a WASI module for Helium.");
+    println!("This example demonstrates how to write a WASI module for Gridway.");
     println!("In a real deployment, this would be compiled to WebAssembly and");
     println!("stored in the blockchain at a path like /bin/counter.");
     println!();

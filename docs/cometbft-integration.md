@@ -1,17 +1,17 @@
 # CometBFT Integration Guide
 
-This guide explains how to set up and run Helium with CometBFT consensus engine.
+This guide explains how to set up and run Gridway with CometBFT consensus engine.
 
 ## Overview
 
-Helium integrates with CometBFT (formerly Tendermint) through the ABCI++ protocol. This allows Helium to leverage CometBFT's Byzantine Fault Tolerant consensus while maintaining the application logic in Rust with WASI modules.
+Gridway integrates with CometBFT (formerly Tendermint) through the ABCI++ protocol. This allows Gridway to leverage CometBFT's Byzantine Fault Tolerant consensus while maintaining the application logic in Rust with WASI modules.
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ABCI++      ┌─────────────────┐
 │                 │ ◄─────────────► │                 │
-│    CometBFT     │                 │     Helium      │
+│    CometBFT     │                 │     Gridway      │
 │  (Consensus)    │                 │  (Application)  │
 │                 │                 │                 │
 └─────────────────┘                 └─────────────────┘
@@ -19,7 +19,7 @@ Helium integrates with CometBFT (formerly Tendermint) through the ABCI++ protoco
 ```
 
 - **CometBFT**: Handles consensus, P2P networking, and block production
-- **Helium**: Processes transactions and manages application state
+- **Gridway**: Processes transactions and manages application state
 - **ABCI++**: Protocol for communication between consensus and application
 
 ## Quick Start
@@ -33,8 +33,8 @@ Helium integrates with CometBFT (formerly Tendermint) through the ABCI++ protoco
 ### 1. Clone and Setup
 
 ```bash
-git clone https://github.com/mconcat/helium.git
-cd helium
+git clone https://github.com/mconcat/gridway.git
+cd gridway
 cp .env.example .env
 ```
 
@@ -49,7 +49,7 @@ This script will:
 - Initialize CometBFT configuration
 - Generate validator keys
 - Create genesis file
-- Set up Helium configuration
+- Set up Gridway configuration
 
 ### 3. Start Testnet
 
@@ -57,7 +57,7 @@ This script will:
 ./scripts/start-testnet.sh
 ```
 
-This will launch both CometBFT and Helium services using Docker Compose.
+This will launch both CometBFT and Gridway services using Docker Compose.
 
 ### 4. Verify Services
 
@@ -67,7 +67,7 @@ Check that services are running:
 # Check CometBFT status
 curl http://localhost:26657/status
 
-# Check Helium health
+# Check Gridway health
 curl http://localhost:1317/health
 
 # Check if ready
@@ -80,9 +80,9 @@ curl http://localhost:1317/ready
 |---------|----------|-------------|
 | CometBFT RPC | http://localhost:26657 | Consensus engine RPC |
 | CometBFT P2P | tcp://localhost:26656 | P2P communication |
-| Helium ABCI | tcp://localhost:26658 | ABCI protocol |
-| Helium gRPC | http://localhost:9090 | gRPC API |
-| Helium REST | http://localhost:1317 | REST API & Health |
+| Gridway ABCI | tcp://localhost:26658 | ABCI protocol |
+| Gridway gRPC | http://localhost:9090 | gRPC API |
+| Gridway REST | http://localhost:1317 | REST API & Health |
 
 ## Configuration
 
@@ -91,8 +91,8 @@ curl http://localhost:1317/ready
 Key environment variables in `.env`:
 
 ```bash
-CHAIN_ID=helium-testnet          # Chain identifier
-MONIKER=helium-node-0           # Node moniker
+CHAIN_ID=gridway-testnet          # Chain identifier
+MONIKER=gridway-node-0           # Node moniker
 RUST_LOG=info                   # Rust log level
 COMETBFT_LOG_LEVEL=info        # CometBFT log level
 ```
@@ -102,8 +102,8 @@ COMETBFT_LOG_LEVEL=info        # CometBFT log level
 Located at `testnet/node0/config/config.toml`:
 
 ```toml
-proxy_app = "tcp://helium:26658"
-moniker = "helium-node-0"
+proxy_app = "tcp://gridway:26658"
+moniker = "gridway-node-0"
 
 [consensus]
 timeout_propose = "3s"
@@ -112,14 +112,14 @@ timeout_precommit = "1s"
 timeout_commit = "5s"
 ```
 
-### Helium Configuration
+### Gridway Configuration
 
-Located at `testnet/helium/config/config.toml`:
+Located at `testnet/gridway/config/config.toml`:
 
 ```toml
 listen_address = "tcp://0.0.0.0:26658"
 grpc_address = "0.0.0.0:9090"
-chain_id = "helium-testnet"
+chain_id = "gridway-testnet"
 ```
 
 ## Operations
@@ -133,8 +133,8 @@ docker compose logs -f
 # Just CometBFT
 docker compose logs -f cometbft
 
-# Just Helium
-docker compose logs -f helium
+# Just Gridway
+docker compose logs -f gridway
 ```
 
 ### Stop Services
@@ -175,20 +175,20 @@ cargo build --release
 ### Running Without Docker
 
 1. Install CometBFT binary
-2. Build Helium: `cargo build --release`
+2. Build Gridway: `cargo build --release`
 3. Initialize: `./scripts/init-testnet.sh`
-4. Start Helium: `./target/release/helium-server start`
+4. Start Gridway: `./target/release/gridway-server start`
 5. Start CometBFT: `cometbft node --home ./testnet/node0`
 
 ## Troubleshooting
 
 ### Connection Issues
 
-If CometBFT cannot connect to Helium:
+If CometBFT cannot connect to Gridway:
 
-1. Check Helium is running: `docker compose ps`
+1. Check Gridway is running: `docker compose ps`
 2. Verify ABCI port: `nc -zv localhost 26658`
-3. Check logs: `docker compose logs helium`
+3. Check logs: `docker compose logs gridway`
 
 ### Consensus Issues
 
@@ -202,7 +202,7 @@ If blocks are not being produced:
 
 1. Monitor resource usage: `docker stats`
 2. Adjust CometBFT timeouts in config
-3. Check Helium logs for slow operations
+3. Check Gridway logs for slow operations
 
 ## Multi-Node Setup
 
@@ -227,7 +227,7 @@ docker compose -f docker compose.multi.yml up
 
 ### Metrics
 
-Helium exposes metrics at:
+Gridway exposes metrics at:
 - Health: `http://localhost:1317/health`
 - Ready: `http://localhost:1317/ready`
 - Swagger: `http://localhost:1317/swagger`
@@ -238,7 +238,7 @@ Add to `prometheus.yml`:
 
 ```yaml
 scrape_configs:
-  - job_name: 'helium'
+  - job_name: 'gridway'
     static_configs:
       - targets: ['localhost:1317']
 ```
@@ -247,11 +247,11 @@ scrape_configs:
 
 ### Custom Genesis State
 
-Edit `testnet/helium/genesis.json` before starting:
+Edit `testnet/gridway/genesis.json` before starting:
 
 ```json
 {
-  "chain_id": "helium-testnet",
+  "chain_id": "gridway-testnet",
   "app_state": {
     "auth": {
       "accounts": []
@@ -265,10 +265,10 @@ Edit `testnet/helium/genesis.json` before starting:
 
 ### WASI Module Configuration
 
-WASI modules are loaded from `/usr/local/lib/helium/wasi-modules/` in the container.
+WASI modules are loaded from `/usr/local/lib/gridway/wasi-modules/` in the container.
 
 ## References
 
 - [CometBFT Documentation](https://docs.cometbft.com/)
 - [ABCI++ Specification](https://docs.cometbft.com/v0.38/spec/abci/)
-- [Helium Architecture](../PLAN.md)
+- [Gridway Architecture](../PLAN.md)
