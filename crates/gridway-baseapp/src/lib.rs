@@ -14,6 +14,9 @@ pub mod module_governance;
 pub mod module_router;
 pub mod prefixed_kvstore_resource;
 pub mod vfs;
+pub mod vfs_host;
+pub mod vfs_wasi_adapter;
+pub mod vfs_wasi_impl;
 pub mod wasi_host;
 
 #[cfg(test)]

@@ -6,6 +6,7 @@
 use crate::component_bindings::ante_handler::AnteHandlerWorld;
 use crate::component_bindings::tx_decoder::TxDecoderWorld;
 use crate::component_bindings::SimpleKVStoreManager;
+use crate::vfs_wasi_adapter::VfsWasiAdapter;
 // TODO: Remove kvstore interface (temporary implementation)
 // use crate::kvstore_resource::KVStoreResourceHost;
 use hex;
@@ -92,8 +93,8 @@ pub struct ComponentResult {
 
 /// Component host state that implements WasiView
 pub struct ComponentState {
-    table: wasmtime_wasi::ResourceTable,
-    wasi: WasiCtx,
+    /// VFS-backed WASI context
+    vfs_wasi: crate::vfs_wasi_adapter::VfsWasiAdapter,
     #[allow(dead_code)]
     component_name: String,
     #[allow(dead_code)]
@@ -104,13 +105,13 @@ pub struct ComponentState {
 
 impl wasmtime_wasi::p2::IoView for ComponentState {
     fn table(&mut self) -> &mut wasmtime_wasi::ResourceTable {
-        &mut self.table
+        self.vfs_wasi.table()
     }
 }
 
 impl WasiView for ComponentState {
     fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
+        self.vfs_wasi.ctx()
     }
 }
 
@@ -249,6 +250,8 @@ pub struct ComponentHost {
     default_gas_limit: u64,
     /// KVStore manager (legacy)
     kvstore_manager: SimpleKVStoreManager,
+    /// Virtual filesystem for component state access
+    vfs: Arc<Mutex<crate::vfs::VirtualFilesystem>>,
     // KVStore resource host for prefix-based access
     // TODO: Remove kvstore interface (temporary implementation)
     // kvstore_host: KVStoreResourceHost,
@@ -266,7 +269,7 @@ impl ComponentHost {
     /// Create a new component host with custom configuration and a base store
     pub fn with_config_and_store(
         mut config: Config,
-        _base_store: Arc<Mutex<dyn gridway_store::KVStore>>,
+        base_store: Arc<Mutex<dyn gridway_store::KVStore>>,
     ) -> Result<Self> {
         // Ensure component model is enabled
         config.wasm_component_model(true);
@@ -281,6 +284,47 @@ impl ComponentHost {
             Engine::new(&config).map_err(|e| ComponentHostError::EngineConfig(e.to_string()))?;
 
         info!("Component host initialized with secure configuration");
+
+        // Create VFS and mount the base store
+        let vfs = Arc::new(Mutex::new(crate::vfs::VirtualFilesystem::new()));
+
+        // Mount stores for different component types with appropriate namespaces
+        // This follows the proposal's mount table approach
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), base_store.clone())
+            .map_err(|e| {
+                ComponentHostError::WasiSetup(format!("Failed to mount base store: {e}"))
+            })?;
+
+        // Mount additional namespaces for different component types
+        vfs.lock()
+            .unwrap()
+            .mount_store("ante".to_string(), base_store.clone())
+            .map_err(|e| {
+                ComponentHostError::WasiSetup(format!("Failed to mount ante store: {e}"))
+            })?;
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("begin".to_string(), base_store.clone())
+            .map_err(|e| {
+                ComponentHostError::WasiSetup(format!("Failed to mount begin store: {e}"))
+            })?;
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("end".to_string(), base_store.clone())
+            .map_err(|e| {
+                ComponentHostError::WasiSetup(format!("Failed to mount end store: {e}"))
+            })?;
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("decoder".to_string(), base_store.clone())
+            .map_err(|e| {
+                ComponentHostError::WasiSetup(format!("Failed to mount decoder store: {e}"))
+            })?;
 
         // TODO: Remove kvstore interface (temporary implementation)
         // let kvstore_host = KVStoreResourceHost::new(base_store);
@@ -306,6 +350,7 @@ impl ComponentHost {
             component_info: Arc::new(Mutex::new(HashMap::new())),
             default_gas_limit: 10_000_000, // 10 million units
             kvstore_manager: SimpleKVStoreManager::new(),
+            vfs,
             // kvstore_host,
         })
     }
@@ -362,12 +407,11 @@ impl ComponentHost {
                 .clone()
         };
 
-        // Create WASI context
-        let wasi = WasiCtxBuilder::new().build();
+        // Create VFS-backed WASI context
+        let vfs_wasi = VfsWasiAdapter::new(self.vfs.clone());
 
         let state = ComponentState {
-            table: wasmtime_wasi::ResourceTable::new(),
-            wasi,
+            vfs_wasi,
             component_name: component_name.to_string(),
             kvstore_manager: SimpleKVStoreManager::new(),
             // kvstore_host: self.kvstore_host.clone(),
@@ -390,8 +434,8 @@ impl ComponentHost {
 
         // Create linker and add WASI
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
+        // Use custom VFS filesystem instead of default WASI filesystem
+        self.add_vfs_filesystem_to_linker(&mut linker)?;
 
         // Add module-state interface
 
@@ -491,12 +535,11 @@ impl ComponentHost {
                 .clone()
         };
 
-        // Create WASI context
-        let wasi = WasiCtxBuilder::new().build();
+        // Create VFS-backed WASI context
+        let vfs_wasi = VfsWasiAdapter::new(self.vfs.clone());
 
         let state = ComponentState {
-            table: wasmtime_wasi::ResourceTable::new(),
-            wasi,
+            vfs_wasi,
             component_name: component_name.to_string(),
             kvstore_manager: SimpleKVStoreManager::new(),
             // kvstore_host: self.kvstore_host.clone(),
@@ -519,8 +562,8 @@ impl ComponentHost {
 
         // Create linker and add WASI
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
+        // Use custom VFS filesystem instead of default WASI filesystem
+        self.add_vfs_filesystem_to_linker(&mut linker)?;
 
         // Add module-state interface
 
@@ -587,12 +630,14 @@ impl ComponentHost {
                 .clone()
         };
 
+        // Create VFS-backed WASI context
+        let vfs_wasi = VfsWasiAdapter::new(self.vfs.clone());
+
         // Create store
         let mut store = Store::new(
             &self.engine,
             ComponentState {
-                table: wasmtime_wasi::ResourceTable::new(),
-                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+                vfs_wasi,
                 component_name: "begin-blocker".to_string(),
                 kvstore_manager: self.kvstore_manager.clone(),
                 // kvstore_host: self.kvstore_host.clone(),
@@ -606,8 +651,8 @@ impl ComponentHost {
 
         // Create linker and add WASI
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
+        // Use custom VFS filesystem instead of default WASI filesystem
+        self.add_vfs_filesystem_to_linker(&mut linker)?;
 
         // Add module-state interface
 
@@ -710,12 +755,14 @@ impl ComponentHost {
                 .clone()
         };
 
+        // Create VFS-backed WASI context
+        let vfs_wasi = VfsWasiAdapter::new(self.vfs.clone());
+
         // Create store
         let mut store = Store::new(
             &self.engine,
             ComponentState {
-                table: wasmtime_wasi::ResourceTable::new(),
-                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+                vfs_wasi,
                 component_name: "end-blocker".to_string(),
                 kvstore_manager: self.kvstore_manager.clone(),
                 // kvstore_host: self.kvstore_host.clone(),
@@ -729,8 +776,8 @@ impl ComponentHost {
 
         // Create linker and add WASI
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
+        // Use custom VFS filesystem instead of default WASI filesystem
+        self.add_vfs_filesystem_to_linker(&mut linker)?;
 
         // Add module-state interface
 
@@ -837,6 +884,76 @@ impl ComponentHost {
             .map_err(ComponentHostError::ResourceError)
     }
     */
+
+    /// Add VFS-based filesystem to linker
+    fn add_vfs_filesystem_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
+        // Add all non-filesystem WASI subsystems from wasmtime-wasi
+        wasmtime_wasi::p2::bindings::io::streams::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| cx,
+        )
+        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add io::streams: {e}")))?;
+        wasmtime_wasi::p2::bindings::cli::environment::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| cx,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add cli::environment: {e}"))
+        })?;
+        wasmtime_wasi::p2::bindings::cli::stderr::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| cx,
+        )
+        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add cli::stderr: {e}")))?;
+        wasmtime_wasi::p2::bindings::cli::stdout::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| cx,
+        )
+        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add cli::stdout: {e}")))?;
+        wasmtime_wasi::p2::bindings::cli::stdin::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| cx,
+        )
+        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add cli::stdin: {e}")))?;
+        wasmtime_wasi::p2::bindings::random::random::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| cx,
+        )
+        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add random: {e}")))?;
+        wasmtime_wasi::p2::bindings::clocks::wall_clock::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| cx,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add clocks::wall_clock: {e}"))
+        })?;
+        wasmtime_wasi::p2::bindings::clocks::monotonic_clock::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| cx,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add clocks::monotonic_clock: {e}"))
+        })?;
+
+        // The key: Add OUR filesystem implementation, NOT wasmtime-wasi's
+        // Our VfsWasiAdapter implements the filesystem host traits directly
+        wasmtime_wasi::p2::bindings::filesystem::types::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| &mut cx.vfs_wasi,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add filesystem::types: {e}"))
+        })?;
+        wasmtime_wasi::p2::bindings::filesystem::preopens::add_to_linker(
+            linker,
+            |cx: &mut ComponentState| &mut cx.vfs_wasi,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add filesystem::preopens: {e}"))
+        })?;
+
+        Ok(())
+    }
 
     /* TODO: Remove kvstore interface (temporary implementation)
     /// Add kvstore interface to the component linker
