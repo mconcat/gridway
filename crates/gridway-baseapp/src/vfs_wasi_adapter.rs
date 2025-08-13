@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::bindings::filesystem::{preopens, types as fs_types};
 use wasmtime_wasi::p2::bindings::io::streams as io_streams;
-use wasmtime_wasi::p2::WasiView;
 use wasmtime_wasi::p2::WasiCtx;
+use wasmtime_wasi::p2::WasiView;
 use wasmtime_wasi::ResourceTable;
 
 /// VFS WASI Adapter that wraps our VfsWasiContext
@@ -56,11 +56,17 @@ impl preopens::Host for VfsWasiAdapter {
 impl fs_types::Host for VfsWasiAdapter {
     fn filesystem_error_code(
         &mut self,
-        err: Resource<anyhow::Error>,
+        err: Resource<fs_types::Error>,
     ) -> wasmtime::Result<Option<fs_types::ErrorCode>> {
         self.inner.fs.filesystem_error_code(err)
     }
 
+    fn convert_error_code(
+        &mut self,
+        err: wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
+    ) -> wasmtime::Result<fs_types::ErrorCode> {
+        self.inner.fs.convert_error_code(err)
+    }
 }
 
 impl fs_types::HostDescriptor for VfsWasiAdapter {
@@ -71,8 +77,12 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         path: String,
         open_flags: fs_types::OpenFlags,
         flags: fs_types::DescriptorFlags,
-    ) -> Result<wasmtime::component::Resource<fs_types::Descriptor>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        self.inner.fs
+    ) -> Result<
+        wasmtime::component::Resource<fs_types::Descriptor>,
+        wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
+    > {
+        self.inner
+            .fs
             .open_at(dirfd, path_flags, path, open_flags, flags)
             .await
     }
@@ -81,7 +91,10 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         &mut self,
         fd: wasmtime::component::Resource<fs_types::Descriptor>,
         offset: fs_types::Filesize,
-    ) -> Result<wasmtime::component::Resource<io_streams::InputStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
+    ) -> Result<
+        wasmtime::component::Resource<io_streams::InputStream>,
+        wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
+    > {
         self.inner.fs.read_via_stream(fd, offset)
     }
 
@@ -89,14 +102,20 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         &mut self,
         fd: wasmtime::component::Resource<fs_types::Descriptor>,
         offset: fs_types::Filesize,
-    ) -> Result<wasmtime::component::Resource<io_streams::OutputStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
+    ) -> Result<
+        wasmtime::component::Resource<io_streams::OutputStream>,
+        wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
+    > {
         self.inner.fs.write_via_stream(fd, offset)
     }
 
     fn append_via_stream(
         &mut self,
         fd: wasmtime::component::Resource<fs_types::Descriptor>,
-    ) -> Result<wasmtime::component::Resource<io_streams::OutputStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
+    ) -> Result<
+        wasmtime::component::Resource<io_streams::OutputStream>,
+        wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
+    > {
         self.inner.fs.append_via_stream(fd)
     }
 
@@ -117,7 +136,10 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
     async fn read_directory(
         &mut self,
         fd: wasmtime::component::Resource<fs_types::Descriptor>,
-    ) -> Result<wasmtime::component::Resource<fs_types::DirectoryEntryStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
+    ) -> Result<
+        wasmtime::component::Resource<fs_types::DirectoryEntryStream>,
+        wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
+    > {
         self.inner.fs.read_directory(fd).await
     }
 
@@ -128,11 +150,11 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         self.inner.fs.sync(fd).await
     }
 
-    async fn drop(
+    fn drop(
         &mut self,
         fd: wasmtime::component::Resource<fs_types::Descriptor>,
     ) -> wasmtime::Result<()> {
-        self.inner.fs.drop(fd).await
+        self.inner.fs.drop(fd)
     }
 
     async fn advise(
@@ -142,18 +164,31 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         length: fs_types::Filesize,
         advice: fs_types::Advice,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        self.inner.fs.advise(descriptor, offset, length, advice).await
+        self.inner
+            .fs
+            .advise(descriptor, offset, length, advice)
+            .await
     }
 
-    async fn sync_data(&mut self, descriptor: wasmtime::component::Resource<fs_types::Descriptor>) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
+    async fn sync_data(
+        &mut self,
+        descriptor: wasmtime::component::Resource<fs_types::Descriptor>,
+    ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
         self.inner.fs.sync_data(descriptor).await
     }
 
-    async fn get_flags(&mut self, descriptor: wasmtime::component::Resource<fs_types::Descriptor>) -> Result<fs_types::DescriptorFlags, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
+    async fn get_flags(
+        &mut self,
+        descriptor: wasmtime::component::Resource<fs_types::Descriptor>,
+    ) -> Result<fs_types::DescriptorFlags, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
         self.inner.fs.get_flags(descriptor).await
     }
 
-    async fn set_size(&mut self, descriptor: wasmtime::component::Resource<fs_types::Descriptor>, size: fs_types::Filesize) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
+    async fn set_size(
+        &mut self,
+        descriptor: wasmtime::component::Resource<fs_types::Descriptor>,
+        size: fs_types::Filesize,
+    ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
         self.inner.fs.set_size(descriptor, size).await
     }
 
@@ -163,7 +198,14 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         data_access_timestamp: fs_types::NewTimestamp,
         data_modification_timestamp: fs_types::NewTimestamp,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        self.inner.fs.set_times(descriptor, data_access_timestamp, data_modification_timestamp).await
+        self.inner
+            .fs
+            .set_times(
+                descriptor,
+                data_access_timestamp,
+                data_modification_timestamp,
+            )
+            .await
     }
 
     async fn read(
@@ -209,7 +251,16 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         data_access_timestamp: fs_types::NewTimestamp,
         data_modification_timestamp: fs_types::NewTimestamp,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        self.inner.fs.set_times_at(descriptor, path_flags, path, data_access_timestamp, data_modification_timestamp).await
+        self.inner
+            .fs
+            .set_times_at(
+                descriptor,
+                path_flags,
+                path,
+                data_access_timestamp,
+                data_modification_timestamp,
+            )
+            .await
     }
 
     async fn link_at(
@@ -220,7 +271,16 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         new_descriptor: wasmtime::component::Resource<fs_types::Descriptor>,
         new_path: String,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        self.inner.fs.link_at(descriptor, old_path_flags, old_path, new_descriptor, new_path).await
+        self.inner
+            .fs
+            .link_at(
+                descriptor,
+                old_path_flags,
+                old_path,
+                new_descriptor,
+                new_path,
+            )
+            .await
     }
 
     async fn readlink_at(
@@ -246,7 +306,10 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         new_descriptor: wasmtime::component::Resource<fs_types::Descriptor>,
         new_path: String,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        self.inner.fs.rename_at(descriptor, old_path, new_descriptor, new_path).await
+        self.inner
+            .fs
+            .rename_at(descriptor, old_path, new_descriptor, new_path)
+            .await
     }
 
     async fn symlink_at(
@@ -255,7 +318,10 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         old_path: String,
         new_path: String,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        self.inner.fs.symlink_at(descriptor, old_path, new_path).await
+        self.inner
+            .fs
+            .symlink_at(descriptor, old_path, new_path)
+            .await
     }
 
     async fn unlink_file_at(
@@ -277,7 +343,8 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
     async fn metadata_hash(
         &mut self,
         descriptor: wasmtime::component::Resource<fs_types::Descriptor>,
-    ) -> Result<fs_types::MetadataHashValue, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
+    ) -> Result<fs_types::MetadataHashValue, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
+    {
         self.inner.fs.metadata_hash(descriptor).await
     }
 
@@ -286,8 +353,12 @@ impl fs_types::HostDescriptor for VfsWasiAdapter {
         descriptor: wasmtime::component::Resource<fs_types::Descriptor>,
         path_flags: fs_types::PathFlags,
         path: String,
-    ) -> Result<fs_types::MetadataHashValue, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        self.inner.fs.metadata_hash_at(descriptor, path_flags, path).await
+    ) -> Result<fs_types::MetadataHashValue, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
+    {
+        self.inner
+            .fs
+            .metadata_hash_at(descriptor, path_flags, path)
+            .await
     }
 }
 
@@ -295,14 +366,15 @@ impl fs_types::HostDirectoryEntryStream for VfsWasiAdapter {
     async fn read_directory_entry(
         &mut self,
         stream: wasmtime::component::Resource<fs_types::DirectoryEntryStream>,
-    ) -> Result<Option<fs_types::DirectoryEntry>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
+    ) -> Result<Option<fs_types::DirectoryEntry>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
+    {
         self.inner.fs.read_directory_entry(stream).await
     }
 
-    async fn drop(
+    fn drop(
         &mut self,
         stream: wasmtime::component::Resource<fs_types::DirectoryEntryStream>,
     ) -> wasmtime::Result<()> {
-        self.inner.fs.drop(stream).await
+        self.inner.fs.drop(stream)
     }
 }

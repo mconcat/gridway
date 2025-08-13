@@ -17,7 +17,7 @@ use thiserror::Error;
 use tracing::{debug, error, info};
 use wasmtime::component::*;
 use wasmtime::{Config, Engine, Store};
-use wasmtime_wasi::p2::{WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::p2::{WasiCtx, WasiImpl, WasiView};
 
 /// Component Host errors
 #[derive(Error, Debug)]
@@ -887,64 +887,34 @@ impl ComponentHost {
 
     /// Add VFS-based filesystem to linker
     fn add_vfs_filesystem_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
-        // Add all non-filesystem WASI subsystems from wasmtime-wasi
-        wasmtime_wasi::p2::bindings::io::streams::add_to_linker(
-            linker,
-            |cx: &mut ComponentState| cx,
-        )
-        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add io::streams: {e}")))?;
-        wasmtime_wasi::p2::bindings::cli::environment::add_to_linker(
-            linker,
-            |cx: &mut ComponentState| cx,
-        )
-        .map_err(|e| {
-            ComponentHostError::WasiSetup(format!("Failed to add cli::environment: {e}"))
-        })?;
-        wasmtime_wasi::p2::bindings::cli::stderr::add_to_linker(
-            linker,
-            |cx: &mut ComponentState| cx,
-        )
-        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add cli::stderr: {e}")))?;
-        wasmtime_wasi::p2::bindings::cli::stdout::add_to_linker(
-            linker,
-            |cx: &mut ComponentState| cx,
-        )
-        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add cli::stdout: {e}")))?;
-        wasmtime_wasi::p2::bindings::cli::stdin::add_to_linker(
-            linker,
-            |cx: &mut ComponentState| cx,
-        )
-        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add cli::stdin: {e}")))?;
-        wasmtime_wasi::p2::bindings::random::random::add_to_linker(
-            linker,
-            |cx: &mut ComponentState| cx,
-        )
-        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add random: {e}")))?;
-        wasmtime_wasi::p2::bindings::clocks::wall_clock::add_to_linker(
-            linker,
-            |cx: &mut ComponentState| cx,
-        )
-        .map_err(|e| {
-            ComponentHostError::WasiSetup(format!("Failed to add clocks::wall_clock: {e}"))
-        })?;
-        wasmtime_wasi::p2::bindings::clocks::monotonic_clock::add_to_linker(
-            linker,
-            |cx: &mut ComponentState| cx,
-        )
-        .map_err(|e| {
-            ComponentHostError::WasiSetup(format!("Failed to add clocks::monotonic_clock: {e}"))
-        })?;
+        // Since VfsWasiAdapter implements WasiView, we need to use the standard add_to_linker
+        // The key is to provide a function that extracts the VfsWasiAdapter from ComponentState
+        // and wraps it in WasiImpl (from wasmtime-wasi) to provide the Host implementations
 
-        // The key: Add OUR filesystem implementation, NOT wasmtime-wasi's
-        // Our VfsWasiAdapter implements the filesystem host traits directly
-        wasmtime_wasi::p2::bindings::filesystem::types::add_to_linker(
+        // We can't use the standard add_to_linker because it expects WasiView
+        // and our ComponentState doesn't implement WasiView directly
+        // Instead, we'll add a simple delegation wrapper
+
+        // For now, let's simplify: we'll manually add the required interfaces
+        // This is a temporary solution until we properly integrate with wasmtime-wasi
+
+        // Add the filesystem interfaces that use our VfsWasiAdapter
+        // Since our ComponentState contains a VfsWasiAdapter which implements the Host traits,
+        // we need to create a custom HasData implementation to extract it properly
+
+        struct HasVfs;
+        impl wasmtime::component::HasData for HasVfs {
+            type Data<'a> = &'a mut crate::vfs_wasi_adapter::VfsWasiAdapter;
+        }
+
+        wasmtime_wasi::p2::bindings::filesystem::types::add_to_linker::<ComponentState, HasVfs>(
             linker,
             |cx: &mut ComponentState| &mut cx.vfs_wasi,
         )
         .map_err(|e| {
             ComponentHostError::WasiSetup(format!("Failed to add filesystem::types: {e}"))
         })?;
-        wasmtime_wasi::p2::bindings::filesystem::preopens::add_to_linker(
+        wasmtime_wasi::p2::bindings::filesystem::preopens::add_to_linker::<ComponentState, HasVfs>(
             linker,
             |cx: &mut ComponentState| &mut cx.vfs_wasi,
         )
@@ -973,6 +943,12 @@ impl ComponentHost {
     pub fn get_gas_consumed(&self, store: &mut Store<ComponentState>) -> u64 {
         store.get_fuel().unwrap_or(0)
     }
+}
+
+struct HasWasi<T>(T);
+
+impl<T: 'static> HasData for HasWasi<T> {
+    type Data<'a> = WasiImpl<&'a mut T>;
 }
 
 // Component interface bindings would go here

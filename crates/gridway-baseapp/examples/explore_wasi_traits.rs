@@ -8,7 +8,6 @@ fn main() {
     // wasmtime_wasi::p2::bindings::wasi::filesystem::types
 
     // Let's see what we can access
-    use wasmtime_wasi::p2;
 
     // Print type information
     println!("Available in p2 module:");

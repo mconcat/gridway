@@ -4,7 +4,7 @@
 
 use crate::vfs::VirtualFilesystem;
 use std::sync::{Arc, Mutex};
-use wasmtime_wasi::p2::{WasiCtx, WasiCtxBuilder, WasiView, IoView};
+use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi::ResourceTable;
 
 /// VFS-backed WASI context
