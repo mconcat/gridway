@@ -225,7 +225,6 @@ impl VfsFilesystem {
             VfsError::IoError(_) => fs_types::ErrorCode::Io,
             VfsError::SerializationError(_) => fs_types::ErrorCode::Io,
             VfsError::DirectoryNotEmpty(_) => fs_types::ErrorCode::NotEmpty,
-            _ => fs_types::ErrorCode::Io,
         }
     }
 
@@ -552,19 +551,27 @@ impl fs_types::HostDescriptor for VfsFilesystem {
             Some(DescriptorKind::Dir { .. }) => Ok(fs_types::DescriptorStat {
                 type_: fs_types::DescriptorType::Directory,
                 link_count: 1,
-                size: 0,
+                size: 0, // Directories always have size 0
                 data_access_timestamp: None,
                 data_modification_timestamp: None,
                 status_change_timestamp: None,
             }),
-            Some(DescriptorKind::File { .. }) => Ok(fs_types::DescriptorStat {
-                type_: fs_types::DescriptorType::RegularFile,
-                link_count: 1,
-                size: 0,
-                data_access_timestamp: None,
-                data_modification_timestamp: None,
-                status_change_timestamp: None,
-            }),
+            Some(DescriptorKind::File { handle }) => {
+                // Use the VFS stat_by_fd method to get accurate size
+                let vfs = handle.vfs.lock().unwrap();
+                let file_info = vfs
+                    .stat_by_fd(handle.vfs_fd as u32)
+                    .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
+
+                Ok(fs_types::DescriptorStat {
+                    type_: fs_types::DescriptorType::RegularFile,
+                    link_count: 1,
+                    size: file_info.size, // Use actual size from file descriptor
+                    data_access_timestamp: None,
+                    data_modification_timestamp: None,
+                    status_change_timestamp: None,
+                })
+            }
             None => Err(fs_types::ErrorCode::BadDescriptor.into()),
         }
     }
@@ -1662,6 +1669,87 @@ mod tests {
             .any(|(name, typ)| name == "modules" && *typ == fs_types::DescriptorType::Directory));
 
         <VfsFilesystem as fs_types::HostDirectoryEntryStream>::drop(&mut fs, src_stream).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_stat_returns_accurate_size() {
+        // Create a VFS and filesystem
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+
+        // Mount the store
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), store.clone())
+            .unwrap();
+
+        // Create VFS filesystem
+        let mut fs = VfsFilesystem::new(vfs);
+
+        // Get root directory descriptor
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+
+        // Create a file with specific content
+        let test_content = b"This is test content for stat verification";
+        let root_id = root_descriptor.rep();
+        let file_descriptor = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            Resource::new_borrow(root_id),
+            fs_types::PathFlags::empty(),
+            "test_file.txt".to_string(),
+            fs_types::OpenFlags::CREATE,
+            fs_types::DescriptorFlags::WRITE | fs_types::DescriptorFlags::READ,
+        )
+        .await
+        .unwrap();
+
+        // Write content to the file through VFS
+        let file_id = file_descriptor.rep();
+        if let Some(DescriptorKind::File { handle }) = fs.descriptors.get(&file_id) {
+            let vfs = handle.vfs.lock().unwrap();
+            vfs.write(handle.vfs_fd as u32, test_content).unwrap();
+        }
+
+        // Get stat and verify size
+        let stat = <VfsFilesystem as fs_types::HostDescriptor>::stat(
+            &mut fs,
+            Resource::new_borrow(file_id),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stat.type_, fs_types::DescriptorType::RegularFile);
+        assert_eq!(stat.size, test_content.len() as u64);
+
+        // Test directory stat returns size 0
+        let dir_stat = <VfsFilesystem as fs_types::HostDescriptor>::stat(
+            &mut fs,
+            Resource::new_borrow(root_id),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(dir_stat.type_, fs_types::DescriptorType::Directory);
+        assert_eq!(dir_stat.size, 0);
+
+        // Test stat after resizing file
+        <VfsFilesystem as fs_types::HostDescriptor>::set_size(
+            &mut fs,
+            Resource::new_borrow(file_id),
+            100,
+        )
+        .await
+        .unwrap();
+
+        let resized_stat = <VfsFilesystem as fs_types::HostDescriptor>::stat(
+            &mut fs,
+            Resource::new_borrow(file_id),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resized_stat.size, 100);
     }
 
     #[tokio::test]
