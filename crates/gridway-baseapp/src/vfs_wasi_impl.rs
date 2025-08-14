@@ -601,8 +601,15 @@ impl fs_types::HostDescriptor for VfsFilesystem {
             return Err(fs_types::ErrorCode::NotEmpty.into());
         }
 
-        // Directory is empty (or doesn't exist), removal succeeds
-        // In a KV store, directories are implicit, so we just return success
+        // Directory is empty, remove it
+        // Note: In a KV store, directories are implicit. We remove the directory marker
+        // if it exists. If the directory doesn't exist at all (no marker and no files),
+        // we follow POSIX semantics and return ENOENT.
+        
+        // Try to remove the directory through VFS
+        vfs.remove_directory(&vfs_path)
+            .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
+        
         Ok(())
     }
 

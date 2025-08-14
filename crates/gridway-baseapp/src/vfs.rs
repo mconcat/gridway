@@ -848,6 +848,11 @@ impl VirtualFilesystem {
     }
 
     /// Remove an empty directory
+    /// 
+    /// Returns an error if:
+    /// - The directory doesn't exist (ENOENT)
+    /// - The directory is not empty (ENOTEMPTY)
+    /// - Access is denied
     pub fn remove_directory(&self, path: &Path) -> Result<()> {
         debug!("Removing directory:: {}", path.display());
 
@@ -866,29 +871,49 @@ impl VirtualFilesystem {
             .clone();
         drop(stores);
 
-        // Check if directory is empty
-        {
+        // Check if directory exists and is empty
+        let mut dir_key = key_prefix.clone();
+        if !key_prefix.is_empty() {
+            dir_key.push(b'/');
+        }
+        
+        let directory_exists = {
             let store = store
                 .lock()
                 .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
-
-            // Check for any entries with this prefix
-            let mut iter = store.prefix_iterator(&key_prefix);
-            if iter.next().is_some() {
-                return Err(VfsError::DirectoryNotEmpty(
-                    path.to_string_lossy().to_string(),
-                ));
+            
+            // Check if directory marker exists
+            let has_marker = store.has(&dir_key)?;
+            
+            // Check for any files with this prefix (excluding the marker itself)
+            let mut has_files = false;
+            for (key, value) in store.prefix_iterator(&key_prefix) {
+                // Skip the directory marker itself
+                if key == dir_key && value.is_empty() {
+                    continue;
+                }
+                has_files = true;
+                break;
             }
+            
+            if has_files {
+                return Err(VfsError::DirectoryNotEmpty(path.to_string_lossy().to_string()));
+            }
+            
+            has_marker
+        };
+
+        // If directory doesn't exist (no marker and no files), return error
+        if !directory_exists {
+            return Err(VfsError::PathNotFound(format!("Directory not found: {}", path.display())));
         }
 
-        // Remove directory marker if it exists
+        // Remove directory marker
         if !key_prefix.is_empty() {
-            let mut dir_key = key_prefix.clone();
-            dir_key.push(b'/');
             let mut store = store
                 .lock()
                 .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
-            let _ = store.delete(&dir_key);
+            store.delete(&dir_key)?;
         }
 
         info!("Successfully removed directory:: {}", path.display());
@@ -896,6 +921,14 @@ impl VirtualFilesystem {
     }
 
     /// Rename/move a file or directory
+    /// 
+    /// ## Overwrite Behavior
+    /// If the destination path already exists, it will be overwritten.
+    /// This matches POSIX rename(2) semantics where the destination is atomically replaced.
+    /// 
+    /// ## Implementation Note
+    /// Currently implemented as copy+delete which is not atomic. A true atomic
+    /// rename would require transaction support in the underlying store.
     pub fn rename(&self, old_path: &Path, new_path: &Path) -> Result<()> {
         debug!("Renaming {} to {}", old_path.display(), new_path.display());
 
@@ -942,7 +975,7 @@ impl VirtualFilesystem {
                 .ok_or_else(|| VfsError::PathNotFound(old_path.to_string_lossy().to_string()))?
         };
 
-        // Write to new location
+        // Write to new location (overwrites if exists)
         {
             let mut store = new_store
                 .lock()

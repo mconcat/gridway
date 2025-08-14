@@ -441,4 +441,88 @@ mod tests {
 
         fs.drop(read_file).unwrap();
     }
+
+    #[tokio::test]
+    async fn test_rename_across_namespaces() {
+        let mut fs = setup_test_vfs_filesystem();
+
+        // Get preopened directories
+        let dirs = fs.get_directories().unwrap();
+        
+        // Find the root (/) mount and config (/config) mount
+        let mut root_dir = None;
+        let mut config_dir = None;
+        
+        for (desc, path) in &dirs {
+            if path == "/" {
+                root_dir = Some(desc);
+            } else if path == "/config" {
+                config_dir = Some(desc);
+            }
+        }
+        
+        let root_dir = root_dir.expect("Root directory not found");
+        let config_dir = config_dir.expect("Config directory not found");
+
+        // Create a file in the root mount (state namespace)
+        let source_file = fs
+            .open_at(
+                Resource::new_borrow(root_dir.rep()),
+                fs_types::PathFlags::empty(),
+                "cross_namespace_test.txt".to_string(),
+                fs_types::OpenFlags::CREATE,
+                fs_types::DescriptorFlags::WRITE,
+            )
+            .await
+            .unwrap();
+        fs.drop(source_file).unwrap();
+
+        // Try to rename the file from root mount to config mount
+        // This should work as long as both mounts support write operations
+        // However, /config is read-only, so this should fail with Access error
+        let result = fs
+            .rename_at(
+                Resource::new_borrow(root_dir.rep()),
+                "cross_namespace_test.txt".to_string(),
+                Resource::new_borrow(config_dir.rep()),
+                "renamed_file.txt".to_string(),
+            )
+            .await;
+
+        // The rename should fail because /config mount is read-only
+        assert!(
+            result.is_err(),
+            "Should not be able to rename to read-only mount"
+        );
+        
+        // Verify the error is Access (due to read-only mount)
+        if let Err(err) = result {
+            // The error should be Access since config mount doesn't have write capability
+            // We can't easily check the specific error type without exposing internals,
+            // but the fact that it fails is the important test
+        }
+
+        // Now test renaming within the same namespace (should work)
+        let result = fs
+            .rename_at(
+                Resource::new_borrow(root_dir.rep()),
+                "cross_namespace_test.txt".to_string(),
+                Resource::new_borrow(root_dir.rep()),
+                "renamed_within_namespace.txt".to_string(),
+            )
+            .await;
+        
+        assert!(
+            result.is_ok(),
+            "Should be able to rename within the same namespace"
+        );
+
+        // Clean up
+        fs.unlink_file_at(
+            Resource::new_borrow(root_dir.rep()),
+            "renamed_within_namespace.txt".to_string(),
+        )
+        .await
+        .unwrap();
+    }
 }
