@@ -201,6 +201,12 @@ impl VirtualFilesystem {
         Ok(())
     }
 
+    /// Get a store by namespace
+    pub fn get_store(&self, namespace: &str) -> Option<Arc<Mutex<dyn KVStore>>> {
+        let stores = self.stores.lock().ok()?;
+        stores.get(namespace).cloned()
+    }
+
     /// Mount an interface at a specific path
     pub fn mount(&self, path: PathBuf, mount: Mount) -> Result<()> {
         debug!("Mounting interface at path:: {}", path.display());
