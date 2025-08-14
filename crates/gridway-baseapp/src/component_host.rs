@@ -17,7 +17,7 @@ use thiserror::Error;
 use tracing::{debug, error, info};
 use wasmtime::component::*;
 use wasmtime::{Config, Engine, Store};
-use wasmtime_wasi::p2::{WasiCtx, WasiImpl, WasiView};
+use wasmtime_wasi::p2::{IoImpl, WasiCtx, WasiImpl, WasiView};
 
 /// Component Host errors
 #[derive(Error, Debug)]
@@ -897,15 +897,137 @@ impl ComponentHost {
 
     /// Add VFS-based filesystem to linker
     fn add_vfs_filesystem_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
-        // We need to add all WASI interfaces, but we want to use our custom VFS filesystem.
-        // Since ComponentState implements WasiView through the vfs_wasi field,
-        // we can use the standard add_to_linker_async function directly.
+        // IMPORTANT: We explicitly add WASI subsystems separately to preserve our custom VFS
+        // Using add_to_linker_async would override our VFS with the default filesystem
+        
+        // Define helper types for subsystem extraction
+        struct HasVfs;
+        impl wasmtime::component::HasData for HasVfs {
+            type Data<'a> = &'a mut crate::vfs_wasi_adapter::VfsWasiAdapter;
+        }
 
-        // The trick is that our ComponentState implements WasiView, which means
-        // add_to_linker_async will use our VfsWasiAdapter's WasiView implementation
-        // for getting the WasiCtx and IoView.
-        wasmtime_wasi::p2::add_to_linker_async(linker)
-            .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add WASI P2: {e}")))?;
+        struct HasWasiImpl;
+        impl wasmtime::component::HasData for HasWasiImpl {
+            type Data<'a> = WasiImpl<&'a mut crate::vfs_wasi_adapter::VfsWasiAdapter>;
+        }
+
+        // 1. Add our custom VFS filesystem interfaces
+        wasmtime_wasi::p2::bindings::filesystem::types::add_to_linker::<ComponentState, HasVfs>(
+            linker,
+            |cx: &mut ComponentState| &mut cx.vfs_wasi,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add filesystem::types: {e}"))
+        })?;
+        
+        wasmtime_wasi::p2::bindings::filesystem::preopens::add_to_linker::<ComponentState, HasVfs>(
+            linker,
+            |cx: &mut ComponentState| &mut cx.vfs_wasi,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add filesystem::preopens: {e}"))
+        })?;
+
+        // 2. Add CLI subsystems (required by components)
+        wasmtime_wasi::p2::bindings::cli::environment::add_to_linker::<ComponentState, HasWasiImpl>(
+            linker,
+            |cx: &mut ComponentState| WasiImpl(IoImpl(&mut cx.vfs_wasi)),
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add cli::environment: {e}"))
+        })?;
+        
+        wasmtime_wasi::p2::bindings::cli::stdin::add_to_linker::<ComponentState, HasWasiImpl>(
+            linker,
+            |cx: &mut ComponentState| WasiImpl(IoImpl(&mut cx.vfs_wasi)),
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add cli::stdin: {e}"))
+        })?;
+        
+        wasmtime_wasi::p2::bindings::cli::stdout::add_to_linker::<ComponentState, HasWasiImpl>(
+            linker,
+            |cx: &mut ComponentState| WasiImpl(IoImpl(&mut cx.vfs_wasi)),
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add cli::stdout: {e}"))
+        })?;
+        
+        wasmtime_wasi::p2::bindings::cli::stderr::add_to_linker::<ComponentState, HasWasiImpl>(
+            linker,
+            |cx: &mut ComponentState| WasiImpl(IoImpl(&mut cx.vfs_wasi)),
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add cli::stderr: {e}"))
+        })?;
+        
+        // Add cli::exit for proper component termination
+        wasmtime_wasi::p2::bindings::cli::exit::add_to_linker::<ComponentState, HasWasiImpl>(
+            linker,
+            &wasmtime_wasi::p2::bindings::cli::exit::LinkOptions::default(),
+            |cx: &mut ComponentState| WasiImpl(IoImpl(&mut cx.vfs_wasi)),
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add cli::exit: {e}"))
+        })?;
+
+        // 3. Add random subsystem (for cryptographic operations)
+        wasmtime_wasi::p2::bindings::random::random::add_to_linker::<ComponentState, HasWasiImpl>(
+            linker,
+            |cx: &mut ComponentState| WasiImpl(IoImpl(&mut cx.vfs_wasi)),
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add random::random: {e}"))
+        })?;
+
+        // 4. Add clock subsystems (for timestamps and timers)
+        wasmtime_wasi::p2::bindings::clocks::wall_clock::add_to_linker::<ComponentState, HasWasiImpl>(
+            linker,
+            |cx: &mut ComponentState| WasiImpl(IoImpl(&mut cx.vfs_wasi)),
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add clocks::wall_clock: {e}"))
+        })?;
+        
+        wasmtime_wasi::p2::bindings::clocks::monotonic_clock::add_to_linker::<ComponentState, HasWasiImpl>(
+            linker,
+            |cx: &mut ComponentState| WasiImpl(IoImpl(&mut cx.vfs_wasi)),
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add clocks::monotonic_clock: {e}"))
+        })?;
+
+        // 5. Add IO error (required for stream error handling)
+        wasmtime_wasi::p2::bindings::io::error::add_to_linker::<ComponentState, HasVfs>(
+            linker,
+            |cx: &mut ComponentState| &mut cx.vfs_wasi,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add io::error: {e}"))
+        })?;
+        
+        // 6. Add IO poll (required for async operations)
+        wasmtime_wasi::p2::bindings::io::poll::add_to_linker::<ComponentState, HasVfs>(
+            linker,
+            |cx: &mut ComponentState| &mut cx.vfs_wasi,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add io::poll: {e}"))
+        })?;
+
+        // 7. Add IO streams (required for stdin/stdout/stderr)
+        wasmtime_wasi::p2::bindings::io::streams::add_to_linker::<ComponentState, HasVfs>(
+            linker,
+            |cx: &mut ComponentState| &mut cx.vfs_wasi,
+        )
+        .map_err(|e| {
+            ComponentHostError::WasiSetup(format!("Failed to add io::streams: {e}"))
+        })?;
+
+        // Interfaces NOT implemented (components should not depend on these):
+        // - wasi:sockets/* - Network operations (not needed for blockchain components)
+        // - wasi:cli/terminal - Terminal control (not needed)
+        // - wasi:http/* - HTTP client/server (handled at node level)
 
         Ok(())
     }
