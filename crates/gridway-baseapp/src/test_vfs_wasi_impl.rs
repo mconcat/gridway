@@ -448,11 +448,11 @@ mod tests {
 
         // Get preopened directories
         let dirs = fs.get_directories().unwrap();
-        
+
         // Find the root (/) mount and config (/config) mount
         let mut root_dir = None;
         let mut config_dir = None;
-        
+
         for (desc, path) in &dirs {
             if path == "/" {
                 root_dir = Some(desc);
@@ -460,7 +460,7 @@ mod tests {
                 config_dir = Some(desc);
             }
         }
-        
+
         let root_dir = root_dir.expect("Root directory not found");
         let config_dir = config_dir.expect("Config directory not found");
 
@@ -494,7 +494,7 @@ mod tests {
             result.is_err(),
             "Should not be able to rename to read-only mount"
         );
-        
+
         // Verify the error is Access (due to read-only mount)
         if let Err(err) = result {
             // The error should be Access since config mount doesn't have write capability
@@ -511,7 +511,7 @@ mod tests {
                 "renamed_within_namespace.txt".to_string(),
             )
             .await;
-        
+
         assert!(
             result.is_ok(),
             "Should be able to rename within the same namespace"

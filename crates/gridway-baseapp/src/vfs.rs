@@ -778,8 +778,87 @@ impl VirtualFilesystem {
             file_desc.position = new_size;
         }
 
+        // For truncation operations, write back to store immediately
+        // This ensures WASI consistency - truncation is a structural change that
+        // must be immediately visible to maintain filesystem semantics, unlike
+        // regular writes which can be buffered until close() for performance
+        if file_desc.writable && !file_desc.key.is_empty() {
+            let namespace = file_desc.namespace.clone();
+            let key = file_desc.key.clone();
+            let content = file_desc.content.clone();
+
+            drop(fds); // Release the file descriptor lock before acquiring store lock
+
+            let stores = self
+                .stores
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+            let store = stores
+                .get(&namespace)
+                .ok_or_else(|| {
+                    VfsError::PathNotFound(format!("Namespace not found:: {namespace}"))
+                })?
+                .clone();
+            drop(stores);
+
+            let mut store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store.set(&key, &content)?;
+        }
+
         debug!("Set size of fd:: {} to {}", fd, new_size);
         Ok(())
+    }
+
+    /// Check if a file exists at the given path
+    pub fn exists(&self, path: &Path) -> bool {
+        debug!("Checking existence of path:: {}", path.display());
+
+        // Try to parse the path
+        let (namespace, key) = match self.parse_path(path) {
+            Ok(result) => result,
+            Err(_) => return false,
+        };
+
+        // Check if the namespace exists
+        let stores = match self.stores.lock() {
+            Ok(stores) => stores,
+            Err(_) => return false,
+        };
+
+        let store = match stores.get(&namespace) {
+            Some(store) => store.clone(),
+            None => return false,
+        };
+        drop(stores);
+
+        // Check if the key exists in the store
+        let store = match store.lock() {
+            Ok(store) => store,
+            Err(_) => return false,
+        };
+
+        // For directories, check if it's a directory marker or has entries
+        if key.is_empty() || key.ends_with(b"/") {
+            // Check for directory marker
+            if store.has(&key).unwrap_or(false) {
+                return true;
+            }
+            // Check if there are any entries with this prefix
+            let prefix = if key.ends_with(b"/") {
+                key.clone()
+            } else {
+                let mut p = key.clone();
+                p.push(b'/');
+                p
+            };
+            let mut iter = store.prefix_iterator(&prefix);
+            iter.next().is_some()
+        } else {
+            // For files, just check if the key exists
+            store.has(&key).unwrap_or(false)
+        }
     }
 
     /// Create a directory (logical operation in KV store)
@@ -854,7 +933,7 @@ impl VirtualFilesystem {
     }
 
     /// Remove an empty directory
-    /// 
+    ///
     /// Returns an error if:
     /// - The directory doesn't exist (ENOENT)
     /// - The directory is not empty (ENOTEMPTY)
@@ -882,15 +961,15 @@ impl VirtualFilesystem {
         if !key_prefix.is_empty() {
             dir_key.push(b'/');
         }
-        
+
         let directory_exists = {
             let store = store
                 .lock()
                 .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
-            
+
             // Check if directory marker exists
             let has_marker = store.has(&dir_key)?;
-            
+
             // Check for any files with this prefix (excluding the marker itself)
             let mut has_files = false;
             for (key, value) in store.prefix_iterator(&key_prefix) {
@@ -901,17 +980,22 @@ impl VirtualFilesystem {
                 has_files = true;
                 break;
             }
-            
+
             if has_files {
-                return Err(VfsError::DirectoryNotEmpty(path.to_string_lossy().to_string()));
+                return Err(VfsError::DirectoryNotEmpty(
+                    path.to_string_lossy().to_string(),
+                ));
             }
-            
+
             has_marker
         };
 
         // If directory doesn't exist (no marker and no files), return error
         if !directory_exists {
-            return Err(VfsError::PathNotFound(format!("Directory not found: {}", path.display())));
+            return Err(VfsError::PathNotFound(format!(
+                "Directory not found: {}",
+                path.display()
+            )));
         }
 
         // Remove directory marker
@@ -927,11 +1011,11 @@ impl VirtualFilesystem {
     }
 
     /// Rename/move a file or directory
-    /// 
+    ///
     /// ## Overwrite Behavior
     /// If the destination path already exists, it will be overwritten.
     /// This matches POSIX rename(2) semantics where the destination is atomically replaced.
-    /// 
+    ///
     /// ## Implementation Note
     /// Currently implemented as copy+delete which is not atomic. A true atomic
     /// rename would require transaction support in the underlying store.
