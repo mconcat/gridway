@@ -7,7 +7,7 @@
 
 use crate::vfs::{Capability, VfsError, VirtualFilesystem};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::bindings::filesystem::{preopens, types as fs_types};
@@ -48,6 +48,18 @@ enum DescriptorKind {
     File { handle: FileHandle },
 }
 
+/// Directory entry stream for iterating directory contents
+struct DirectoryStream {
+    /// Path of the directory being iterated
+    path: PathBuf,
+    /// Mount associated with this directory
+    mount_id: usize,
+    /// Entries to be yielded
+    entries: Vec<fs_types::DirectoryEntry>,
+    /// Current position in the entries
+    position: usize,
+}
+
 /// File handle for open files
 #[derive(Clone)]
 struct FileHandle {
@@ -73,6 +85,10 @@ pub struct VfsFilesystem {
     descriptors: HashMap<u32, DescriptorKind>,
     /// Next descriptor ID
     next_descriptor: u32,
+    /// Directory streams mapping
+    directory_streams: HashMap<u32, DirectoryStream>,
+    /// Next stream ID
+    next_stream_id: u32,
 }
 
 impl VfsFilesystem {
@@ -83,6 +99,8 @@ impl VfsFilesystem {
             mounts: Vec::new(),
             descriptors: HashMap::new(),
             next_descriptor: 10, // Start after standard descriptors
+            directory_streams: HashMap::new(),
+            next_stream_id: 1,
         };
 
         // Set up default mounts
@@ -309,13 +327,59 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
         let fd = descriptor.rep();
-        match self.descriptors.get(&fd) {
-            Some(DescriptorKind::Dir { .. }) => {
-                // Cannot construct a typed DirectoryEntryStream without internal types; return Unsupported
-                Err(fs_types::ErrorCode::Unsupported.into())
+        let (mount_id, dir_path) = match self.descriptors.get(&fd) {
+            Some(DescriptorKind::Dir { mount_id }) => {
+                let mount = &self.mounts[*mount_id];
+                (*mount_id, PathBuf::from(&mount.guest_prefix))
             }
-            _ => Err(fs_types::ErrorCode::NotDirectory.into()),
+            _ => return Err(fs_types::ErrorCode::NotDirectory.into()),
+        };
+
+        // Get the mount and namespace
+        let mount = &self.mounts[mount_id];
+        let namespace = &mount.vfs_namespace;
+
+        // List all entries in this directory
+        let mut entries = Vec::new();
+        
+        // Create VFS path for listing
+        let vfs_path = PathBuf::from(format!("/{}/", namespace));
+        
+        // Get entries from VFS
+        let vfs = self.vfs.lock().unwrap();
+        
+        // Use the VFS to list keys with the namespace prefix
+        if let Some(store) = vfs.get_store(namespace) {
+            let store = store.lock().unwrap();
+            let iter = store.prefix_iterator(&[]);
+            
+            for (key, _) in iter {
+                if let Ok(key_str) = String::from_utf8(key.clone()) {
+                    // Create a directory entry for each key
+                    let entry = fs_types::DirectoryEntry {
+                        type_: fs_types::DescriptorType::RegularFile,
+                        name: key_str,
+                    };
+                    entries.push(entry);
+                }
+            }
         }
+        
+        // Create the directory stream
+        let stream = DirectoryStream {
+            path: dir_path,
+            mount_id,
+            entries,
+            position: 0,
+        };
+        
+        // Store the stream in our HashMap and return a resource handle
+        let stream_id = self.next_stream_id;
+        self.next_stream_id += 1;
+        self.directory_streams.insert(stream_id, stream);
+        
+        // Create a resource handle with our stream ID
+        Ok(Resource::new_own(stream_id))
     }
 
     async fn sync(
@@ -598,13 +662,28 @@ impl fs_types::HostDirectoryEntryStream for VfsFilesystem {
         stream: Resource<fs_types::DirectoryEntryStream>,
     ) -> Result<Option<fs_types::DirectoryEntry>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
     {
-        // Since we can't create DirectoryEntryStream resources directly,
-        // we return None for now
-        Ok(None)
+        // Get the stream ID from the resource
+        let stream_id = stream.rep();
+        
+        // Get the stream from our HashMap
+        let dir_stream = self.directory_streams.get_mut(&stream_id)
+            .ok_or_else(|| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::BadDescriptor))?;
+        
+        // Check if we have more entries to yield
+        if dir_stream.position < dir_stream.entries.len() {
+            let entry = dir_stream.entries[dir_stream.position].clone();
+            dir_stream.position += 1;
+            Ok(Some(entry))
+        } else {
+            // No more entries
+            Ok(None)
+        }
     }
 
     fn drop(&mut self, stream: Resource<fs_types::DirectoryEntryStream>) -> HostResult<()> {
-        self.table.delete(stream)?;
+        // Remove the stream from our HashMap
+        let stream_id = stream.rep();
+        self.directory_streams.remove(&stream_id);
         Ok(())
     }
 }
@@ -635,6 +714,63 @@ impl VfsOutputStream {
 }
 
 // Stream trait implementations will be added in a future phase
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gridway_store::{KVStore, MemStore};
+    use wasmtime_wasi::p2::bindings::filesystem::{preopens, types as fs_types};
+
+    #[tokio::test]
+    async fn test_directory_iteration() {
+        // Create a VFS with some test data
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+        
+        // Add some test entries to the store
+        {
+            let mut store = store.lock().unwrap();
+            store.set(b"file1.txt", b"content1").unwrap();
+            store.set(b"file2.txt", b"content2").unwrap();
+            store.set(b"subdir/file3.txt", b"content3").unwrap();
+        }
+        
+        // Mount the store
+        vfs.lock().unwrap().mount_store("state".to_string(), store.clone()).unwrap();
+        
+        // Create VFS filesystem
+        let mut fs = VfsFilesystem::new(vfs);
+        
+        // Get the preopened directory descriptor for root using the trait
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        assert!(!preopens.is_empty());
+        
+        let (root_descriptor, _path) = preopens.remove(0);
+        
+        // Read the directory using the trait
+        let stream = <VfsFilesystem as fs_types::HostDescriptor>::read_directory(&mut fs, root_descriptor).await.unwrap();
+        
+        // Read entries from the stream using the trait
+        let mut entries = Vec::new();
+        let stream_id = stream.rep();  // Get the stream ID for repeated use
+        loop {
+            // Use the stream ID to create a new resource handle for each call
+            let stream_ref = Resource::new_borrow(stream_id);
+            match <VfsFilesystem as fs_types::HostDirectoryEntryStream>::read_directory_entry(&mut fs, stream_ref).await.unwrap() {
+                Some(entry) => entries.push(entry.name),
+                None => break,
+            }
+        }
+        
+        // Verify we got the expected entries
+        assert!(entries.contains(&"file1.txt".to_string()));
+        assert!(entries.contains(&"file2.txt".to_string()));
+        assert!(entries.contains(&"subdir/file3.txt".to_string()));
+        
+        // Clean up using the trait
+        <VfsFilesystem as fs_types::HostDirectoryEntryStream>::drop(&mut fs, stream).unwrap();
+    }
+}
 
 /// Custom context that uses our VFS filesystem
 pub struct VfsWasiContext {
