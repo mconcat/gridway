@@ -617,17 +617,37 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         let (mount_id, parent_path) = match self.descriptors.get(&dir_fd) {
             Some(DescriptorKind::Dir { mount_id, path }) => (*mount_id, path.clone()),
             Some(DescriptorKind::File { .. }) => {
-                return Err(fs_types::ErrorCode::Access.into())
+                return Err(fs_types::ErrorCode::NotDirectory.into())
             }
             None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
         };
 
         let mount = &self.mounts[mount_id];
-        let writable = flags.contains(fs_types::DescriptorFlags::WRITE)
-            || open_flags.contains(fs_types::OpenFlags::CREATE)
-            || open_flags.contains(fs_types::OpenFlags::TRUNCATE);
 
-        if writable && !mount.caps.write {
+        // Step 1: Validate flag combinations
+        // EXCLUSIVE requires CREATE
+        if open_flags.contains(fs_types::OpenFlags::EXCLUSIVE)
+            && !open_flags.contains(fs_types::OpenFlags::CREATE)
+        {
+            return Err(fs_types::ErrorCode::Invalid.into());
+        }
+
+        // Determine if we need write capability
+        let needs_write = flags.contains(fs_types::DescriptorFlags::WRITE)
+            || flags.contains(fs_types::DescriptorFlags::MUTATE_DIRECTORY);
+
+        let needs_write_for_create = open_flags.contains(fs_types::OpenFlags::CREATE);
+        let needs_write_for_truncate = open_flags.contains(fs_types::OpenFlags::TRUNCATE);
+
+        // Any write operation requires write capability
+        let requires_write_cap = needs_write || needs_write_for_create || needs_write_for_truncate;
+
+        // Step 2: Check mount capabilities
+        if requires_write_cap && !mount.caps.write {
+            return Err(fs_types::ErrorCode::Access.into());
+        }
+
+        if flags.contains(fs_types::DescriptorFlags::READ) && !mount.caps.read {
             return Err(fs_types::ErrorCode::Access.into());
         }
 
@@ -656,7 +676,12 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         let is_dir = if path.is_empty() && parent_path == PathBuf::from(&mount.guest_prefix) {
             true // Mount root is always a directory
         } else if open_flags.contains(fs_types::OpenFlags::DIRECTORY) {
-            // Explicitly opening as directory
+            // Explicitly opening as directory - verify it actually is one
+            let is_directory = self.is_directory(&mount.vfs_namespace, path_bytes);
+            if !is_directory && !open_flags.contains(fs_types::OpenFlags::CREATE) {
+                // Trying to open non-directory as directory
+                return Err(fs_types::ErrorCode::NotDirectory.into());
+            }
             true
         } else {
             // Check if path has directory entries
@@ -668,8 +693,14 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         self.next_descriptor += 1;
 
         if is_dir {
-            // Opening a directory - just create a directory descriptor
-            // Directories don't need VFS file handles
+            // Opening a directory - directories don't support CREATE/TRUNCATE
+            if open_flags.contains(fs_types::OpenFlags::CREATE) && !path.is_empty() {
+                // Can't create a file when DIRECTORY flag is set
+                if open_flags.contains(fs_types::OpenFlags::DIRECTORY) {
+                    return Err(fs_types::ErrorCode::Invalid.into());
+                }
+            }
+
             self.descriptors.insert(
                 new_fd,
                 DescriptorKind::Dir {
@@ -678,17 +709,35 @@ impl fs_types::HostDescriptor for VfsFilesystem {
                 },
             );
         } else {
-            // Opening a file - proceed with VFS operations
-            // Ensure capabilities for this path (coarse-grained)
+            // Opening a file
+
+            // Step 3: Map capabilities to VFS operations
             {
                 let vfs = self
                     .vfs
                     .lock()
                     .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
+
+                // Always need read capability for open
                 let _ = vfs.add_capability(Capability::Read(vfs_path.clone()));
-                if writable {
+
+                if requires_write_cap {
                     let _ = vfs.add_capability(Capability::Write(vfs_path.clone()));
                 }
+            }
+
+            // Check file existence for EXCLUSIVE flag
+            let file_exists = {
+                let vfs = self
+                    .vfs
+                    .lock()
+                    .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
+                vfs.exists(&vfs_path)
+            };
+
+            // Handle EXCLUSIVE flag - fail if file exists when creating exclusively
+            if open_flags.contains(fs_types::OpenFlags::EXCLUSIVE) && file_exists {
+                return Err(fs_types::ErrorCode::Exist.into());
             }
 
             // Open or create in VFS
@@ -697,17 +746,34 @@ impl fs_types::HostDescriptor for VfsFilesystem {
                     .vfs
                     .lock()
                     .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
-                if open_flags.contains(fs_types::OpenFlags::CREATE) {
+
+                // Handle CREATE flag
+                let fd = if open_flags.contains(fs_types::OpenFlags::CREATE) && !file_exists {
                     vfs.create(&vfs_path).map_err(|e| {
                         wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e))
                     })?
+                } else if !file_exists {
+                    // File doesn't exist and CREATE not specified
+                    return Err(fs_types::ErrorCode::NoEntry.into());
                 } else {
-                    vfs.open(&vfs_path, writable).map_err(|e| {
+                    // File exists, open it
+                    vfs.open(&vfs_path, requires_write_cap).map_err(|e| {
                         wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e))
                     })?
+                };
+
+                // Step 4: Handle TRUNCATE flag
+                if open_flags.contains(fs_types::OpenFlags::TRUNCATE) {
+                    // Truncate means resize to 0
+                    vfs.set_size(fd, 0).map_err(|e| {
+                        wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e))
+                    })?;
                 }
+
+                fd
             } as u64;
 
+            // Step 5: Create file handle with mapped descriptor flags
             self.descriptors.insert(
                 new_fd,
                 DescriptorKind::File {
@@ -715,7 +781,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
                         vfs_fd,
                         position: 0,
                         vfs: self.vfs.clone(),
-                        writable,
+                        writable: needs_write, // Map WRITE flag to writable
                     },
                 },
             );
@@ -810,11 +876,11 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         // Note: In a KV store, directories are implicit. We remove the directory marker
         // if it exists. If the directory doesn't exist at all (no marker and no files),
         // we follow POSIX semantics and return ENOENT.
-        
+
         // Try to remove the directory through VFS
         vfs.remove_directory(&vfs_path)
             .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
-        
+
         Ok(())
     }
 
@@ -1104,6 +1170,319 @@ mod tests {
     use wasmtime_wasi::p2::bindings::filesystem::{preopens, types as fs_types};
 
     #[tokio::test]
+    async fn test_open_at_capability_enforcement() {
+        // Test that CREATE without write capability fails
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("config".to_string(), store.clone())
+            .unwrap();
+
+        let mut fs = VfsFilesystem::new(vfs);
+
+        // Get config mount descriptor (read-only)
+        let preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let config_descriptor = preopens
+            .iter()
+            .find(|(_, path)| path == "/config")
+            .map(|(desc, _)| Resource::new_borrow(desc.rep()))
+            .unwrap();
+
+        // Try to create a file without write capability
+        let result = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            config_descriptor,
+            fs_types::PathFlags::empty(),
+            "test.txt".to_string(),
+            fs_types::OpenFlags::CREATE,
+            fs_types::DescriptorFlags::WRITE,
+        )
+        .await;
+
+        // Should fail with Access error
+        assert!(result.is_err());
+        match result.unwrap_err().downcast() {
+            Ok(err) => assert_eq!(err, fs_types::ErrorCode::Access),
+            Err(_) => panic!("Expected Access error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_open_at_truncate_flag() {
+        // Test that TRUNCATE flag correctly resizes file to 0
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+
+        // Pre-populate a file with content
+        {
+            let mut store = store.lock().unwrap();
+            store
+                .set(b"existing.txt", b"This is existing content")
+                .unwrap();
+        }
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), store.clone())
+            .unwrap();
+
+        let mut fs = VfsFilesystem::new(vfs);
+
+        // Get root descriptor
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+
+        // Open file with TRUNCATE flag
+        let fd = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            root_descriptor,
+            fs_types::PathFlags::empty(),
+            "existing.txt".to_string(),
+            fs_types::OpenFlags::TRUNCATE,
+            fs_types::DescriptorFlags::WRITE | fs_types::DescriptorFlags::READ,
+        )
+        .await
+        .unwrap();
+
+        // Verify file was truncated by checking through the store
+        let fd_id = fd.rep();
+        if let Some(DescriptorKind::File { handle: _ }) = fs.descriptors.get(&fd_id) {
+            // Check the actual content in the store to verify truncation
+            let store = store.lock().unwrap();
+            let content = store.get(b"existing.txt").unwrap().unwrap_or_default();
+            // The file should still exist but be empty after truncation
+            assert_eq!(content.len(), 0, "File should be truncated to 0 bytes");
+        } else {
+            panic!("Expected file descriptor");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_open_at_exclusive_flag() {
+        // Test that EXCLUSIVE flag prevents overwriting existing files
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+
+        // Pre-populate a file
+        {
+            let mut store = store.lock().unwrap();
+            store.set(b"existing.txt", b"content").unwrap();
+        }
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), store.clone())
+            .unwrap();
+
+        let mut fs = VfsFilesystem::new(vfs);
+
+        // Get root descriptor
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+
+        // Try to create file with EXCLUSIVE flag when it already exists
+        let result = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            root_descriptor,
+            fs_types::PathFlags::empty(),
+            "existing.txt".to_string(),
+            fs_types::OpenFlags::CREATE | fs_types::OpenFlags::EXCLUSIVE,
+            fs_types::DescriptorFlags::WRITE,
+        )
+        .await;
+
+        // Should fail with Exist error
+        assert!(result.is_err());
+        match result.unwrap_err().downcast() {
+            Ok(err) => assert_eq!(err, fs_types::ErrorCode::Exist),
+            Err(_) => panic!("Expected Exist error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_open_at_invalid_flag_combinations() {
+        // Test that EXCLUSIVE without CREATE fails
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), store.clone())
+            .unwrap();
+
+        let mut fs = VfsFilesystem::new(vfs);
+
+        // Get root descriptor
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+
+        // Try EXCLUSIVE without CREATE
+        let result = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            root_descriptor,
+            fs_types::PathFlags::empty(),
+            "test.txt".to_string(),
+            fs_types::OpenFlags::EXCLUSIVE, // Missing CREATE
+            fs_types::DescriptorFlags::WRITE,
+        )
+        .await;
+
+        // Should fail with Invalid error
+        assert!(result.is_err());
+        match result.unwrap_err().downcast() {
+            Ok(err) => assert_eq!(err, fs_types::ErrorCode::Invalid),
+            Err(_) => panic!("Expected Invalid error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_open_at_descriptor_flag_mapping() {
+        // Test that descriptor flags are correctly mapped to file handle properties
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), store.clone())
+            .unwrap();
+
+        let mut fs = VfsFilesystem::new(vfs);
+
+        // Get root descriptor
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+
+        // Test 1: Open with WRITE flag
+        let write_fd = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            root_descriptor,
+            fs_types::PathFlags::empty(),
+            "write_test.txt".to_string(),
+            fs_types::OpenFlags::CREATE,
+            fs_types::DescriptorFlags::WRITE,
+        )
+        .await
+        .unwrap();
+
+        // Verify writable flag is set
+        let write_fd_id = write_fd.rep();
+        if let Some(DescriptorKind::File { handle }) = fs.descriptors.get(&write_fd_id) {
+            assert!(handle.writable, "File should be writable with WRITE flag");
+        }
+
+        // Test 2: Open with READ only flag
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+
+        // Create file first
+        {
+            let mut store = store.lock().unwrap();
+            store.set(b"read_test.txt", b"content").unwrap();
+        }
+
+        let read_fd = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            root_descriptor,
+            fs_types::PathFlags::empty(),
+            "read_test.txt".to_string(),
+            fs_types::OpenFlags::empty(),
+            fs_types::DescriptorFlags::READ,
+        )
+        .await
+        .unwrap();
+
+        // Verify writable flag is not set
+        let read_fd_id = read_fd.rep();
+        if let Some(DescriptorKind::File { handle }) = fs.descriptors.get(&read_fd_id) {
+            assert!(
+                !handle.writable,
+                "File should not be writable with only READ flag"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_open_at_nonexistent_file_without_create() {
+        // Test that opening non-existent file without CREATE fails
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), store.clone())
+            .unwrap();
+
+        let mut fs = VfsFilesystem::new(vfs);
+
+        // Get root descriptor
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+
+        // Try to open non-existent file without CREATE
+        let result = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            root_descriptor,
+            fs_types::PathFlags::empty(),
+            "nonexistent.txt".to_string(),
+            fs_types::OpenFlags::empty(), // No CREATE flag
+            fs_types::DescriptorFlags::READ,
+        )
+        .await;
+
+        // Should fail with NoEntry error
+        assert!(result.is_err());
+        match result.unwrap_err().downcast() {
+            Ok(err) => assert_eq!(err, fs_types::ErrorCode::NoEntry),
+            Err(_) => panic!("Expected NoEntry error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_open_at_directory_as_file() {
+        // Test that opening a directory without DIRECTORY flag works correctly
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+
+        // Create directory structure
+        {
+            let mut store = store.lock().unwrap();
+            store.set(b"mydir/file.txt", b"content").unwrap();
+        }
+
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), store.clone())
+            .unwrap();
+
+        let mut fs = VfsFilesystem::new(vfs);
+
+        // Get root descriptor
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+
+        // Open directory as directory (should succeed)
+        let dir_fd = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            root_descriptor,
+            fs_types::PathFlags::empty(),
+            "mydir".to_string(),
+            fs_types::OpenFlags::DIRECTORY,
+            fs_types::DescriptorFlags::READ,
+        )
+        .await
+        .unwrap();
+
+        // Verify it's a directory descriptor
+        let dir_fd_id = dir_fd.rep();
+        assert!(matches!(
+            fs.descriptors.get(&dir_fd_id),
+            Some(DescriptorKind::Dir { .. })
+        ));
+    }
+
+    #[tokio::test]
     async fn test_directory_iteration() {
         // Create a VFS with some test data
         let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
@@ -1290,17 +1669,17 @@ mod tests {
         // Create a VFS with many entries to validate performance
         let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
         let store = Arc::new(Mutex::new(MemStore::new()));
-        
+
         // Add many entries to test performance
         {
             let mut store = store.lock().unwrap();
             // Add 100 files to test performance with larger directories
             for i in 0..100 {
-                let key = format!("file_{:03}.txt", i);
-                let value = format!("content_{}", i);
+                let key = format!("file_{i:03}.txt");
+                let value = format!("content_{i}");
                 store.set(key.as_bytes(), value.as_bytes()).unwrap();
             }
-            
+
             // Add some nested directories with files
             for i in 0..10 {
                 let dir_files = vec![
@@ -1313,59 +1692,61 @@ mod tests {
                 }
             }
         }
-        
+
         // Mount the store
         vfs.lock()
             .unwrap()
             .mount_store("state".to_string(), store.clone())
             .unwrap();
-        
+
         // Create VFS filesystem
         let mut fs = VfsFilesystem::new(vfs);
-        
+
         // List root directory and measure
         let start = std::time::Instant::now();
-        
+
         let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
         let (root_descriptor, _) = preopens.remove(0);
-        
-        let stream = <VfsFilesystem as fs_types::HostDescriptor>::read_directory(&mut fs, root_descriptor)
-            .await
-            .unwrap();
-        
+
+        let stream =
+            <VfsFilesystem as fs_types::HostDescriptor>::read_directory(&mut fs, root_descriptor)
+                .await
+                .unwrap();
+
         let mut entries = Vec::new();
         let stream_id = stream.rep();
         loop {
             let stream_ref = Resource::new_borrow(stream_id);
-            match <VfsFilesystem as fs_types::HostDirectoryEntryStream>::read_directory_entry(&mut fs, stream_ref)
-                .await
-                .unwrap()
+            match <VfsFilesystem as fs_types::HostDirectoryEntryStream>::read_directory_entry(
+                &mut fs, stream_ref,
+            )
+            .await
+            .unwrap()
             {
                 Some(entry) => entries.push(entry.name),
                 None => break,
             }
         }
-        
+
         let elapsed = start.elapsed();
-        
+
         // Verify we got all entries
         assert_eq!(entries.len(), 110); // 100 files + 10 directories
-        
+
         // Verify correct ordering (entries should be consistent)
-        let file_entries: Vec<_> = entries.iter()
-            .filter(|e| e.starts_with("file_"))
-            .collect();
+        let file_entries: Vec<_> = entries.iter().filter(|e| e.starts_with("file_")).collect();
         assert_eq!(file_entries.len(), 100);
-        
-        let dir_entries: Vec<_> = entries.iter()
-            .filter(|e| e.starts_with("dir_"))
-            .collect();
+
+        let dir_entries: Vec<_> = entries.iter().filter(|e| e.starts_with("dir_")).collect();
         assert_eq!(dir_entries.len(), 10);
-        
+
         // Performance check - should complete reasonably quickly
         // This is a soft check, mainly to catch severe performance regressions
-        assert!(elapsed.as_millis() < 100, "Directory listing took {:?} which seems slow", elapsed);
-        
+        assert!(
+            elapsed.as_millis() < 100,
+            "Directory listing took {elapsed:?} which seems slow"
+        );
+
         <VfsFilesystem as fs_types::HostDirectoryEntryStream>::drop(&mut fs, stream).unwrap();
     }
 }

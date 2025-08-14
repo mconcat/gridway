@@ -411,7 +411,7 @@ impl wasmtime_wasi::p2::bindings::io::error::HostError for VfsWasiAdapter {
         self.inner.table().delete(error)?;
         Ok(())
     }
-    
+
     fn to_debug_string(&mut self, error: Resource<io_streams::Error>) -> wasmtime::Result<String> {
         Ok(format!("{:?}", self.inner.table().get(&error)?))
     }
@@ -427,14 +427,10 @@ impl io_streams::Host for VfsWasiAdapter {
         // Convert the stream error to the expected type
         match err {
             wasmtime_wasi::p2::StreamError::Closed => Ok(io_streams::StreamError::Closed),
-            wasmtime_wasi::p2::StreamError::LastOperationFailed(e) => {
-                Ok(io_streams::StreamError::LastOperationFailed(
-                    self.inner.table().push(e).unwrap()
-                ))
-            }
-            wasmtime_wasi::p2::StreamError::Trap(e) => {
-                Err(e)
-            }
+            wasmtime_wasi::p2::StreamError::LastOperationFailed(e) => Ok(
+                io_streams::StreamError::LastOperationFailed(self.inner.table().push(e).unwrap()),
+            ),
+            wasmtime_wasi::p2::StreamError::Trap(e) => Err(e),
         }
     }
 }
@@ -482,7 +478,9 @@ impl io_streams::HostInputStream for VfsWasiAdapter {
         &mut self,
         _stream: Resource<io_streams::InputStream>,
     ) -> Result<Resource<io_poll::Pollable>, anyhow::Error> {
-        Err(anyhow::anyhow!("VFS stream subscribe not yet implemented (Issue #66)"))
+        Err(anyhow::anyhow!(
+            "VFS stream subscribe not yet implemented (Issue #66)"
+        ))
     }
 
     async fn drop(&mut self, stream: Resource<io_streams::InputStream>) -> wasmtime::Result<()> {
