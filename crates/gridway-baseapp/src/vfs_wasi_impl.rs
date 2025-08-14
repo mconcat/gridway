@@ -227,7 +227,7 @@ impl VfsFilesystem {
             VfsError::StoreError(_) => fs_types::ErrorCode::Io,
             VfsError::IoError(_) => fs_types::ErrorCode::Io,
             VfsError::SerializationError(_) => fs_types::ErrorCode::Io,
-            VfsError::DirectoryNotEmpty(_) => fs_types::ErrorCode::Io,
+            VfsError::DirectoryNotEmpty(_) => fs_types::ErrorCode::NotEmpty,
             _ => fs_types::ErrorCode::Io,
         }
     }
@@ -348,8 +348,23 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         _descriptor: Resource<fs_types::Descriptor>,
         _size: fs_types::Filesize,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        // TODO: Implement set_size
-        Err(fs_types::ErrorCode::Unsupported.into())
+        let fd = descriptor.rep();
+        match self.descriptors.get(&fd) {
+            Some(DescriptorKind::File { handle }) => {
+                if !handle.writable {
+                    return Err(fs_types::ErrorCode::Access.into());
+                }
+
+                // Use the VFS set_size method
+                let vfs = handle.vfs.lock().unwrap();
+                vfs.set_size(handle.vfs_fd as u32, size)
+                    .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
+
+                Ok(())
+            }
+            Some(DescriptorKind::Dir { .. }) => Err(fs_types::ErrorCode::IsDirectory.into()),
+            None => Err(fs_types::ErrorCode::BadDescriptor.into()),
+        }
     }
 
     async fn set_times(
@@ -486,11 +501,49 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     async fn create_directory_at(
         &mut self,
-        _descriptor: Resource<fs_types::Descriptor>,
-        _path: String,
+        descriptor: Resource<fs_types::Descriptor>,
+        path: String,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        // TODO: Implement directory creation
-        Err(fs_types::ErrorCode::Unsupported.into())
+        let dir_fd = descriptor.rep();
+
+        // Validate directory descriptor
+        let mount_id = match self.descriptors.get(&dir_fd) {
+            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::File { .. }) => {
+                return Err(fs_types::ErrorCode::NotDirectory.into())
+            }
+            None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
+        };
+
+        let mount = &self.mounts[mount_id];
+
+        // Check write permission on mount
+        if !mount.caps.write {
+            return Err(fs_types::ErrorCode::Access.into());
+        }
+
+        // Build VFS path: /{namespace}/{path}/
+        let vfs_path = if path.is_empty() {
+            return Err(fs_types::ErrorCode::BadDescriptor.into());
+        } else {
+            PathBuf::from(format!("/{}/{}/", mount.vfs_namespace, path))
+        };
+
+        // Add write capability for this path
+        {
+            let vfs = self.vfs.lock().unwrap();
+            let _ = vfs.add_capability(Capability::Write(vfs_path.clone()));
+        }
+
+        // Create a directory marker in the VFS
+        // This helps distinguish between non-existent paths and empty directories
+        let vfs = self.vfs.lock().unwrap();
+
+        // Use the VFS create_directory method to create the marker
+        vfs.create_directory(&vfs_path)
+            .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
+
+        Ok(())
     }
 
     async fn stat(
@@ -700,22 +753,128 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     async fn remove_directory_at(
         &mut self,
-        _descriptor: Resource<fs_types::Descriptor>,
-        _path: String,
+        descriptor: Resource<fs_types::Descriptor>,
+        path: String,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        // TODO: Implement directory removal
-        Err(fs_types::ErrorCode::Unsupported.into())
+        let dir_fd = descriptor.rep();
+
+        // Validate directory descriptor
+        let mount_id = match self.descriptors.get(&dir_fd) {
+            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::File { .. }) => {
+                return Err(fs_types::ErrorCode::NotDirectory.into())
+            }
+            None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
+        };
+
+        let mount = &self.mounts[mount_id];
+
+        // Check write permission on mount
+        if !mount.caps.write {
+            return Err(fs_types::ErrorCode::Access.into());
+        }
+
+        // Build VFS path for directory: /{namespace}/{path}/
+        let vfs_path = if path.is_empty() {
+            return Err(fs_types::ErrorCode::BadDescriptor.into());
+        } else {
+            PathBuf::from(format!("/{}/{}/", mount.vfs_namespace, path))
+        };
+
+        // Add write capability for this path
+        {
+            let vfs = self.vfs.lock().unwrap();
+            let _ = vfs.add_capability(Capability::Write(vfs_path.clone()));
+            let _ = vfs.add_capability(Capability::Read(vfs_path.clone()));
+        }
+
+        // Check if directory is empty by looking for any files with this prefix
+        let vfs = self.vfs.lock().unwrap();
+        let (namespace, _) = vfs
+            .parse_path(&vfs_path)
+            .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
+
+        // Check if there are any entries with this directory path as prefix
+        // We need to check for any keys that start with "directory_name/"
+        let dir_prefix = if path.ends_with('/') {
+            path.to_string()
+        } else {
+            format!("{path}/")
+        };
+
+        if vfs
+            .has_prefix(&namespace, dir_prefix.as_bytes())
+            .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?
+        {
+            return Err(fs_types::ErrorCode::NotEmpty.into());
+        }
+
+        // Directory is empty, remove it
+        // Note: In a KV store, directories are implicit. We remove the directory marker
+        // if it exists. If the directory doesn't exist at all (no marker and no files),
+        // we follow POSIX semantics and return ENOENT.
+        
+        // Try to remove the directory through VFS
+        vfs.remove_directory(&vfs_path)
+            .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
+        
+        Ok(())
     }
 
     async fn rename_at(
         &mut self,
-        _descriptor: Resource<fs_types::Descriptor>,
-        _old_path: String,
-        _new_descriptor: Resource<fs_types::Descriptor>,
-        _new_path: String,
+        descriptor: Resource<fs_types::Descriptor>,
+        old_path: String,
+        new_descriptor: Resource<fs_types::Descriptor>,
+        new_path: String,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        // TODO: Implement rename
-        Err(fs_types::ErrorCode::Unsupported.into())
+        let old_dir_fd = descriptor.rep();
+        let new_dir_fd = new_descriptor.rep();
+
+        // Validate old directory descriptor
+        let old_mount_id = match self.descriptors.get(&old_dir_fd) {
+            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::File { .. }) => {
+                return Err(fs_types::ErrorCode::NotDirectory.into())
+            }
+            None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
+        };
+
+        // Validate new directory descriptor
+        let new_mount_id = match self.descriptors.get(&new_dir_fd) {
+            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::File { .. }) => {
+                return Err(fs_types::ErrorCode::NotDirectory.into())
+            }
+            None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
+        };
+
+        let old_mount = &self.mounts[old_mount_id];
+        let new_mount = &self.mounts[new_mount_id];
+
+        // Check permissions
+        if !old_mount.caps.write || !new_mount.caps.write {
+            return Err(fs_types::ErrorCode::Access.into());
+        }
+
+        // Build VFS paths
+        let old_vfs_path = PathBuf::from(format!("/{}/{}", old_mount.vfs_namespace, old_path));
+        let new_vfs_path = PathBuf::from(format!("/{}/{}", new_mount.vfs_namespace, new_path));
+
+        // Add capabilities
+        {
+            let vfs = self.vfs.lock().unwrap();
+            let _ = vfs.add_capability(Capability::Read(old_vfs_path.clone()));
+            let _ = vfs.add_capability(Capability::Write(old_vfs_path.clone()));
+            let _ = vfs.add_capability(Capability::Write(new_vfs_path.clone()));
+        }
+
+        // Perform the rename operation using VFS's rename method
+        let vfs = self.vfs.lock().unwrap();
+        vfs.rename(&old_vfs_path, &new_vfs_path)
+            .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
+
+        Ok(())
     }
 
     async fn symlink_at(
@@ -730,11 +889,51 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     async fn unlink_file_at(
         &mut self,
-        _descriptor: Resource<fs_types::Descriptor>,
-        _path: String,
+        descriptor: Resource<fs_types::Descriptor>,
+        path: String,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        // TODO: Implement file unlinking
-        Err(fs_types::ErrorCode::Unsupported.into())
+        let dir_fd = descriptor.rep();
+
+        // Validate directory descriptor
+        let mount_id = match self.descriptors.get(&dir_fd) {
+            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::File { .. }) => {
+                return Err(fs_types::ErrorCode::NotDirectory.into())
+            }
+            None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
+        };
+
+        let mount = &self.mounts[mount_id];
+
+        // Check write permission on mount
+        if !mount.caps.write {
+            return Err(fs_types::ErrorCode::Access.into());
+        }
+
+        // Build VFS path: /{namespace}/{path}
+        let vfs_path = if path.is_empty() {
+            return Err(fs_types::ErrorCode::BadDescriptor.into());
+        } else {
+            PathBuf::from(format!("/{}/{}", mount.vfs_namespace, path))
+        };
+
+        // Check if it's a directory (ends with /) - we can't unlink directories
+        if path.ends_with('/') {
+            return Err(fs_types::ErrorCode::IsDirectory.into());
+        }
+
+        // Add write capability for this path
+        {
+            let vfs = self.vfs.lock().unwrap();
+            let _ = vfs.add_capability(Capability::Write(vfs_path.clone()));
+        }
+
+        // Delete the file from VFS
+        let vfs = self.vfs.lock().unwrap();
+        vfs.unlink(&vfs_path)
+            .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
+
+        Ok(())
     }
 
     async fn is_same_object(

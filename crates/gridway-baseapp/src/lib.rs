@@ -30,6 +30,10 @@ mod test_kvstore_integration;
 #[cfg(test)]
 mod test_prefixed_kvstore;
 #[cfg(test)]
+mod test_vfs_debug;
+#[cfg(test)]
+mod test_vfs_wasi_impl;
+#[cfg(test)]
 mod test_wasi;
 #[cfg(test)]
 mod test_wasi_modules;
