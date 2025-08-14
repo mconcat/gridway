@@ -385,7 +385,7 @@ impl ComponentHost {
 
     /// Execute an ante-handler component
     #[allow(clippy::too_many_arguments)]
-    pub fn execute_ante_handler(
+    pub async fn execute_ante_handler(
         &self,
         component_name: &str,
         block_height: u64,
@@ -444,8 +444,9 @@ impl ComponentHost {
         // TODO: Remove kvstore interface (temporary implementation)
         // self.add_kvstore_to_linker(&mut linker)?;
 
-        // Instantiate the component with bindings
-        let bindings = AnteHandlerWorld::instantiate(&mut store, &component, &linker)
+        // Instantiate the component with bindings (using async since async support is enabled)
+        let bindings = AnteHandlerWorld::instantiate_async(&mut store, &component, &linker)
+            .await
             .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
         // Create the context
@@ -464,6 +465,7 @@ impl ComponentHost {
         let response = bindings
             .gridway_framework_ante_handler()
             .call_ante_handle(&mut store, &context, &tx_bytes)
+            .await
             .map_err(|e| {
                 ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
             })?;
@@ -516,7 +518,7 @@ impl ComponentHost {
     }
 
     /// Execute a tx-decoder component
-    pub fn execute_tx_decoder(
+    pub async fn execute_tx_decoder(
         &self,
         component_name: &str,
         tx_bytes: &str,
@@ -572,8 +574,9 @@ impl ComponentHost {
         // TODO: Remove kvstore interface (temporary implementation)
         // self.add_kvstore_to_linker(&mut linker)?;
 
-        // Instantiate the component with bindings
-        let bindings = TxDecoderWorld::instantiate(&mut store, &component, &linker)
+        // Instantiate the component with bindings (using async since async support is enabled)
+        let bindings = TxDecoderWorld::instantiate_async(&mut store, &component, &linker)
+            .await
             .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
         // Create decode request using the generated types
@@ -587,6 +590,7 @@ impl ComponentHost {
         let response = bindings
             .gridway_framework_tx_decoder()
             .call_decode_tx(&mut store, &request)
+            .await
             .map_err(|e| ComponentHostError::ComponentExecution(e.to_string()))?;
 
         // Get gas consumed
@@ -610,7 +614,7 @@ impl ComponentHost {
     }
 
     /// Execute a begin-blocker component
-    pub fn execute_begin_blocker(
+    pub async fn execute_begin_blocker(
         &self,
         block_height: u64,
         block_time: u64,
@@ -661,11 +665,13 @@ impl ComponentHost {
         // TODO: Remove kvstore interface (temporary implementation)
         // self.add_kvstore_to_linker(&mut linker)?;
 
-        // Instantiate the component with bindings
-        let bindings = crate::component_bindings::begin_blocker::BeginBlockerWorld::instantiate(
-            &mut store, &component, &linker,
-        )
-        .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
+        // Instantiate the component with bindings (using async since async support is enabled)
+        let bindings =
+            crate::component_bindings::begin_blocker::BeginBlockerWorld::instantiate_async(
+                &mut store, &component, &linker,
+            )
+            .await
+            .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
         // Create the request
         let evidence_list: Vec<crate::component_bindings::begin_blocker::exports::gridway::framework::begin_blocker::Evidence> = byzantine_validators
@@ -688,6 +694,7 @@ impl ComponentHost {
         let response = bindings
             .gridway_framework_begin_blocker()
             .call_begin_block(&mut store, &request)
+            .await
             .map_err(|e| {
                 ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
             })?;
@@ -736,7 +743,7 @@ impl ComponentHost {
     }
 
     /// Execute an end-blocker component  
-    pub fn execute_end_blocker(
+    pub async fn execute_end_blocker(
         &self,
         block_height: u64,
         _block_time: u64,
@@ -786,10 +793,11 @@ impl ComponentHost {
         // TODO: Remove kvstore interface (temporary implementation)
         // self.add_kvstore_to_linker(&mut linker)?;
 
-        // Instantiate the component with bindings
-        let bindings = crate::component_bindings::end_blocker::EndBlockerWorld::instantiate(
+        // Instantiate the component with bindings (using async since async support is enabled)
+        let bindings = crate::component_bindings::end_blocker::EndBlockerWorld::instantiate_async(
             &mut store, &component, &linker,
         )
+        .await
         .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
         // Create the request
@@ -802,6 +810,7 @@ impl ComponentHost {
         let response = bindings
             .gridway_framework_end_blocker()
             .call_end_block(&mut store, &request)
+            .await
             .map_err(|e| {
                 ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
             })?;
@@ -888,40 +897,15 @@ impl ComponentHost {
 
     /// Add VFS-based filesystem to linker
     fn add_vfs_filesystem_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
-        // Since VfsWasiAdapter implements WasiView, we need to use the standard add_to_linker
-        // The key is to provide a function that extracts the VfsWasiAdapter from ComponentState
-        // and wraps it in WasiImpl (from wasmtime-wasi) to provide the Host implementations
+        // We need to add all WASI interfaces, but we want to use our custom VFS filesystem.
+        // Since ComponentState implements WasiView through the vfs_wasi field,
+        // we can use the standard add_to_linker_async function directly.
 
-        // We can't use the standard add_to_linker because it expects WasiView
-        // and our ComponentState doesn't implement WasiView directly
-        // Instead, we'll add a simple delegation wrapper
-
-        // For now, let's simplify: we'll manually add the required interfaces
-        // This is a temporary solution until we properly integrate with wasmtime-wasi
-
-        // Add the filesystem interfaces that use our VfsWasiAdapter
-        // Since our ComponentState contains a VfsWasiAdapter which implements the Host traits,
-        // we need to create a custom HasData implementation to extract it properly
-
-        struct HasVfs;
-        impl wasmtime::component::HasData for HasVfs {
-            type Data<'a> = &'a mut crate::vfs_wasi_adapter::VfsWasiAdapter;
-        }
-
-        wasmtime_wasi::p2::bindings::filesystem::types::add_to_linker::<ComponentState, HasVfs>(
-            linker,
-            |cx: &mut ComponentState| &mut cx.vfs_wasi,
-        )
-        .map_err(|e| {
-            ComponentHostError::WasiSetup(format!("Failed to add filesystem::types: {e}"))
-        })?;
-        wasmtime_wasi::p2::bindings::filesystem::preopens::add_to_linker::<ComponentState, HasVfs>(
-            linker,
-            |cx: &mut ComponentState| &mut cx.vfs_wasi,
-        )
-        .map_err(|e| {
-            ComponentHostError::WasiSetup(format!("Failed to add filesystem::preopens: {e}"))
-        })?;
+        // The trick is that our ComponentState implements WasiView, which means
+        // add_to_linker_async will use our VfsWasiAdapter's WasiView implementation
+        // for getting the WasiCtx and IoView.
+        wasmtime_wasi::p2::add_to_linker_async(linker)
+            .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add WASI P2: {e}")))?;
 
         Ok(())
     }

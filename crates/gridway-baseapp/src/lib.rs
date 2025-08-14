@@ -475,13 +475,15 @@ impl BaseApp {
                     .load_component("begin-blocker", &component_bytes, info)
                 {
                     Ok(_) => {
-                        match self.component_host.execute_begin_blocker(
+                        // Block on async execution since this is called from sync context
+                        let runtime = tokio::runtime::Handle::current();
+                        match runtime.block_on(self.component_host.execute_begin_blocker(
                             height,
                             time,
                             chain_id,
                             1_000_000,
                             vec![],
-                        ) {
+                        )) {
                             Ok(result) => {
                                 if !result.success {
                                     return Err(BaseAppError::AbciError(
@@ -666,10 +668,12 @@ impl BaseApp {
                     .load_component("end-blocker", &component_bytes, info)
                 {
                     Ok(_) => {
-                        match self
-                            .component_host
-                            .execute_end_blocker(height, time, chain_id, 1_000_000)
-                        {
+                        // Block on async execution since this is called from sync context
+                        let runtime = tokio::runtime::Handle::current();
+                        match runtime.block_on(
+                            self.component_host
+                                .execute_end_blocker(height, time, chain_id, 1_000_000),
+                        ) {
                             Ok(result) => {
                                 if !result.success {
                                     return Err(BaseAppError::AbciError(
@@ -954,12 +958,14 @@ impl BaseApp {
                 .load_component("tx-decoder", &component_bytes, info)
             {
                 Ok(_) => {
-                    match self.component_host.execute_tx_decoder(
+                    // Block on async execution since this is called from sync context
+                    let runtime = tokio::runtime::Handle::current();
+                    match runtime.block_on(self.component_host.execute_tx_decoder(
                         "tx-decoder",
                         &request.tx_bytes,
                         &request.encoding,
                         request.validate,
-                    ) {
+                    )) {
                         Ok(result) => {
                             if !result.success {
                                 return Err(BaseAppError::TxFailed(
@@ -1642,7 +1648,14 @@ mod tests {
             Ok(_) => {
                 println!("Component loaded successfully");
                 // Test tx decoder execution
-                match component_host.execute_tx_decoder("tx-decoder", "dGVzdA==", "base64", false) {
+                // Block on async execution since this is called from sync context
+                let runtime = tokio::runtime::Handle::current();
+                match runtime.block_on(component_host.execute_tx_decoder(
+                    "tx-decoder",
+                    "dGVzdA==",
+                    "base64",
+                    false,
+                )) {
                     Ok(result) => {
                         println!("Exit code:: {}", result.exit_code);
                         println!("Stdout:: {}", String::from_utf8_lossy(&result.stdout));
@@ -1703,12 +1716,14 @@ mod tests {
             Ok(_) => {
                 println!("Component loaded successfully");
                 // Test tx decoder execution with the same data
-                match component_host.execute_tx_decoder(
+                // Block on async execution since this is called from sync context
+                let runtime = tokio::runtime::Handle::current();
+                match runtime.block_on(component_host.execute_tx_decoder(
                     "tx-decoder",
                     "dGVzdCB0cmFuc2FjdGlvbg==",
                     "base64",
                     false,
-                ) {
+                )) {
                     Ok(result) => {
                         println!("Exit code:: {}", result.exit_code);
                         println!("Stdout:: {}", String::from_utf8_lossy(&result.stdout));

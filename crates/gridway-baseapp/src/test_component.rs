@@ -13,8 +13,8 @@ mod tests {
         // Basic test that host can be created
     }
 
-    #[test]
-    fn test_tx_decoder_component() {
+    #[tokio::test]
+    async fn test_tx_decoder_component() {
         let base_store = Arc::new(Mutex::new(gridway_store::MemStore::new()));
         let host = ComponentHost::new(base_store).unwrap();
 
@@ -48,6 +48,7 @@ mod tests {
                     "base64",
                     false,
                 )
+                .await
                 .unwrap();
 
             assert_eq!(result.exit_code, 0);

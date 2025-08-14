@@ -3,4 +3,5 @@
 wasmtime::component::bindgen!({
     world: "end-blocker-world",
     path: "../../wit",
+    async: true,
 });

@@ -3,4 +3,5 @@
 wasmtime::component::bindgen!({
     world: "tx-decoder-world",
     path: "../../wit",
+    async: true,
 });
