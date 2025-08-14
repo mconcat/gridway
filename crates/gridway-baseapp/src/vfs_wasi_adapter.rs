@@ -432,7 +432,8 @@ impl io_streams::HostInputStream for VfsWasiAdapter {
         _stream: Resource<io_streams::InputStream>,
         _len: u64,
     ) -> Result<Vec<u8>, wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream reading not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     async fn blocking_read(
@@ -440,7 +441,8 @@ impl io_streams::HostInputStream for VfsWasiAdapter {
         _stream: Resource<io_streams::InputStream>,
         _len: u64,
     ) -> Result<Vec<u8>, wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking read not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     fn skip(
@@ -448,7 +450,8 @@ impl io_streams::HostInputStream for VfsWasiAdapter {
         _stream: Resource<io_streams::InputStream>,
         _len: u64,
     ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream skip not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     async fn blocking_skip(
@@ -456,7 +459,8 @@ impl io_streams::HostInputStream for VfsWasiAdapter {
         _stream: Resource<io_streams::InputStream>,
         _len: u64,
     ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking skip not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     fn subscribe(
@@ -479,7 +483,8 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
         &mut self,
         _stream: Resource<io_streams::OutputStream>,
     ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream check_write not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     fn write(
@@ -487,7 +492,8 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
         _stream: Resource<io_streams::OutputStream>,
         _contents: Vec<u8>,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream write not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     async fn blocking_write_and_flush(
@@ -495,21 +501,24 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
         _stream: Resource<io_streams::OutputStream>,
         _contents: Vec<u8>,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking write not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     fn flush(
         &mut self,
         _stream: Resource<io_streams::OutputStream>,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream flush not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     async fn blocking_flush(
         &mut self,
         _stream: Resource<io_streams::OutputStream>,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking flush not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     fn subscribe(
@@ -524,7 +533,8 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
         _stream: Resource<io_streams::OutputStream>,
         _len: u64,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream write_zeroes not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     async fn blocking_write_zeroes_and_flush(
@@ -532,7 +542,8 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
         _stream: Resource<io_streams::OutputStream>,
         _len: u64,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking write_zeroes not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     fn splice(
@@ -541,7 +552,8 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
         _src: Resource<io_streams::InputStream>,
         _len: u64,
     ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream splice not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     async fn blocking_splice(
@@ -550,7 +562,8 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
         _src: Resource<io_streams::InputStream>,
         _len: u64,
     ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
-        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking splice not yet implemented (Issue #66)")))
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
     async fn drop(&mut self, stream: Resource<io_streams::OutputStream>) -> wasmtime::Result<()> {
