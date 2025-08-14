@@ -15,9 +15,6 @@ use wasmtime_wasi::p2::bindings::io::poll::{self as io_poll};
 use wasmtime_wasi::p2::bindings::io::streams::{self as io_streams};
 use wasmtime_wasi::p2::{IoView, WasiView};
 use wasmtime_wasi::ResourceTable;
-// Stream support deferred; leave imports commented for future work
-// use wasmtime_wasi_io::streams::{InputStream as IoInputStream, OutputStream as IoOutputStream, StreamError};
-// use bytes::Bytes;
 
 /// Host result type
 type HostResult<T> = wasmtime::Result<T>;
@@ -345,8 +342,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     async fn set_size(
         &mut self,
-        _descriptor: Resource<fs_types::Descriptor>,
-        _size: fs_types::Filesize,
+        descriptor: Resource<fs_types::Descriptor>,
+        size: fs_types::Filesize,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
         let fd = descriptor.rep();
         match self.descriptors.get(&fd) {
@@ -508,7 +505,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate directory descriptor
         let mount_id = match self.descriptors.get(&dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -620,7 +617,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         let (mount_id, parent_path) = match self.descriptors.get(&dir_fd) {
             Some(DescriptorKind::Dir { mount_id, path }) => (*mount_id, path.clone()),
             Some(DescriptorKind::File { .. }) => {
-                return Err(fs_types::ErrorCode::NotDirectory.into())
+                return Err(fs_types::ErrorCode::Access.into())
             }
             None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
         };
@@ -760,7 +757,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate directory descriptor
         let mount_id = match self.descriptors.get(&dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -833,7 +830,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate old directory descriptor
         let old_mount_id = match self.descriptors.get(&old_dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -842,7 +839,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate new directory descriptor
         let new_mount_id = match self.descriptors.get(&new_dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -896,7 +893,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate directory descriptor
         let mount_id = match self.descriptors.get(&dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -971,7 +968,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         _offset: fs_types::Filesize,
     ) -> Result<Resource<io_streams::InputStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
     {
-        // Stream support deferred; use Unsupported for now
+        // Stream support will be added in a future iteration
+        // For now, return unsupported to allow the system to compile
         Err(fs_types::ErrorCode::Unsupported.into())
     }
 
@@ -983,7 +981,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-        // Stream support deferred; use Unsupported for now
+        // Stream support will be added in a future iteration
+        // For now, return unsupported to allow the system to compile
         Err(fs_types::ErrorCode::Unsupported.into())
     }
 
@@ -994,7 +993,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-        // Stream support deferred; use Unsupported for now
+        // Stream support will be added in a future iteration
+        // For now, return unsupported to allow the system to compile
         Err(fs_types::ErrorCode::Unsupported.into())
     }
 }
@@ -1032,30 +1032,8 @@ impl fs_types::HostDirectoryEntryStream for VfsFilesystem {
     }
 }
 
-/// Input stream type (placeholder for future stream support)
-pub struct VfsInputStream {
-    handle: FileHandle,
-}
-
-/// Output stream type (placeholder for future stream support)
-pub struct VfsOutputStream {
-    handle: FileHandle,
-}
-
-/// Always-ready pollable for streams
-pub struct AlwaysReadyPollable;
-
-impl VfsInputStream {
-    fn new(handle: FileHandle) -> Self {
-        Self { handle }
-    }
-}
-
-impl VfsOutputStream {
-    fn new(handle: FileHandle) -> Self {
-        Self { handle }
-    }
-}
+// FileHandle has been moved to vfs_streams_simple.rs and made public
+// Stream implementations will be added in a future phase
 
 /// Custom context that uses our VFS filesystem
 pub struct VfsWasiContext {
@@ -1116,7 +1094,8 @@ impl io_poll::HostPollable for VfsWasiContext {
     }
 }
 
-// Stream trait implementations will be added in a future phase
+// Stream host traits are automatically provided by wasmtime-wasi
+// when we return boxed InputStream/OutputStream instances
 
 #[cfg(test)]
 mod tests {
