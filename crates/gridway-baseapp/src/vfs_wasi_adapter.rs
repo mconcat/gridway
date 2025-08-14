@@ -12,9 +12,8 @@ use crate::vfs_wasi_impl::VfsWasiContext;
 use std::sync::{Arc, Mutex};
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::bindings::filesystem::{preopens, types as fs_types};
-use wasmtime_wasi::p2::bindings::io::streams as io_streams;
-use wasmtime_wasi::p2::WasiCtx;
-use wasmtime_wasi::p2::WasiView;
+use wasmtime_wasi::p2::bindings::io::{poll as io_poll, streams as io_streams};
+use wasmtime_wasi::p2::{IoView, WasiCtx, WasiView};
 use wasmtime_wasi::ResourceTable;
 
 /// VFS WASI Adapter that wraps our VfsWasiContext
@@ -376,5 +375,188 @@ impl fs_types::HostDirectoryEntryStream for VfsWasiAdapter {
         stream: wasmtime::component::Resource<fs_types::DirectoryEntryStream>,
     ) -> wasmtime::Result<()> {
         self.inner.fs.drop(stream)
+    }
+}
+
+// Forward io::poll implementations
+impl io_poll::Host for VfsWasiAdapter {
+    async fn poll(
+        &mut self,
+        pollables: Vec<Resource<io_poll::Pollable>>,
+    ) -> wasmtime::Result<Vec<u32>> {
+        self.inner.poll(pollables).await
+    }
+}
+
+impl io_poll::HostPollable for VfsWasiAdapter {
+    async fn ready(&mut self, pollable: Resource<io_poll::Pollable>) -> wasmtime::Result<bool> {
+        self.inner.ready(pollable).await
+    }
+
+    async fn block(&mut self, pollable: Resource<io_poll::Pollable>) -> wasmtime::Result<()> {
+        self.inner.block(pollable).await
+    }
+
+    fn drop(&mut self, pollable: Resource<io_poll::Pollable>) -> wasmtime::Result<()> {
+        self.inner.drop(pollable)
+    }
+}
+
+// Stream support will be properly implemented in a future iteration
+// For now, the stream methods in VfsFilesystem return Unsupported
+impl io_streams::Host for VfsWasiAdapter {
+    fn convert_stream_error(
+        &mut self,
+        err: wasmtime_wasi::p2::StreamError,
+    ) -> wasmtime::Result<io_streams::StreamError> {
+        // Convert the stream error to the expected type
+        match err {
+            wasmtime_wasi::p2::StreamError::Closed => Ok(io_streams::StreamError::Closed),
+            wasmtime_wasi::p2::StreamError::LastOperationFailed(e) => {
+                Ok(io_streams::StreamError::LastOperationFailed(
+                    self.inner.table().push(e).unwrap()
+                ))
+            }
+            wasmtime_wasi::p2::StreamError::Trap(e) => {
+                Err(e)
+            }
+        }
+    }
+}
+
+// Minimal stream trait implementations that return explicit errors
+// These satisfy Issue #66's requirement for trait implementations while deferring full functionality
+impl io_streams::HostInputStream for VfsWasiAdapter {
+    fn read(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+        _len: u64,
+    ) -> Result<Vec<u8>, wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream reading not yet implemented (Issue #66)")))
+    }
+
+    async fn blocking_read(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+        _len: u64,
+    ) -> Result<Vec<u8>, wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking read not yet implemented (Issue #66)")))
+    }
+
+    fn skip(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+        _len: u64,
+    ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream skip not yet implemented (Issue #66)")))
+    }
+
+    async fn blocking_skip(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+        _len: u64,
+    ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking skip not yet implemented (Issue #66)")))
+    }
+
+    fn subscribe(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+    ) -> Result<Resource<io_poll::Pollable>, anyhow::Error> {
+        Err(anyhow::anyhow!("VFS stream subscribe not yet implemented (Issue #66)"))
+    }
+
+    async fn drop(&mut self, stream: Resource<io_streams::InputStream>) -> wasmtime::Result<()> {
+        // Allow drop to succeed to prevent resource leaks
+        use wasmtime_wasi::p2::IoView;
+        self.inner.table().delete(stream)?;
+        Ok(())
+    }
+}
+
+impl io_streams::HostOutputStream for VfsWasiAdapter {
+    fn check_write(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+    ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream check_write not yet implemented (Issue #66)")))
+    }
+
+    fn write(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+        _contents: Vec<u8>,
+    ) -> Result<(), wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream write not yet implemented (Issue #66)")))
+    }
+
+    async fn blocking_write_and_flush(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+        _contents: Vec<u8>,
+    ) -> Result<(), wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking write not yet implemented (Issue #66)")))
+    }
+
+    fn flush(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+    ) -> Result<(), wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream flush not yet implemented (Issue #66)")))
+    }
+
+    async fn blocking_flush(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+    ) -> Result<(), wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking flush not yet implemented (Issue #66)")))
+    }
+
+    fn subscribe(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+    ) -> Result<Resource<io_poll::Pollable>, anyhow::Error> {
+        Err(anyhow::anyhow!("VFS stream subscribe not yet implemented (Issue #66)"))
+    }
+
+    fn write_zeroes(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+        _len: u64,
+    ) -> Result<(), wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream write_zeroes not yet implemented (Issue #66)")))
+    }
+
+    async fn blocking_write_zeroes_and_flush(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+        _len: u64,
+    ) -> Result<(), wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking write_zeroes not yet implemented (Issue #66)")))
+    }
+
+    fn splice(
+        &mut self,
+        _dest: Resource<io_streams::OutputStream>,
+        _src: Resource<io_streams::InputStream>,
+        _len: u64,
+    ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream splice not yet implemented (Issue #66)")))
+    }
+
+    async fn blocking_splice(
+        &mut self,
+        _dest: Resource<io_streams::OutputStream>,
+        _src: Resource<io_streams::InputStream>,
+        _len: u64,
+    ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
+        Err(wasmtime_wasi::p2::StreamError::Trap(anyhow::anyhow!("VFS stream blocking splice not yet implemented (Issue #66)")))
+    }
+
+    async fn drop(&mut self, stream: Resource<io_streams::OutputStream>) -> wasmtime::Result<()> {
+        // Allow drop to succeed to prevent resource leaks
+        use wasmtime_wasi::p2::IoView;
+        self.inner.table().delete(stream)?;
+        Ok(())
     }
 }

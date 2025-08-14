@@ -15,9 +15,7 @@ use wasmtime_wasi::p2::bindings::io::poll::{self as io_poll};
 use wasmtime_wasi::p2::bindings::io::streams::{self as io_streams};
 use wasmtime_wasi::p2::{IoView, WasiView};
 use wasmtime_wasi::ResourceTable;
-// Stream support deferred; leave imports commented for future work
-// use wasmtime_wasi_io::streams::{InputStream as IoInputStream, OutputStream as IoOutputStream, StreamError};
-// use bytes::Bytes;
+use crate::vfs_streams_simple::{FileHandle, AlwaysReadyPollable};
 
 /// Host result type
 type HostResult<T> = wasmtime::Result<T>;
@@ -48,18 +46,7 @@ enum DescriptorKind {
     File { handle: FileHandle },
 }
 
-/// File handle for open files
-#[derive(Clone)]
-struct FileHandle {
-    /// VFS file descriptor
-    vfs_fd: u64,
-    /// Current position in file
-    position: u64,
-    /// Reference to VFS
-    vfs: Arc<Mutex<VirtualFilesystem>>,
-    /// Whether file is open for writing
-    writable: bool,
-}
+// FileHandle has been moved to vfs_streams.rs and made public
 
 /// Our VFS-backed filesystem implementation
 pub struct VfsFilesystem {
@@ -409,7 +396,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         let mount_id = match self.descriptors.get(&dir_fd) {
             Some(DescriptorKind::Dir { mount_id }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
-                return Err(fs_types::ErrorCode::NotDirectory.into())
+                return Err(fs_types::ErrorCode::Access.into())
             }
             None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
         };
@@ -560,34 +547,37 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     fn read_via_stream(
         &mut self,
-        descriptor: Resource<fs_types::Descriptor>,
-        offset: fs_types::Filesize,
+        _descriptor: Resource<fs_types::Descriptor>,
+        _offset: fs_types::Filesize,
     ) -> Result<Resource<io_streams::InputStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
     {
-        // Stream support deferred; use Unsupported for now
+        // Stream support will be added in a future iteration
+        // For now, return unsupported to allow the system to compile
         Err(fs_types::ErrorCode::Unsupported.into())
     }
 
     fn write_via_stream(
         &mut self,
-        descriptor: Resource<fs_types::Descriptor>,
-        offset: fs_types::Filesize,
+        _descriptor: Resource<fs_types::Descriptor>,
+        _offset: fs_types::Filesize,
     ) -> Result<
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-        // Stream support deferred; use Unsupported for now
+        // Stream support will be added in a future iteration
+        // For now, return unsupported to allow the system to compile
         Err(fs_types::ErrorCode::Unsupported.into())
     }
 
     fn append_via_stream(
         &mut self,
-        descriptor: Resource<fs_types::Descriptor>,
+        _descriptor: Resource<fs_types::Descriptor>,
     ) -> Result<
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-        // Stream support deferred; use Unsupported for now
+        // Stream support will be added in a future iteration
+        // For now, return unsupported to allow the system to compile
         Err(fs_types::ErrorCode::Unsupported.into())
     }
 }
@@ -609,32 +599,7 @@ impl fs_types::HostDirectoryEntryStream for VfsFilesystem {
     }
 }
 
-/// Input stream type (placeholder for future stream support)
-pub struct VfsInputStream {
-    handle: FileHandle,
-}
-
-/// Output stream type (placeholder for future stream support)
-pub struct VfsOutputStream {
-    handle: FileHandle,
-}
-
-/// Always-ready pollable for streams
-pub struct AlwaysReadyPollable;
-
-impl VfsInputStream {
-    fn new(handle: FileHandle) -> Self {
-        Self { handle }
-    }
-}
-
-impl VfsOutputStream {
-    fn new(handle: FileHandle) -> Self {
-        Self { handle }
-    }
-}
-
-// Stream trait implementations will be added in a future phase
+// Stream implementations have been moved to vfs_streams.rs
 
 /// Custom context that uses our VFS filesystem
 pub struct VfsWasiContext {
@@ -694,3 +659,6 @@ impl io_poll::HostPollable for VfsWasiContext {
         Ok(())
     }
 }
+
+// Stream host traits are automatically provided by wasmtime-wasi
+// when we return boxed InputStream/OutputStream instances
