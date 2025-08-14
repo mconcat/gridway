@@ -6,7 +6,7 @@
 //! filesystem interfaces.
 
 use crate::vfs::{Capability, VfsError, VirtualFilesystem};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use wasmtime::component::Resource;
@@ -43,7 +43,10 @@ struct MountCapabilities {
 /// Descriptor kinds in our filesystem
 enum DescriptorKind {
     /// Directory descriptor
-    Dir { mount_id: usize },
+    Dir { 
+        mount_id: usize,
+        path: PathBuf,  // Track the actual directory path
+    },
     /// File descriptor
     File { handle: FileHandle },
 }
@@ -58,6 +61,31 @@ struct DirectoryStream {
     entries: Vec<fs_types::DirectoryEntry>,
     /// Current position in the entries
     position: usize,
+}
+
+impl DirectoryStream {
+    /// Create a new directory stream for the given path
+    fn new(path: PathBuf, mount_id: usize) -> Self {
+        Self {
+            path,
+            mount_id,
+            entries: Vec::new(),
+            position: 0,
+        }
+    }
+    
+    /// Add an entry to the stream
+    fn add_entry(&mut self, name: String, is_directory: bool) {
+        let entry = fs_types::DirectoryEntry {
+            type_: if is_directory {
+                fs_types::DescriptorType::Directory
+            } else {
+                fs_types::DescriptorType::RegularFile
+            },
+            name,
+        };
+        self.entries.push(entry);
+    }
 }
 
 /// File handle for open files
@@ -196,6 +224,23 @@ impl VfsFilesystem {
             _ => fs_types::ErrorCode::Io,
         }
     }
+    
+    /// Check if a path represents a directory by looking for entries with that prefix
+    fn is_directory(&self, namespace: &str, path: &[u8]) -> bool {
+        let vfs = self.vfs.lock().unwrap();
+        if let Some(store) = vfs.get_store(namespace) {
+            let store = store.lock().unwrap();
+            // A path is a directory if there are keys that start with "path/"
+            let mut dir_prefix = path.to_vec();
+            if !dir_prefix.is_empty() && dir_prefix[dir_prefix.len() - 1] != b'/' {
+                dir_prefix.push(b'/');
+            }
+            let mut iter = store.prefix_iterator(&dir_prefix);
+            iter.next().is_some()
+        } else {
+            false
+        }
+    }
 }
 
 impl preopens::Host for VfsFilesystem {
@@ -207,8 +252,13 @@ impl preopens::Host for VfsFilesystem {
             let descriptor_id = self.next_descriptor;
             self.next_descriptor += 1;
 
-            self.descriptors
-                .insert(descriptor_id, DescriptorKind::Dir { mount_id });
+            self.descriptors.insert(
+                descriptor_id, 
+                DescriptorKind::Dir { 
+                    mount_id,
+                    path: PathBuf::from(&mount.guest_prefix),
+                }
+            );
 
             // Hand back a handle with our descriptor id as the representation
             preopens.push((Resource::new_own(descriptor_id), mount.guest_prefix.clone()));
@@ -221,7 +271,7 @@ impl preopens::Host for VfsFilesystem {
 impl fs_types::Host for VfsFilesystem {
     fn filesystem_error_code(
         &mut self,
-        err: Resource<fs_types::Error>,
+        _err: Resource<fs_types::Error>,
     ) -> HostResult<Option<fs_types::ErrorCode>> {
         // For now, just return a generic error
         // In a real implementation, we'd store error details in the resource table
@@ -282,8 +332,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     async fn set_size(
         &mut self,
-        descriptor: Resource<fs_types::Descriptor>,
-        size: fs_types::Filesize,
+        _descriptor: Resource<fs_types::Descriptor>,
+        _size: fs_types::Filesize,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
         // TODO: Implement set_size
         Err(fs_types::ErrorCode::Unsupported.into())
@@ -327,51 +377,74 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
         let fd = descriptor.rep();
+        
+        // Get the mount ID and directory path from the descriptor
         let (mount_id, dir_path) = match self.descriptors.get(&fd) {
-            Some(DescriptorKind::Dir { mount_id }) => {
-                let mount = &self.mounts[*mount_id];
-                (*mount_id, PathBuf::from(&mount.guest_prefix))
+            Some(DescriptorKind::Dir { mount_id, path }) => {
+                (*mount_id, path.clone())
             }
-            _ => return Err(fs_types::ErrorCode::NotDirectory.into()),
+            Some(DescriptorKind::File { .. }) => {
+                return Err(fs_types::ErrorCode::NotDirectory.into())
+            }
+            None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
         };
 
         // Get the mount and namespace
         let mount = &self.mounts[mount_id];
         let namespace = &mount.vfs_namespace;
-
-        // List all entries in this directory
-        let mut entries = Vec::new();
         
-        // Create VFS path for listing
-        let vfs_path = PathBuf::from(format!("/{}/", namespace));
+        // Create a new directory stream
+        let mut stream = DirectoryStream::new(dir_path.clone(), mount_id);
         
         // Get entries from VFS
         let vfs = self.vfs.lock().unwrap();
         
-        // Use the VFS to list keys with the namespace prefix
+        // Build proper prefix for listing based on the directory path
+        let prefix = if dir_path == Path::new(&mount.guest_prefix) {
+            // Listing root of mount
+            Vec::new()
+        } else {
+            // Listing a subdirectory - extract relative path
+            let relative = dir_path.strip_prefix(&mount.guest_prefix)
+                .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::NotDirectory))?;
+            relative.to_string_lossy().into_owned().into_bytes()
+        };
+        
+        // Collect all entries and organize them
+        let mut seen_dirs = std::collections::HashSet::new();
+        
         if let Some(store) = vfs.get_store(namespace) {
             let store = store.lock().unwrap();
-            let iter = store.prefix_iterator(&[]);
+            let iter = store.prefix_iterator(&prefix);
             
             for (key, _) in iter {
                 if let Ok(key_str) = String::from_utf8(key.clone()) {
-                    // Create a directory entry for each key
-                    let entry = fs_types::DirectoryEntry {
-                        type_: fs_types::DescriptorType::RegularFile,
-                        name: key_str,
+                    // Skip the prefix itself
+                    let relative_key = if prefix.is_empty() {
+                        key_str.clone()
+                    } else {
+                        let prefix_str = String::from_utf8_lossy(&prefix);
+                        if key_str.starts_with(&*prefix_str) {
+                            key_str[prefix_str.len()..].trim_start_matches('/').to_string()
+                        } else {
+                            continue;
+                        }
                     };
-                    entries.push(entry);
+                    
+                    // Check if this is a directory (has more path components)
+                    if let Some(slash_pos) = relative_key.find('/') {
+                        // This is a directory - add only the directory name
+                        let dir_name = &relative_key[..slash_pos];
+                        if seen_dirs.insert(dir_name.to_string()) {
+                            stream.add_entry(dir_name.to_string(), true);
+                        }
+                    } else if !relative_key.is_empty() {
+                        // This is a file in the current directory
+                        stream.add_entry(relative_key, false);
+                    }
                 }
             }
         }
-        
-        // Create the directory stream
-        let stream = DirectoryStream {
-            path: dir_path,
-            mount_id,
-            entries,
-            position: 0,
-        };
         
         // Store the stream in our HashMap and return a resource handle
         let stream_id = self.next_stream_id;
@@ -462,7 +535,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
     async fn open_at(
         &mut self,
         descriptor: Resource<fs_types::Descriptor>,
-        path_flags: fs_types::PathFlags,
+        _path_flags: fs_types::PathFlags,
         path: String,
         open_flags: fs_types::OpenFlags,
         flags: fs_types::DescriptorFlags,
@@ -470,8 +543,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
     {
         let dir_fd = descriptor.rep();
         // Validate directory descriptor
-        let mount_id = match self.descriptors.get(&dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+        let (mount_id, parent_path) = match self.descriptors.get(&dir_fd) {
+            Some(DescriptorKind::Dir { mount_id, path }) => (*mount_id, path.clone()),
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -487,48 +560,86 @@ impl fs_types::HostDescriptor for VfsFilesystem {
             return Err(fs_types::ErrorCode::Access.into());
         }
 
-        // Build VFS path: /{namespace}/{path}
-        let vfs_path = if path.is_empty() {
+        // Build the full guest path by joining parent path with the relative path
+        let full_guest_path = if path.is_empty() {
+            parent_path.clone()
+        } else {
+            parent_path.join(&path)
+        };
+        
+        // Build VFS path: /{namespace}/{relative_path}
+        // Extract relative path from guest path
+        let relative_path = full_guest_path.strip_prefix(&mount.guest_prefix)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        
+        let vfs_path = if relative_path.is_empty() {
             PathBuf::from(format!("/{}/", mount.vfs_namespace))
         } else {
-            PathBuf::from(format!("/{}/{}", mount.vfs_namespace, path))
+            PathBuf::from(format!("/{}/{}", mount.vfs_namespace, relative_path))
+        };
+        
+        // Check if this path is a directory
+        let path_bytes = relative_path.as_bytes();
+        let is_dir = if path.is_empty() && parent_path == PathBuf::from(&mount.guest_prefix) {
+            true // Mount root is always a directory
+        } else if open_flags.contains(fs_types::OpenFlags::DIRECTORY) {
+            // Explicitly opening as directory
+            true
+        } else {
+            // Check if path has directory entries
+            self.is_directory(&mount.vfs_namespace, path_bytes)
         };
 
-        // Ensure capabilities for this path (coarse-grained)
-        {
-            let vfs = self.vfs.lock().unwrap();
-            let _ = vfs.add_capability(Capability::Read(vfs_path.clone()));
-            if writable {
-                let _ = vfs.add_capability(Capability::Write(vfs_path.clone()));
-            }
-        }
-
-        // Open or create in VFS
-        let vfs_fd = {
-            let vfs = self.vfs.lock().unwrap();
-            if open_flags.contains(fs_types::OpenFlags::CREATE) {
-                vfs.create(&vfs_path)
-                    .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?
-            } else {
-                vfs.open(&vfs_path, writable)
-                    .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?
-            }
-        } as u64;
-
-        // Register descriptor
+        // Register descriptor based on type
         let new_fd = self.next_descriptor;
         self.next_descriptor += 1;
-        self.descriptors.insert(
-            new_fd,
-            DescriptorKind::File {
-                handle: FileHandle {
-                    vfs_fd,
-                    position: 0,
-                    vfs: self.vfs.clone(),
-                    writable,
+        
+        if is_dir {
+            // Opening a directory - just create a directory descriptor
+            // Directories don't need VFS file handles
+            self.descriptors.insert(
+                new_fd,
+                DescriptorKind::Dir { 
+                    mount_id, // Use the same mount as parent
+                    path: full_guest_path, // Store the full guest path
                 },
-            },
-        );
+            );
+        } else {
+            // Opening a file - proceed with VFS operations
+            // Ensure capabilities for this path (coarse-grained)
+            {
+                let vfs = self.vfs.lock().unwrap();
+                let _ = vfs.add_capability(Capability::Read(vfs_path.clone()));
+                if writable {
+                    let _ = vfs.add_capability(Capability::Write(vfs_path.clone()));
+                }
+            }
+
+            // Open or create in VFS
+            let vfs_fd = {
+                let vfs = self.vfs.lock().unwrap();
+                if open_flags.contains(fs_types::OpenFlags::CREATE) {
+                    vfs.create(&vfs_path)
+                        .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?
+                } else {
+                    vfs.open(&vfs_path, writable)
+                        .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?
+                }
+            } as u64;
+            
+            self.descriptors.insert(
+                new_fd,
+                DescriptorKind::File {
+                    handle: FileHandle {
+                        vfs_fd,
+                        position: 0,
+                        vfs: self.vfs.clone(),
+                        writable,
+                    },
+                },
+            );
+        }
 
         Ok(Resource::new_own(new_fd))
     }
@@ -624,8 +735,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     fn read_via_stream(
         &mut self,
-        descriptor: Resource<fs_types::Descriptor>,
-        offset: fs_types::Filesize,
+        _descriptor: Resource<fs_types::Descriptor>,
+        _offset: fs_types::Filesize,
     ) -> Result<Resource<io_streams::InputStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
     {
         // Stream support deferred; use Unsupported for now
@@ -634,8 +745,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     fn write_via_stream(
         &mut self,
-        descriptor: Resource<fs_types::Descriptor>,
-        offset: fs_types::Filesize,
+        _descriptor: Resource<fs_types::Descriptor>,
+        _offset: fs_types::Filesize,
     ) -> Result<
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
@@ -646,7 +757,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     fn append_via_stream(
         &mut self,
-        descriptor: Resource<fs_types::Descriptor>,
+        _descriptor: Resource<fs_types::Descriptor>,
     ) -> Result<
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
@@ -765,10 +876,108 @@ mod tests {
         // Verify we got the expected entries
         assert!(entries.contains(&"file1.txt".to_string()));
         assert!(entries.contains(&"file2.txt".to_string()));
-        assert!(entries.contains(&"subdir/file3.txt".to_string()));
+        // The directory listing should show "subdir" as a directory, not "subdir/file3.txt"
+        assert!(entries.contains(&"subdir".to_string()));
         
         // Clean up using the trait
         <VfsFilesystem as fs_types::HostDirectoryEntryStream>::drop(&mut fs, stream).unwrap();
+    }
+    
+    #[tokio::test]
+    async fn test_nested_directory_iteration() {
+        // Create a VFS with nested directory structure
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+        
+        // Add nested directory structure
+        {
+            let mut store = store.lock().unwrap();
+            // Root files
+            store.set(b"README.md", b"root readme").unwrap();
+            store.set(b"config.toml", b"config").unwrap();
+            
+            // src directory
+            store.set(b"src/main.rs", b"main code").unwrap();
+            store.set(b"src/lib.rs", b"lib code").unwrap();
+            store.set(b"src/utils.rs", b"utils").unwrap();
+            
+            // src/modules subdirectory
+            store.set(b"src/modules/auth.rs", b"auth module").unwrap();
+            store.set(b"src/modules/db.rs", b"db module").unwrap();
+            
+            // tests directory
+            store.set(b"tests/unit.rs", b"unit tests").unwrap();
+            store.set(b"tests/integration.rs", b"integration tests").unwrap();
+        }
+        
+        // Mount the store
+        vfs.lock().unwrap().mount_store("state".to_string(), store.clone()).unwrap();
+        
+        // Create VFS filesystem
+        let mut fs = VfsFilesystem::new(vfs);
+        
+        // Test 1: List root directory
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+        
+        let stream = <VfsFilesystem as fs_types::HostDescriptor>::read_directory(&mut fs, root_descriptor).await.unwrap();
+        
+        let mut root_entries = Vec::new();
+        let stream_id = stream.rep();
+        loop {
+            let stream_ref = Resource::new_borrow(stream_id);
+            match <VfsFilesystem as fs_types::HostDirectoryEntryStream>::read_directory_entry(&mut fs, stream_ref).await.unwrap() {
+                Some(entry) => root_entries.push((entry.name, entry.type_)),
+                None => break,
+            }
+        }
+        
+        // Verify root contains files and directories
+        assert!(root_entries.iter().any(|(name, _)| name == "README.md"));
+        assert!(root_entries.iter().any(|(name, _)| name == "config.toml"));
+        assert!(root_entries.iter().any(|(name, typ)| 
+            name == "src" && *typ == fs_types::DescriptorType::Directory
+        ));
+        assert!(root_entries.iter().any(|(name, typ)| 
+            name == "tests" && *typ == fs_types::DescriptorType::Directory
+        ));
+        
+        <VfsFilesystem as fs_types::HostDirectoryEntryStream>::drop(&mut fs, stream).unwrap();
+        
+        // Test 2: Open and list the src directory
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+        
+        let src_descriptor = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            root_descriptor,
+            fs_types::PathFlags::empty(),
+            "src".to_string(),
+            fs_types::OpenFlags::DIRECTORY,
+            fs_types::DescriptorFlags::READ,
+        ).await.unwrap();
+        
+        let src_stream = <VfsFilesystem as fs_types::HostDescriptor>::read_directory(&mut fs, src_descriptor).await.unwrap();
+        
+        let mut src_entries = Vec::new();
+        let src_stream_id = src_stream.rep();
+        loop {
+            let stream_ref = Resource::new_borrow(src_stream_id);
+            match <VfsFilesystem as fs_types::HostDirectoryEntryStream>::read_directory_entry(&mut fs, stream_ref).await.unwrap() {
+                Some(entry) => src_entries.push((entry.name, entry.type_)),
+                None => break,
+            }
+        }
+        
+        // Verify src directory contents
+        assert!(src_entries.iter().any(|(name, _)| name == "main.rs"));
+        assert!(src_entries.iter().any(|(name, _)| name == "lib.rs"));
+        assert!(src_entries.iter().any(|(name, _)| name == "utils.rs"));
+        assert!(src_entries.iter().any(|(name, typ)| 
+            name == "modules" && *typ == fs_types::DescriptorType::Directory
+        ));
+        
+        <VfsFilesystem as fs_types::HostDirectoryEntryStream>::drop(&mut fs, src_stream).unwrap();
     }
 }
 
