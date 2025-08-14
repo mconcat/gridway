@@ -262,7 +262,7 @@ impl ComponentHost {
     pub fn new(base_store: Arc<Mutex<dyn gridway_store::KVStore>>) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true);
-        config.async_support(false);
+        config.async_support(true);
         Self::with_config_and_store(config, base_store)
     }
 
@@ -273,6 +273,7 @@ impl ComponentHost {
     ) -> Result<Self> {
         // Ensure component model is enabled
         config.wasm_component_model(true);
+        config.async_support(true);
 
         // Configure engine for security and performance
         config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);

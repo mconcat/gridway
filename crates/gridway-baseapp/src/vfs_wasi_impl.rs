@@ -5,8 +5,9 @@
 //! filesystem implementation at all, but provide our own implementation of the WASI
 //! filesystem interfaces.
 
-use crate::vfs::{VfsError, VirtualFilesystem};
+use crate::vfs::{Capability, VfsError, VirtualFilesystem};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::bindings::filesystem::{preopens, types as fs_types};
@@ -14,6 +15,9 @@ use wasmtime_wasi::p2::bindings::io::poll::{self as io_poll};
 use wasmtime_wasi::p2::bindings::io::streams::{self as io_streams};
 use wasmtime_wasi::p2::{IoView, WasiView};
 use wasmtime_wasi::ResourceTable;
+// Stream support deferred; leave imports commented for future work
+// use wasmtime_wasi_io::streams::{InputStream as IoInputStream, OutputStream as IoOutputStream, StreamError};
+// use bytes::Bytes;
 
 /// Host result type
 type HostResult<T> = wasmtime::Result<T>;
@@ -178,7 +182,7 @@ impl VfsFilesystem {
 
 impl preopens::Host for VfsFilesystem {
     fn get_directories(&mut self) -> HostResult<Vec<(Resource<fs_types::Descriptor>, String)>> {
-        let preopens: Vec<(Resource<fs_types::Descriptor>, String)> = Vec::new();
+        let mut preopens: Vec<(Resource<fs_types::Descriptor>, String)> = Vec::new();
 
         // Create a descriptor for each mount point
         for (mount_id, mount) in self.mounts.iter().enumerate() {
@@ -188,12 +192,11 @@ impl preopens::Host for VfsFilesystem {
             self.descriptors
                 .insert(descriptor_id, DescriptorKind::Dir { mount_id });
 
-            // Skip creating descriptors for now - this needs proper implementation
-            // when we have access to the actual Descriptor type from wasmtime-wasi
+            // Hand back a handle with our descriptor id as the representation
+            preopens.push((Resource::new_own(descriptor_id), mount.guest_prefix.clone()));
         }
 
-        // Return empty preopens for now
-        Ok(Vec::new())
+        Ok(preopens)
     }
 }
 
@@ -251,11 +254,12 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         &mut self,
         descriptor: Resource<fs_types::Descriptor>,
     ) -> Result<fs_types::DescriptorType, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        let desc = self.table.get(&descriptor)?;
-
-        // For now, determine type based on descriptor kind
-        // In a real implementation, we'd check the actual file type
-        Ok(fs_types::DescriptorType::RegularFile)
+        let fd = descriptor.rep();
+        match self.descriptors.get(&fd) {
+            Some(DescriptorKind::Dir { .. }) => Ok(fs_types::DescriptorType::Directory),
+            Some(DescriptorKind::File { .. }) => Ok(fs_types::DescriptorType::RegularFile),
+            None => Err(fs_types::ErrorCode::BadDescriptor.into()),
+        }
     }
 
     async fn set_size(
@@ -304,14 +308,14 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         Resource<fs_types::DirectoryEntryStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-        // TODO: Implement directory reading - for now return empty iterator
-        // We need to create our own iterator that implements the required trait
-        // Since ReaddirIterator is not public, we'll work around this
-        // by creating a placeholder DirectoryEntryStream
-
-        // For now, just create an empty resource
-        // The actual implementation will need to properly handle directory reading
-        Err(fs_types::ErrorCode::Unsupported.into())
+        let fd = descriptor.rep();
+        match self.descriptors.get(&fd) {
+            Some(DescriptorKind::Dir { .. }) => {
+                // Cannot construct a typed DirectoryEntryStream without internal types; return Unsupported
+                Err(fs_types::ErrorCode::Unsupported.into())
+            }
+            _ => Err(fs_types::ErrorCode::NotDirectory.into()),
+        }
     }
 
     async fn sync(
@@ -335,15 +339,26 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         &mut self,
         descriptor: Resource<fs_types::Descriptor>,
     ) -> Result<fs_types::DescriptorStat, wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
-        // TODO: Implement stat
-        Ok(fs_types::DescriptorStat {
-            type_: fs_types::DescriptorType::RegularFile,
-            link_count: 1,
-            size: 0,
-            data_access_timestamp: None,
-            data_modification_timestamp: None,
-            status_change_timestamp: None,
-        })
+        let fd = descriptor.rep();
+        match self.descriptors.get(&fd) {
+            Some(DescriptorKind::Dir { .. }) => Ok(fs_types::DescriptorStat {
+                type_: fs_types::DescriptorType::Directory,
+                link_count: 1,
+                size: 0,
+                data_access_timestamp: None,
+                data_modification_timestamp: None,
+                status_change_timestamp: None,
+            }),
+            Some(DescriptorKind::File { .. }) => Ok(fs_types::DescriptorStat {
+                type_: fs_types::DescriptorType::RegularFile,
+                link_count: 1,
+                size: 0,
+                data_access_timestamp: None,
+                data_modification_timestamp: None,
+                status_change_timestamp: None,
+            }),
+            None => Err(fs_types::ErrorCode::BadDescriptor.into()),
+        }
     }
 
     async fn stat_at(
@@ -389,13 +404,80 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         flags: fs_types::DescriptorFlags,
     ) -> Result<Resource<fs_types::Descriptor>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
     {
-        // TODO: Implement open_at properly
-        // For now, return not supported
-        Err(fs_types::ErrorCode::Unsupported.into())
+        let dir_fd = descriptor.rep();
+        // Validate directory descriptor
+        let mount_id = match self.descriptors.get(&dir_fd) {
+            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::File { .. }) => {
+                return Err(fs_types::ErrorCode::NotDirectory.into())
+            }
+            None => return Err(fs_types::ErrorCode::BadDescriptor.into()),
+        };
+
+        let mount = &self.mounts[mount_id];
+        let writable = flags.contains(fs_types::DescriptorFlags::WRITE)
+            || open_flags.contains(fs_types::OpenFlags::CREATE)
+            || open_flags.contains(fs_types::OpenFlags::TRUNCATE);
+
+        if writable && !mount.caps.write {
+            return Err(fs_types::ErrorCode::Access.into());
+        }
+
+        // Build VFS path: /{namespace}/{path}
+        let vfs_path = if path.is_empty() {
+            PathBuf::from(format!("/{}/", mount.vfs_namespace))
+        } else {
+            PathBuf::from(format!("/{}/{}", mount.vfs_namespace, path))
+        };
+
+        // Ensure capabilities for this path (coarse-grained)
+        {
+            let vfs = self.vfs.lock().unwrap();
+            let _ = vfs.add_capability(Capability::Read(vfs_path.clone()));
+            if writable {
+                let _ = vfs.add_capability(Capability::Write(vfs_path.clone()));
+            }
+        }
+
+        // Open or create in VFS
+        let vfs_fd = {
+            let vfs = self.vfs.lock().unwrap();
+            if open_flags.contains(fs_types::OpenFlags::CREATE) {
+                vfs.create(&vfs_path)
+                    .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?
+            } else {
+                vfs.open(&vfs_path, writable)
+                    .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?
+            }
+        } as u64;
+
+        // Register descriptor
+        let new_fd = self.next_descriptor;
+        self.next_descriptor += 1;
+        self.descriptors.insert(
+            new_fd,
+            DescriptorKind::File {
+                handle: FileHandle {
+                    vfs_fd,
+                    position: 0,
+                    vfs: self.vfs.clone(),
+                    writable,
+                },
+            },
+        );
+
+        Ok(Resource::new_own(new_fd))
     }
 
     fn drop(&mut self, descriptor: Resource<fs_types::Descriptor>) -> HostResult<()> {
-        self.table.delete(descriptor)?;
+        let fd = descriptor.rep();
+        // If this was a file descriptor, close underlying VFS fd
+        if let Some(kind) = self.descriptors.remove(&fd) {
+            if let DescriptorKind::File { handle } = kind {
+                let _ = self.vfs.lock().unwrap().close(handle.vfs_fd as u32);
+            }
+        }
+        // Do not call table.delete for descriptors; they are tracked in descriptors map
         Ok(())
     }
 
@@ -482,16 +564,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         offset: fs_types::Filesize,
     ) -> Result<Resource<io_streams::InputStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
     {
-        // TODO: Create proper VFS input stream
-        let handle = FileHandle {
-            vfs_fd: 0, // TODO: Get from descriptor
-            position: offset,
-            vfs: self.vfs.clone(),
-            writable: false,
-        };
-
-        // For now, return Unsupported since we can't create proper stream resources
-        // without implementing the full wasmtime-wasi-io traits
+        // Stream support deferred; use Unsupported for now
         Err(fs_types::ErrorCode::Unsupported.into())
     }
 
@@ -503,16 +576,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-        // TODO: Create proper VFS output stream
-        let handle = FileHandle {
-            vfs_fd: 0, // TODO: Get from descriptor
-            position: offset,
-            vfs: self.vfs.clone(),
-            writable: true,
-        };
-
-        // For now, return Unsupported since we can't create proper stream resources
-        // without implementing the full wasmtime-wasi-io traits
+        // Stream support deferred; use Unsupported for now
         Err(fs_types::ErrorCode::Unsupported.into())
     }
 
@@ -523,8 +587,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-        // TODO: Get file size for append position
-        self.write_via_stream(descriptor, 0)
+        // Stream support deferred; use Unsupported for now
+        Err(fs_types::ErrorCode::Unsupported.into())
     }
 }
 
@@ -545,12 +609,12 @@ impl fs_types::HostDirectoryEntryStream for VfsFilesystem {
     }
 }
 
-/// Input stream type
+/// Input stream type (placeholder for future stream support)
 pub struct VfsInputStream {
     handle: FileHandle,
 }
 
-/// Output stream type  
+/// Output stream type (placeholder for future stream support)
 pub struct VfsOutputStream {
     handle: FileHandle,
 }
@@ -570,153 +634,7 @@ impl VfsOutputStream {
     }
 }
 
-// TODO: Stream support will be added later
-// For now, streams are not supported and return Unsupported errors
-/*
-// The stream traits are implemented on the context, not the stream types
-impl io_streams::HostInputStream for VfsWasiContext {
-    fn read(&mut self, stream: Resource<io_streams::InputStream>, size: u64) -> wasmtime::Result<Vec<u8>, StreamError> {
-        let stream_ref = self.fs.table.get(&stream)?;
-        let vfs_stream = stream_ref
-            .downcast_ref::<VfsInputStream>()
-            .ok_or_else(|| anyhow::anyhow!("not a VFS input stream"))?;
-        let mut handle = vfs_stream.handle.clone();
-
-        let vfs = handle.vfs.lock().unwrap();
-
-        // Seek to position
-        match vfs.seek(handle.vfs_fd, SeekFrom::Start(handle.position)) {
-            Ok(_) => {},
-            Err(_) => return Err(StreamError::Closed),
-        }
-
-        // Read data
-        let mut buffer = vec![0u8; size as usize];
-        let bytes_read = match vfs.read(handle.vfs_fd, &mut buffer) {
-            Ok(n) => n,
-            Err(_) => return Err(StreamError::Closed),
-        };
-
-        buffer.truncate(bytes_read);
-        drop(vfs);
-
-        // Update position in the stream
-        let stream_mut = self.fs.table.get_mut(&stream)?;
-        let vfs_stream_mut = stream_mut
-            .downcast_mut::<VfsInputStream>()
-            .ok_or_else(|| anyhow::anyhow!("not a VFS input stream"))?;
-        vfs_stream_mut.handle.position += bytes_read as u64;
-
-        Ok(Ok(buffer))
-    }
-
-    async fn blocking_read(&mut self, stream: Resource<io_streams::InputStream>, size: u64) -> wasmtime::Result<Vec<u8>, StreamError> {
-        self.read(stream, size)
-    }
-
-    fn skip(&mut self, stream: Resource<io_streams::InputStream>, amount: u64) -> wasmtime::Result<u64, StreamError> {
-        let stream_mut = self.fs.table.get_mut(&stream)?;
-        let vfs_stream = stream_mut
-            .downcast_mut::<VfsInputStream>()
-            .ok_or_else(|| anyhow::anyhow!("not a VFS input stream"))?;
-        vfs_stream.handle.position += amount;
-        Ok(amount)
-    }
-
-    async fn blocking_skip(&mut self, stream: Resource<io_streams::InputStream>, amount: u64) -> wasmtime::Result<u64, StreamError> {
-        self.skip(stream, amount)
-    }
-
-    fn subscribe(&mut self, _stream: Resource<io_streams::InputStream>) -> wasmtime::Result<Resource<io_poll::Pollable>> {
-        // For now, return an error as we don't have proper pollable implementation
-        Err(anyhow::anyhow!("subscribe not implemented"))
-    }
-
-    async fn drop(&mut self, stream: Resource<io_streams::InputStream>) -> wasmtime::Result<()> {
-        self.fs.table.delete(stream)?;
-        Ok(())
-    }
-}
-
-impl io_streams::HostOutputStream for VfsWasiContext {
-    fn write(&mut self, stream: Resource<io_streams::OutputStream>, bytes: Vec<u8>) -> wasmtime::Result<(), StreamError> {
-        let stream_ref = self.fs.table.get(&stream)?;
-        let vfs_stream = stream_ref
-            .downcast_ref::<VfsOutputStream>()
-            .ok_or_else(|| anyhow::anyhow!("not a VFS output stream"))?;
-        let mut handle = vfs_stream.handle.clone();
-
-        let vfs = handle.vfs.lock().unwrap();
-
-        // Seek to position
-        match vfs.seek(handle.vfs_fd, SeekFrom::Start(handle.position)) {
-            Ok(_) => {},
-            Err(_) => return Err(StreamError::Closed),
-        }
-
-        // Write data
-        let bytes_written = match vfs.write(handle.vfs_fd, &bytes) {
-            Ok(n) => n,
-            Err(_) => return Err(StreamError::Closed),
-        };
-
-        drop(vfs);
-
-        // Update position in the stream
-        let stream_mut = self.fs.table.get_mut(&stream)?;
-        let vfs_stream_mut = stream_mut
-            .downcast_mut::<VfsOutputStream>()
-            .ok_or_else(|| anyhow::anyhow!("not a VFS output stream"))?;
-        vfs_stream_mut.handle.position += bytes_written as u64;
-
-        Ok(Ok(()))
-    }
-
-    async fn blocking_write_and_flush(&mut self, stream: Resource<io_streams::OutputStream>, bytes: Vec<u8>) -> wasmtime::Result<(), StreamError> {
-        self.write(stream, bytes)
-    }
-
-    fn flush(&mut self, _stream: Resource<io_streams::OutputStream>) -> wasmtime::Result<(), StreamError> {
-        // VFS operations are synchronous
-        Ok(Ok(()))
-    }
-
-    async fn blocking_flush(&mut self, stream: Resource<io_streams::OutputStream>) -> wasmtime::Result<(), StreamError> {
-        self.flush(stream)
-    }
-
-    fn check_write(&mut self, _stream: Resource<io_streams::OutputStream>) -> wasmtime::Result<u64, StreamError> {
-        Ok(1024 * 1024) // 1MB write buffer
-    }
-
-    fn write_zeroes(&mut self, stream: Resource<io_streams::OutputStream>, len: u64) -> wasmtime::Result<(), StreamError> {
-        let zeroes = vec![0u8; len as usize];
-        self.write(stream, zeroes)
-    }
-
-    async fn blocking_write_zeroes_and_flush(&mut self, stream: Resource<io_streams::OutputStream>, len: u64) -> wasmtime::Result<(), StreamError> {
-        self.write_zeroes(stream, len)
-    }
-
-    fn splice(&mut self, _dst: Resource<io_streams::OutputStream>, _src: Resource<io_streams::InputStream>, _len: u64) -> wasmtime::Result<u64, StreamError> {
-        Err(StreamError::Closed)
-    }
-
-    async fn blocking_splice(&mut self, dst: Resource<io_streams::OutputStream>, src: Resource<io_streams::InputStream>, len: u64) -> wasmtime::Result<u64, StreamError> {
-        self.splice(dst, src, len)
-    }
-
-    fn subscribe(&mut self, _stream: Resource<io_streams::OutputStream>) -> wasmtime::Result<Resource<io_poll::Pollable>> {
-        // For now, return an error as we don't have proper pollable implementation
-        Err(anyhow::anyhow!("subscribe not implemented"))
-    }
-
-    async fn drop(&mut self, stream: Resource<io_streams::OutputStream>) -> wasmtime::Result<()> {
-        self.fs.table.delete(stream)?;
-        Ok(())
-    }
-}
-*/
+// Stream trait implementations will be added in a future phase
 
 /// Custom context that uses our VFS filesystem
 pub struct VfsWasiContext {
