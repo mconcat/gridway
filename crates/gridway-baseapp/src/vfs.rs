@@ -259,8 +259,37 @@ impl VirtualFilesystem {
         }
     }
 
+    /// Check if a namespace has any keys with the given prefix (excluding directory markers)
+    pub fn has_prefix(&self, namespace: &str, prefix: &[u8]) -> Result<bool> {
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        if let Some(store) = stores.get(namespace) {
+            let store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+
+            let iter = store.prefix_iterator(prefix);
+
+            // Check if there are any non-directory-marker entries
+            for (key, value) in iter {
+                // Skip directory markers (keys ending with '/' and empty values)
+                if key.ends_with(b"/") && value.is_empty() {
+                    continue;
+                }
+                // Found a real file or non-empty entry
+                return Ok(true);
+            }
+            Ok(false)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Parse a virtual path into namespace and key components
-    fn parse_path(&self, path: &Path) -> Result<(String, Vec<u8>)> {
+    pub fn parse_path(&self, path: &Path) -> Result<(String, Vec<u8>)> {
         let mounts = self
             .mounts
             .lock()
@@ -358,7 +387,16 @@ impl VirtualFilesystem {
             let store = store
                 .lock()
                 .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
-            store.get(&key)?.unwrap_or_default()
+
+            // If not writable (i.e., not creating), file must exist
+            if !writable {
+                store
+                    .get(&key)?
+                    .ok_or_else(|| VfsError::PathNotFound(path.to_string_lossy().to_string()))?
+            } else {
+                // If writable, create empty file if doesn't exist
+                store.get(&key)?.unwrap_or_default()
+            }
         };
 
         // Create file descriptor
@@ -640,7 +678,7 @@ impl VirtualFilesystem {
 
         let file_desc = fds.remove(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
-        // If file was writable and has content, write back to store
+        // If file was writable, write back to store (even if empty)
         if file_desc.writable && !file_desc.key.is_empty() {
             let stores = self
                 .stores
@@ -703,6 +741,78 @@ impl VirtualFilesystem {
         self.open(path, true)
     }
 
+    /// Set the size of a file (truncate or extend)
+    pub fn set_size(&self, fd: u32, new_size: u64) -> Result<()> {
+        debug!("Setting size of fd:: {} to {}", fd, new_size);
+
+        let mut fds = self
+            .file_descriptors
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        let file_desc = fds.get_mut(&fd).ok_or(VfsError::FdNotFound(fd))?;
+
+        if !file_desc.writable {
+            return Err(VfsError::AccessDenied(
+                "File not open for writing".to_string(),
+            ));
+        }
+
+        if file_desc.key.is_empty() {
+            return Err(VfsError::InvalidOperation(
+                "Cannot set size of directory".to_string(),
+            ));
+        }
+
+        // Resize the content buffer
+        file_desc.content.resize(new_size as usize, 0);
+
+        // If position is beyond new size, reset it
+        if file_desc.position > new_size {
+            file_desc.position = new_size;
+        }
+
+        debug!("Set size of fd:: {} to {}", fd, new_size);
+        Ok(())
+    }
+
+    /// Create a directory (logical operation in KV store)
+    pub fn create_directory(&self, path: &Path) -> Result<()> {
+        debug!("Creating directory:: {}", path.display());
+
+        // Check write access
+        self.check_access(path, "write")?;
+
+        let (namespace, key) = self.parse_path(path)?;
+
+        // In a KV store, directories are implicit
+        // We can optionally create a marker entry
+        if !key.is_empty() {
+            let stores = self
+                .stores
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+            let store = stores
+                .get(&namespace)
+                .ok_or_else(|| {
+                    VfsError::PathNotFound(format!("Namespace not found:: {namespace}"))
+                })?
+                .clone();
+            drop(stores);
+
+            // Create a directory marker (empty value)
+            let mut dir_key = key.clone();
+            dir_key.push(b'/');
+            let mut store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store.set(&dir_key, &[])?;
+        }
+
+        info!("Successfully created directory:: {}", path.display());
+        Ok(())
+    }
+
     /// Delete a file
     pub fn unlink(&self, path: &Path) -> Result<()> {
         debug!("Deleting file:: {}", path.display());
@@ -734,6 +844,125 @@ impl VirtualFilesystem {
         store.delete(&key)?;
 
         info!("Successfully deleted file:: {}", path.display());
+        Ok(())
+    }
+
+    /// Remove an empty directory
+    pub fn remove_directory(&self, path: &Path) -> Result<()> {
+        debug!("Removing directory:: {}", path.display());
+
+        // Check write access
+        self.check_access(path, "write")?;
+
+        let (namespace, key_prefix) = self.parse_path(path)?;
+
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+        let store = stores
+            .get(&namespace)
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found:: {namespace}")))?
+            .clone();
+        drop(stores);
+
+        // Check if directory is empty
+        {
+            let store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+
+            // Check for any entries with this prefix
+            let mut iter = store.prefix_iterator(&key_prefix);
+            if iter.next().is_some() {
+                return Err(VfsError::DirectoryNotEmpty(
+                    path.to_string_lossy().to_string(),
+                ));
+            }
+        }
+
+        // Remove directory marker if it exists
+        if !key_prefix.is_empty() {
+            let mut dir_key = key_prefix.clone();
+            dir_key.push(b'/');
+            let mut store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            let _ = store.delete(&dir_key);
+        }
+
+        info!("Successfully removed directory:: {}", path.display());
+        Ok(())
+    }
+
+    /// Rename/move a file or directory
+    pub fn rename(&self, old_path: &Path, new_path: &Path) -> Result<()> {
+        debug!("Renaming {} to {}", old_path.display(), new_path.display());
+
+        // Check access
+        self.check_access(old_path, "read")?;
+        self.check_access(old_path, "write")?;
+        self.check_access(new_path, "write")?;
+
+        let (old_namespace, old_key) = self.parse_path(old_path)?;
+        let (new_namespace, new_key) = self.parse_path(new_path)?;
+
+        // Get the stores
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        let old_store = stores
+            .get(&old_namespace)
+            .ok_or_else(|| {
+                VfsError::PathNotFound(format!("Namespace not found:: {old_namespace}"))
+            })?
+            .clone();
+
+        let new_store = if old_namespace == new_namespace {
+            old_store.clone()
+        } else {
+            stores
+                .get(&new_namespace)
+                .ok_or_else(|| {
+                    VfsError::PathNotFound(format!("Namespace not found:: {new_namespace}"))
+                })?
+                .clone()
+        };
+        drop(stores);
+
+        // Read content from old location
+        let content = {
+            let store = old_store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store
+                .get(&old_key)?
+                .ok_or_else(|| VfsError::PathNotFound(old_path.to_string_lossy().to_string()))?
+        };
+
+        // Write to new location
+        {
+            let mut store = new_store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store.set(&new_key, &content)?;
+        }
+
+        // Delete from old location
+        {
+            let mut store = old_store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store.delete(&old_key)?;
+        }
+
+        info!(
+            "Successfully renamed {} to {}",
+            old_path.display(),
+            new_path.display()
+        );
         Ok(())
     }
 
