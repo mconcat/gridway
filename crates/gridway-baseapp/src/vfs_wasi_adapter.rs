@@ -12,10 +12,10 @@ use crate::vfs_wasi_impl::VfsWasiContext;
 use std::sync::{Arc, Mutex};
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::bindings::filesystem::{preopens, types as fs_types};
-use wasmtime_wasi::p2::bindings::io::streams as io_streams;
-use wasmtime_wasi::p2::WasiCtx;
-use wasmtime_wasi::p2::WasiView;
+use wasmtime_wasi::p2::bindings::io::{poll as io_poll, streams as io_streams};
+use wasmtime_wasi::p2::{IoView, StreamError, WasiCtx, WasiView};
 use wasmtime_wasi::ResourceTable;
+use wasmtime_wasi_io::poll::{DynPollable, Pollable};
 
 /// VFS WASI Adapter that wraps our VfsWasiContext
 pub struct VfsWasiAdapter {
@@ -376,5 +376,219 @@ impl fs_types::HostDirectoryEntryStream for VfsWasiAdapter {
         stream: wasmtime::component::Resource<fs_types::DirectoryEntryStream>,
     ) -> wasmtime::Result<()> {
         self.inner.fs.drop(stream)
+    }
+}
+
+// Forward io::poll trait implementations to the inner VfsWasiContext
+impl io_poll::Host for VfsWasiAdapter {
+    async fn poll(
+        &mut self,
+        pollables: Vec<Resource<io_poll::Pollable>>,
+    ) -> wasmtime::Result<Vec<u32>> {
+        // The VfsWasiContext doesn't have a direct poll method, so we need to access it properly
+        // For now, all our pollables are always ready (same as VfsWasiContext implementation)
+        Ok((0..pollables.len() as u32).collect())
+    }
+}
+
+impl io_poll::HostPollable for VfsWasiAdapter {
+    async fn ready(&mut self, _pollable: Resource<io_poll::Pollable>) -> wasmtime::Result<bool> {
+        Ok(true)
+    }
+
+    async fn block(&mut self, _pollable: Resource<io_poll::Pollable>) -> wasmtime::Result<()> {
+        Ok(())
+    }
+
+    fn drop(&mut self, pollable: Resource<io_poll::Pollable>) -> wasmtime::Result<()> {
+        self.inner.table().delete(pollable)?;
+        Ok(())
+    }
+}
+
+// Forward io::error trait implementation
+impl wasmtime_wasi::p2::bindings::io::error::Host for VfsWasiAdapter {}
+
+// Forward io::error::HostError trait implementation
+impl wasmtime_wasi::p2::bindings::io::error::HostError for VfsWasiAdapter {
+    fn drop(&mut self, error: Resource<io_streams::Error>) -> wasmtime::Result<()> {
+        self.inner.table().delete(error)?;
+        Ok(())
+    }
+    
+    fn to_debug_string(&mut self, error: Resource<io_streams::Error>) -> wasmtime::Result<String> {
+        Ok(format!("{:?}", self.inner.table().get(&error)?))
+    }
+}
+
+// Forward io::streams trait implementations
+// Note: These are placeholder implementations since our VFS doesn't fully implement streams yet
+impl io_streams::Host for VfsWasiAdapter {
+    fn convert_stream_error(&mut self, err: StreamError) -> wasmtime::Result<io_streams::StreamError> {
+        match err {
+            StreamError::Closed => Ok(io_streams::StreamError::Closed),
+            StreamError::LastOperationFailed(e) => Ok(io_streams::StreamError::LastOperationFailed(
+                self.inner.table().push(e)?,
+            )),
+            StreamError::Trap(e) => Err(e),
+        }
+    }
+}
+
+impl io_streams::HostInputStream for VfsWasiAdapter {
+    fn read(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+        _len: u64,
+    ) -> Result<Vec<u8>, StreamError> {
+        // Placeholder implementation - VFS streams not yet fully implemented
+        Ok(Vec::new())
+    }
+
+    async fn blocking_read(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+        _len: u64,
+    ) -> Result<Vec<u8>, StreamError> {
+        // Placeholder implementation - VFS streams not yet fully implemented
+        Ok(Vec::new())
+    }
+
+    fn skip(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+        len: u64,
+    ) -> Result<u64, StreamError> {
+        Ok(len)
+    }
+
+    async fn blocking_skip(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+        len: u64,
+    ) -> Result<u64, StreamError> {
+        // Just return that we skipped the requested amount
+        Ok(len)
+    }
+
+    fn subscribe(
+        &mut self,
+        _stream: Resource<io_streams::InputStream>,
+    ) -> wasmtime::Result<Resource<DynPollable>> {
+        // Create a pollable that's always ready
+        struct AlwaysReadyPollable;
+        #[async_trait::async_trait]
+        impl Pollable for AlwaysReadyPollable {
+            async fn ready(&mut self) {}
+        }
+        let pollable = AlwaysReadyPollable;
+        let resource = self.inner.table().push(pollable)?;
+        wasmtime_wasi_io::poll::subscribe(self.inner.table(), resource)
+    }
+
+    async fn drop(&mut self, stream: Resource<io_streams::InputStream>) -> wasmtime::Result<()> {
+        self.inner.table().delete(stream)?;
+        Ok(())
+    }
+}
+
+impl io_streams::HostOutputStream for VfsWasiAdapter {
+    fn write(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+        contents: Vec<u8>,
+    ) -> Result<(), StreamError> {
+        // Placeholder - just accept the write
+        let _ = contents;
+        Ok(())
+    }
+
+    async fn blocking_write_and_flush(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+        _contents: Vec<u8>,
+    ) -> Result<(), StreamError> {
+        // Placeholder - just accept the write and flush
+        Ok(())
+    }
+
+    fn flush(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+    ) -> Result<(), StreamError> {
+        Ok(())
+    }
+
+    async fn blocking_flush(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+    ) -> Result<(), StreamError> {
+        // Placeholder - nothing to flush
+        Ok(())
+    }
+
+    fn check_write(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+    ) -> Result<u64, StreamError> {
+        // Always ready to write up to 64KB
+        Ok(65536)
+    }
+
+    fn subscribe(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+    ) -> wasmtime::Result<Resource<DynPollable>> {
+        // Create a pollable that's always ready
+        struct AlwaysReadyPollable;
+        #[async_trait::async_trait]
+        impl Pollable for AlwaysReadyPollable {
+            async fn ready(&mut self) {}
+        }
+        let pollable = AlwaysReadyPollable;
+        let resource = self.inner.table().push(pollable)?;
+        wasmtime_wasi_io::poll::subscribe(self.inner.table(), resource)
+    }
+
+    fn write_zeroes(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+        _len: u64,
+    ) -> Result<(), StreamError> {
+        // Placeholder - just pretend we wrote zeroes
+        Ok(())
+    }
+
+    async fn blocking_write_zeroes_and_flush(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+        _len: u64,
+    ) -> Result<(), StreamError> {
+        // Placeholder - just pretend we wrote zeroes and flushed
+        Ok(())
+    }
+
+    fn splice(
+        &mut self,
+        _dst: Resource<io_streams::OutputStream>,
+        _src: Resource<io_streams::InputStream>,
+        len: u64,
+    ) -> Result<u64, StreamError> {
+        Ok(len)
+    }
+
+    async fn blocking_splice(
+        &mut self,
+        _dst: Resource<io_streams::OutputStream>,
+        _src: Resource<io_streams::InputStream>,
+        len: u64,
+    ) -> Result<u64, StreamError> {
+        // Placeholder - just pretend we spliced the data
+        Ok(len)
+    }
+
+    async fn drop(&mut self, stream: Resource<io_streams::OutputStream>) -> wasmtime::Result<()> {
+        self.inner.table().delete(stream)?;
+        Ok(())
     }
 }
