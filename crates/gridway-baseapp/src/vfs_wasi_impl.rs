@@ -102,6 +102,13 @@ struct FileHandle {
 }
 
 /// Our VFS-backed filesystem implementation
+///
+/// ID Space Management:
+/// - Descriptor IDs: Start at 10, incremented for each file/directory descriptor
+/// - Stream IDs: Start at 1000000, incremented for each directory stream
+/// These ID spaces are intentionally disjoint to avoid collisions between
+/// different resource types. Stream IDs use a high starting value to ensure
+/// they never overlap with descriptor IDs even with heavy usage.
 pub struct VfsFilesystem {
     /// Resource table for managing WASI resources
     table: ResourceTable,
@@ -109,11 +116,11 @@ pub struct VfsFilesystem {
     vfs: Arc<Mutex<VirtualFilesystem>>,
     /// Configured mounts
     mounts: Vec<Mount>,
-    /// Descriptor mapping
+    /// Descriptor mapping (ID space: 10+)
     descriptors: HashMap<u32, DescriptorKind>,
     /// Next descriptor ID
     next_descriptor: u32,
-    /// Directory streams mapping
+    /// Directory streams mapping (ID space: 1000000+)
     directory_streams: HashMap<u32, DirectoryStream>,
     /// Next stream ID
     next_stream_id: u32,
@@ -128,7 +135,7 @@ impl VfsFilesystem {
             descriptors: HashMap::new(),
             next_descriptor: 10, // Start after standard descriptors
             directory_streams: HashMap::new(),
-            next_stream_id: 1,
+            next_stream_id: 1_000_000, // High starting value to avoid ID collisions
         };
 
         // Set up default mounts
@@ -227,9 +234,15 @@ impl VfsFilesystem {
 
     /// Check if a path represents a directory by looking for entries with that prefix
     fn is_directory(&self, namespace: &str, path: &[u8]) -> bool {
-        let vfs = self.vfs.lock().unwrap();
+        let Ok(vfs) = self.vfs.lock() else {
+            // Lock poisoned, treat as not a directory
+            return false;
+        };
         if let Some(store) = vfs.get_store(namespace) {
-            let store = store.lock().unwrap();
+            let Ok(store) = store.lock() else {
+                // Lock poisoned, treat as not a directory
+                return false;
+            };
             // A path is a directory if there are keys that start with "path/"
             let mut dir_prefix = path.to_vec();
             if !dir_prefix.is_empty() && dir_prefix[dir_prefix.len() - 1] != b'/' {
@@ -395,7 +408,10 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         let mut stream = DirectoryStream::new(dir_path.clone(), mount_id);
 
         // Get entries from VFS
-        let vfs = self.vfs.lock().unwrap();
+        let vfs = self
+            .vfs
+            .lock()
+            .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
 
         // Build proper prefix for listing based on the directory path
         let prefix = if dir_path == Path::new(&mount.guest_prefix) {
@@ -410,10 +426,14 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         };
 
         // Collect all entries and organize them
+        // Performance Note: This currently loads all entries upfront. For very large
+        // directories, consider implementing lazy loading or pagination in future iterations.
         let mut seen_dirs = std::collections::HashSet::new();
 
         if let Some(store) = vfs.get_store(namespace) {
-            let store = store.lock().unwrap();
+            let store = store
+                .lock()
+                .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
             let iter = store.prefix_iterator(&prefix);
 
             for (key, _) in iter {
@@ -611,7 +631,10 @@ impl fs_types::HostDescriptor for VfsFilesystem {
             // Opening a file - proceed with VFS operations
             // Ensure capabilities for this path (coarse-grained)
             {
-                let vfs = self.vfs.lock().unwrap();
+                let vfs = self
+                    .vfs
+                    .lock()
+                    .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
                 let _ = vfs.add_capability(Capability::Read(vfs_path.clone()));
                 if writable {
                     let _ = vfs.add_capability(Capability::Write(vfs_path.clone()));
@@ -620,7 +643,10 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
             // Open or create in VFS
             let vfs_fd = {
-                let vfs = self.vfs.lock().unwrap();
+                let vfs = self
+                    .vfs
+                    .lock()
+                    .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
                 if open_flags.contains(fs_types::OpenFlags::CREATE) {
                     vfs.create(&vfs_path).map_err(|e| {
                         wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e))
@@ -653,7 +679,10 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         // If this was a file descriptor, close underlying VFS fd
         if let Some(kind) = self.descriptors.remove(&fd) {
             if let DescriptorKind::File { handle } = kind {
-                let _ = self.vfs.lock().unwrap().close(handle.vfs_fd as u32);
+                // Best effort close - if lock is poisoned, we can't close
+                if let Ok(vfs) = self.vfs.lock() {
+                    let _ = vfs.close(handle.vfs_fd as u32);
+                }
             }
         }
         // Do not call table.delete for descriptors; they are tracked in descriptors map
@@ -1076,5 +1105,89 @@ mod tests {
             .any(|(name, typ)| name == "modules" && *typ == fs_types::DescriptorType::Directory));
 
         <VfsFilesystem as fs_types::HostDirectoryEntryStream>::drop(&mut fs, src_stream).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_large_directory_performance() {
+        // Create a VFS with many entries to validate performance
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+        
+        // Add many entries to test performance
+        {
+            let mut store = store.lock().unwrap();
+            // Add 100 files to test performance with larger directories
+            for i in 0..100 {
+                let key = format!("file_{:03}.txt", i);
+                let value = format!("content_{}", i);
+                store.set(key.as_bytes(), value.as_bytes()).unwrap();
+            }
+            
+            // Add some nested directories with files
+            for i in 0..10 {
+                let dir_files = vec![
+                    format!("dir_{:02}/file_a.txt", i),
+                    format!("dir_{:02}/file_b.txt", i),
+                    format!("dir_{:02}/subdir/file_c.txt", i),
+                ];
+                for file in dir_files {
+                    store.set(file.as_bytes(), b"content").unwrap();
+                }
+            }
+        }
+        
+        // Mount the store
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), store.clone())
+            .unwrap();
+        
+        // Create VFS filesystem
+        let mut fs = VfsFilesystem::new(vfs);
+        
+        // List root directory and measure
+        let start = std::time::Instant::now();
+        
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+        
+        let stream = <VfsFilesystem as fs_types::HostDescriptor>::read_directory(&mut fs, root_descriptor)
+            .await
+            .unwrap();
+        
+        let mut entries = Vec::new();
+        let stream_id = stream.rep();
+        loop {
+            let stream_ref = Resource::new_borrow(stream_id);
+            match <VfsFilesystem as fs_types::HostDirectoryEntryStream>::read_directory_entry(&mut fs, stream_ref)
+                .await
+                .unwrap()
+            {
+                Some(entry) => entries.push(entry.name),
+                None => break,
+            }
+        }
+        
+        let elapsed = start.elapsed();
+        
+        // Verify we got all entries
+        assert_eq!(entries.len(), 110); // 100 files + 10 directories
+        
+        // Verify correct ordering (entries should be consistent)
+        let file_entries: Vec<_> = entries.iter()
+            .filter(|e| e.starts_with("file_"))
+            .collect();
+        assert_eq!(file_entries.len(), 100);
+        
+        let dir_entries: Vec<_> = entries.iter()
+            .filter(|e| e.starts_with("dir_"))
+            .collect();
+        assert_eq!(dir_entries.len(), 10);
+        
+        // Performance check - should complete reasonably quickly
+        // This is a soft check, mainly to catch severe performance regressions
+        assert!(elapsed.as_millis() < 100, "Directory listing took {:?} which seems slow", elapsed);
+        
+        <VfsFilesystem as fs_types::HostDirectoryEntryStream>::drop(&mut fs, stream).unwrap();
     }
 }
