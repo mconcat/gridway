@@ -228,7 +228,6 @@ impl VfsFilesystem {
             VfsError::IoError(_) => fs_types::ErrorCode::Io,
             VfsError::SerializationError(_) => fs_types::ErrorCode::Io,
             VfsError::DirectoryNotEmpty(_) => fs_types::ErrorCode::NotEmpty,
-            _ => fs_types::ErrorCode::Io,
         }
     }
 
@@ -345,8 +344,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     async fn set_size(
         &mut self,
-        _descriptor: Resource<fs_types::Descriptor>,
-        _size: fs_types::Filesize,
+        descriptor: Resource<fs_types::Descriptor>,
+        size: fs_types::Filesize,
     ) -> Result<(), wasmtime_wasi::TrappableError<fs_types::ErrorCode>> {
         let fd = descriptor.rep();
         match self.descriptors.get(&fd) {
@@ -508,7 +507,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate directory descriptor
         let mount_id = match self.descriptors.get(&dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -555,19 +554,27 @@ impl fs_types::HostDescriptor for VfsFilesystem {
             Some(DescriptorKind::Dir { .. }) => Ok(fs_types::DescriptorStat {
                 type_: fs_types::DescriptorType::Directory,
                 link_count: 1,
-                size: 0,
+                size: 0, // Directories always have size 0
                 data_access_timestamp: None,
                 data_modification_timestamp: None,
                 status_change_timestamp: None,
             }),
-            Some(DescriptorKind::File { .. }) => Ok(fs_types::DescriptorStat {
-                type_: fs_types::DescriptorType::RegularFile,
-                link_count: 1,
-                size: 0,
-                data_access_timestamp: None,
-                data_modification_timestamp: None,
-                status_change_timestamp: None,
-            }),
+            Some(DescriptorKind::File { handle }) => {
+                // Use the VFS stat_by_fd method to get accurate size
+                let vfs = handle.vfs.lock().unwrap();
+                let file_info = vfs
+                    .stat_by_fd(handle.vfs_fd as u32)
+                    .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
+
+                Ok(fs_types::DescriptorStat {
+                    type_: fs_types::DescriptorType::RegularFile,
+                    link_count: 1,
+                    size: file_info.size, // Use actual size from file descriptor
+                    data_access_timestamp: None,
+                    data_modification_timestamp: None,
+                    status_change_timestamp: None,
+                })
+            }
             None => Err(fs_types::ErrorCode::BadDescriptor.into()),
         }
     }
@@ -760,7 +767,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate directory descriptor
         let mount_id = match self.descriptors.get(&dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -813,11 +820,11 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         // Note: In a KV store, directories are implicit. We remove the directory marker
         // if it exists. If the directory doesn't exist at all (no marker and no files),
         // we follow POSIX semantics and return ENOENT.
-        
+
         // Try to remove the directory through VFS
         vfs.remove_directory(&vfs_path)
             .map_err(|e| wasmtime_wasi::TrappableError::from(Self::convert_vfs_error(e)))?;
-        
+
         Ok(())
     }
 
@@ -833,7 +840,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate old directory descriptor
         let old_mount_id = match self.descriptors.get(&old_dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -842,7 +849,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate new directory descriptor
         let new_mount_id = match self.descriptors.get(&new_dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -896,7 +903,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
         // Validate directory descriptor
         let mount_id = match self.descriptors.get(&dir_fd) {
-            Some(DescriptorKind::Dir { mount_id }) => *mount_id,
+            Some(DescriptorKind::Dir { mount_id, .. }) => *mount_id,
             Some(DescriptorKind::File { .. }) => {
                 return Err(fs_types::ErrorCode::NotDirectory.into())
             }
@@ -1307,21 +1314,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_stat_returns_accurate_size() {
+        // Create a VFS and filesystem
+        let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
+        let store = Arc::new(Mutex::new(MemStore::new()));
+
+        // Mount the store
+        vfs.lock()
+            .unwrap()
+            .mount_store("state".to_string(), store.clone())
+            .unwrap();
+
+        // Create VFS filesystem
+        let mut fs = VfsFilesystem::new(vfs);
+
+        // Get root directory descriptor
+        let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
+        let (root_descriptor, _) = preopens.remove(0);
+
+        // Create a file with specific content
+        let test_content = b"This is test content for stat verification";
+        let root_id = root_descriptor.rep();
+        let file_descriptor = <VfsFilesystem as fs_types::HostDescriptor>::open_at(
+            &mut fs,
+            Resource::new_borrow(root_id),
+            fs_types::PathFlags::empty(),
+            "test_file.txt".to_string(),
+            fs_types::OpenFlags::CREATE,
+            fs_types::DescriptorFlags::WRITE | fs_types::DescriptorFlags::READ,
+        )
+        .await
+        .unwrap();
+
+        // Write content to the file through VFS
+        let file_id = file_descriptor.rep();
+        if let Some(DescriptorKind::File { handle }) = fs.descriptors.get(&file_id) {
+            let vfs = handle.vfs.lock().unwrap();
+            vfs.write(handle.vfs_fd as u32, test_content).unwrap();
+        }
+
+        // Get stat and verify size
+        let stat = <VfsFilesystem as fs_types::HostDescriptor>::stat(
+            &mut fs,
+            Resource::new_borrow(file_id),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stat.type_, fs_types::DescriptorType::RegularFile);
+        assert_eq!(stat.size, test_content.len() as u64);
+
+        // Test directory stat returns size 0
+        let dir_stat = <VfsFilesystem as fs_types::HostDescriptor>::stat(
+            &mut fs,
+            Resource::new_borrow(root_id),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(dir_stat.type_, fs_types::DescriptorType::Directory);
+        assert_eq!(dir_stat.size, 0);
+
+        // Test stat after resizing file
+        <VfsFilesystem as fs_types::HostDescriptor>::set_size(
+            &mut fs,
+            Resource::new_borrow(file_id),
+            100,
+        )
+        .await
+        .unwrap();
+
+        let resized_stat = <VfsFilesystem as fs_types::HostDescriptor>::stat(
+            &mut fs,
+            Resource::new_borrow(file_id),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resized_stat.size, 100);
+    }
+
+    #[tokio::test]
     async fn test_large_directory_performance() {
         // Create a VFS with many entries to validate performance
         let vfs = Arc::new(Mutex::new(VirtualFilesystem::new()));
         let store = Arc::new(Mutex::new(MemStore::new()));
-        
+
         // Add many entries to test performance
         {
             let mut store = store.lock().unwrap();
             // Add 100 files to test performance with larger directories
             for i in 0..100 {
-                let key = format!("file_{:03}.txt", i);
-                let value = format!("content_{}", i);
+                let key = format!("file_{i:03}.txt");
+                let value = format!("content_{i}");
                 store.set(key.as_bytes(), value.as_bytes()).unwrap();
             }
-            
+
             // Add some nested directories with files
             for i in 0..10 {
                 let dir_files = vec![
@@ -1334,59 +1422,61 @@ mod tests {
                 }
             }
         }
-        
+
         // Mount the store
         vfs.lock()
             .unwrap()
             .mount_store("state".to_string(), store.clone())
             .unwrap();
-        
+
         // Create VFS filesystem
         let mut fs = VfsFilesystem::new(vfs);
-        
+
         // List root directory and measure
         let start = std::time::Instant::now();
-        
+
         let mut preopens = <VfsFilesystem as preopens::Host>::get_directories(&mut fs).unwrap();
         let (root_descriptor, _) = preopens.remove(0);
-        
-        let stream = <VfsFilesystem as fs_types::HostDescriptor>::read_directory(&mut fs, root_descriptor)
-            .await
-            .unwrap();
-        
+
+        let stream =
+            <VfsFilesystem as fs_types::HostDescriptor>::read_directory(&mut fs, root_descriptor)
+                .await
+                .unwrap();
+
         let mut entries = Vec::new();
         let stream_id = stream.rep();
         loop {
             let stream_ref = Resource::new_borrow(stream_id);
-            match <VfsFilesystem as fs_types::HostDirectoryEntryStream>::read_directory_entry(&mut fs, stream_ref)
-                .await
-                .unwrap()
+            match <VfsFilesystem as fs_types::HostDirectoryEntryStream>::read_directory_entry(
+                &mut fs, stream_ref,
+            )
+            .await
+            .unwrap()
             {
                 Some(entry) => entries.push(entry.name),
                 None => break,
             }
         }
-        
+
         let elapsed = start.elapsed();
-        
+
         // Verify we got all entries
         assert_eq!(entries.len(), 110); // 100 files + 10 directories
-        
+
         // Verify correct ordering (entries should be consistent)
-        let file_entries: Vec<_> = entries.iter()
-            .filter(|e| e.starts_with("file_"))
-            .collect();
+        let file_entries: Vec<_> = entries.iter().filter(|e| e.starts_with("file_")).collect();
         assert_eq!(file_entries.len(), 100);
-        
-        let dir_entries: Vec<_> = entries.iter()
-            .filter(|e| e.starts_with("dir_"))
-            .collect();
+
+        let dir_entries: Vec<_> = entries.iter().filter(|e| e.starts_with("dir_")).collect();
         assert_eq!(dir_entries.len(), 10);
-        
+
         // Performance check - should complete reasonably quickly
         // This is a soft check, mainly to catch severe performance regressions
-        assert!(elapsed.as_millis() < 100, "Directory listing took {:?} which seems slow", elapsed);
-        
+        assert!(
+            elapsed.as_millis() < 100,
+            "Directory listing took {elapsed:?} which seems slow"
+        );
+
         <VfsFilesystem as fs_types::HostDirectoryEntryStream>::drop(&mut fs, stream).unwrap();
     }
 }

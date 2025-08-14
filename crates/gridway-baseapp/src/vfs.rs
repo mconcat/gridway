@@ -388,6 +388,28 @@ impl VirtualFilesystem {
             .clone();
         drop(stores);
 
+        // Create file descriptor
+        let fd = self.next_fd_id()?;
+
+        // Check if this is a directory (empty key)
+        if key.is_empty() {
+            // Directory open - no content to read
+            let file_desc = FileDescriptor::new(fd, path.to_path_buf(), namespace, key, writable);
+
+            let mut fds = self
+                .file_descriptors
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+            fds.insert(fd, file_desc);
+
+            info!(
+                "Successfully opened directory:: {} with fd:: {}",
+                path.display(),
+                fd
+            );
+            return Ok(fd);
+        }
+
         // Read current content if file exists
         let content = {
             let store = store
@@ -405,8 +427,6 @@ impl VirtualFilesystem {
             }
         };
 
-        // Create file descriptor
-        let fd = self.next_fd_id()?;
         let mut file_desc = FileDescriptor::new(fd, path.to_path_buf(), namespace, key, writable);
         file_desc.content = content;
 
@@ -854,7 +874,7 @@ impl VirtualFilesystem {
     }
 
     /// Remove an empty directory
-    /// 
+    ///
     /// Returns an error if:
     /// - The directory doesn't exist (ENOENT)
     /// - The directory is not empty (ENOTEMPTY)
@@ -882,15 +902,15 @@ impl VirtualFilesystem {
         if !key_prefix.is_empty() {
             dir_key.push(b'/');
         }
-        
+
         let directory_exists = {
             let store = store
                 .lock()
                 .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
-            
+
             // Check if directory marker exists
             let has_marker = store.has(&dir_key)?;
-            
+
             // Check for any files with this prefix (excluding the marker itself)
             let mut has_files = false;
             for (key, value) in store.prefix_iterator(&key_prefix) {
@@ -901,17 +921,22 @@ impl VirtualFilesystem {
                 has_files = true;
                 break;
             }
-            
+
             if has_files {
-                return Err(VfsError::DirectoryNotEmpty(path.to_string_lossy().to_string()));
+                return Err(VfsError::DirectoryNotEmpty(
+                    path.to_string_lossy().to_string(),
+                ));
             }
-            
+
             has_marker
         };
 
         // If directory doesn't exist (no marker and no files), return error
         if !directory_exists {
-            return Err(VfsError::PathNotFound(format!("Directory not found: {}", path.display())));
+            return Err(VfsError::PathNotFound(format!(
+                "Directory not found: {}",
+                path.display()
+            )));
         }
 
         // Remove directory marker
@@ -927,11 +952,11 @@ impl VirtualFilesystem {
     }
 
     /// Rename/move a file or directory
-    /// 
+    ///
     /// ## Overwrite Behavior
     /// If the destination path already exists, it will be overwritten.
     /// This matches POSIX rename(2) semantics where the destination is atomically replaced.
-    /// 
+    ///
     /// ## Implementation Note
     /// Currently implemented as copy+delete which is not atomic. A true atomic
     /// rename would require transaction support in the underlying store.
@@ -1003,6 +1028,39 @@ impl VirtualFilesystem {
             new_path.display()
         );
         Ok(())
+    }
+
+    /// Get file information by file descriptor
+    ///
+    /// This helper method returns FileInfo (size and type) based on the
+    /// current content/state of an open file descriptor.
+    pub fn stat_by_fd(&self, fd: u32) -> Result<FileInfo> {
+        debug!("Getting stat for fd:: {}", fd);
+
+        let fds = self
+            .file_descriptors
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        let file_desc = fds.get(&fd).ok_or(VfsError::FdNotFound(fd))?;
+
+        // Check if it's a directory (empty key means directory)
+        if file_desc.key.is_empty() {
+            Ok(FileInfo {
+                file_type: FileType::Directory,
+                size: 0, // Directories always have size 0
+                modified: SystemTime::now(),
+                path: file_desc.path.clone(),
+            })
+        } else {
+            // For files, return the size based on current content buffer
+            Ok(FileInfo {
+                file_type: FileType::File,
+                size: file_desc.content.len() as u64,
+                modified: SystemTime::now(),
+                path: file_desc.path.clone(),
+            })
+        }
     }
 
     /// List all open file descriptors (for debugging)
@@ -1194,6 +1252,108 @@ mod tests {
             .unwrap();
         let dir_info = vfs.stat(&dir_path).unwrap();
         assert_eq!(dir_info.file_type, FileType::Directory);
+    }
+
+    #[test]
+    fn test_stat_by_fd() {
+        let vfs = setup_test_vfs();
+
+        // Test file stat by fd
+        let path = PathBuf::from("/auth/test_file");
+        vfs.add_capability(Capability::Write(path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(path.clone())).unwrap();
+
+        // Create a file and write data
+        let fd = vfs.create(&path).unwrap();
+        let test_data = b"This is test data for stat_by_fd";
+        vfs.write(fd, test_data).unwrap();
+
+        // Get stat by fd before closing
+        let stat = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat.file_type, FileType::File);
+        assert_eq!(stat.size, test_data.len() as u64);
+        assert_eq!(stat.path, path);
+
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_stat_by_fd_directory() {
+        let vfs = setup_test_vfs();
+
+        // Test directory stat by fd
+        let dir_path = PathBuf::from("/auth/");
+        vfs.add_capability(Capability::Read(dir_path.clone()))
+            .unwrap();
+
+        let fd = vfs.open(&dir_path, false).unwrap();
+
+        // Get stat by fd for directory
+        let stat = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat.file_type, FileType::Directory);
+        assert_eq!(stat.size, 0); // Directories always have size 0
+        assert_eq!(stat.path, dir_path);
+
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_stat_by_fd_after_write() {
+        let vfs = setup_test_vfs();
+
+        let path = PathBuf::from("/bank/account");
+        vfs.add_capability(Capability::Write(path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(path.clone())).unwrap();
+
+        // Create file and get initial stat
+        let fd = vfs.create(&path).unwrap();
+        let stat1 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat1.size, 0); // Empty file initially
+
+        // Write some data
+        let data1 = b"initial data";
+        vfs.write(fd, data1).unwrap();
+        let stat2 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat2.size, data1.len() as u64);
+
+        // Write more data (appending)
+        let data2 = b" and more data";
+        vfs.write(fd, data2).unwrap();
+        let stat3 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat3.size, (data1.len() + data2.len()) as u64);
+
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_stat_by_fd_after_set_size() {
+        let vfs = setup_test_vfs();
+
+        let path = PathBuf::from("/auth/resizable");
+        vfs.add_capability(Capability::Write(path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(path.clone())).unwrap();
+
+        let fd = vfs.create(&path).unwrap();
+
+        // Write some initial data
+        let data = b"test data for resizing";
+        vfs.write(fd, data).unwrap();
+
+        // Check initial size
+        let stat1 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat1.size, data.len() as u64);
+
+        // Truncate the file
+        vfs.set_size(fd, 5).unwrap();
+        let stat2 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat2.size, 5);
+
+        // Extend the file
+        vfs.set_size(fd, 100).unwrap();
+        let stat3 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat3.size, 100);
+
+        vfs.close(fd).unwrap();
     }
 
     #[test]

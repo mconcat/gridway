@@ -415,7 +415,7 @@ impl wasmtime_wasi::p2::bindings::io::error::HostError for VfsWasiAdapter {
         self.inner.table().delete(error)?;
         Ok(())
     }
-    
+
     fn to_debug_string(&mut self, error: Resource<io_streams::Error>) -> wasmtime::Result<String> {
         Ok(format!("{:?}", self.inner.table().get(&error)?))
     }
@@ -424,12 +424,15 @@ impl wasmtime_wasi::p2::bindings::io::error::HostError for VfsWasiAdapter {
 // Forward io::streams trait implementations
 // Note: These are placeholder implementations since our VFS doesn't fully implement streams yet
 impl io_streams::Host for VfsWasiAdapter {
-    fn convert_stream_error(&mut self, err: StreamError) -> wasmtime::Result<io_streams::StreamError> {
+    fn convert_stream_error(
+        &mut self,
+        err: StreamError,
+    ) -> wasmtime::Result<io_streams::StreamError> {
         match err {
             StreamError::Closed => Ok(io_streams::StreamError::Closed),
-            StreamError::LastOperationFailed(e) => Ok(io_streams::StreamError::LastOperationFailed(
-                self.inner.table().push(e)?,
-            )),
+            StreamError::LastOperationFailed(e) => Ok(
+                io_streams::StreamError::LastOperationFailed(self.inner.table().push(e)?),
+            ),
             StreamError::Trap(e) => Err(e),
         }
     }
@@ -512,10 +515,7 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
         Ok(())
     }
 
-    fn flush(
-        &mut self,
-        _stream: Resource<io_streams::OutputStream>,
-    ) -> Result<(), StreamError> {
+    fn flush(&mut self, _stream: Resource<io_streams::OutputStream>) -> Result<(), StreamError> {
         Ok(())
     }
 
