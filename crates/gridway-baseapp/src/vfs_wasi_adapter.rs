@@ -402,6 +402,21 @@ impl io_poll::HostPollable for VfsWasiAdapter {
     }
 }
 
+// Forward io::error trait implementation
+impl wasmtime_wasi::p2::bindings::io::error::Host for VfsWasiAdapter {}
+
+// Forward io::error::HostError trait implementation
+impl wasmtime_wasi::p2::bindings::io::error::HostError for VfsWasiAdapter {
+    fn drop(&mut self, error: Resource<io_streams::Error>) -> wasmtime::Result<()> {
+        self.inner.table().delete(error)?;
+        Ok(())
+    }
+    
+    fn to_debug_string(&mut self, error: Resource<io_streams::Error>) -> wasmtime::Result<String> {
+        Ok(format!("{:?}", self.inner.table().get(&error)?))
+    }
+}
+
 // Stream support will be properly implemented in a future iteration
 // For now, the stream methods in VfsFilesystem return Unsupported
 impl io_streams::Host for VfsWasiAdapter {
@@ -479,14 +494,6 @@ impl io_streams::HostInputStream for VfsWasiAdapter {
 }
 
 impl io_streams::HostOutputStream for VfsWasiAdapter {
-    fn check_write(
-        &mut self,
-        _stream: Resource<io_streams::OutputStream>,
-    ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
-    }
-
     fn write(
         &mut self,
         _stream: Resource<io_streams::OutputStream>,
@@ -521,11 +528,27 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
         Err(wasmtime_wasi::p2::StreamError::Closed)
     }
 
+    fn check_write(
+        &mut self,
+        _stream: Resource<io_streams::OutputStream>,
+    ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
+        // Return Closed to indicate stream is not available (less noisy than trap)
+        Err(wasmtime_wasi::p2::StreamError::Closed)
+    }
+
     fn subscribe(
         &mut self,
         _stream: Resource<io_streams::OutputStream>,
-    ) -> Result<Resource<io_poll::Pollable>, anyhow::Error> {
-        Err(anyhow::anyhow!("VFS stream subscribe not yet implemented (Issue #66)"))
+    ) -> wasmtime::Result<Resource<wasmtime_wasi_io::poll::DynPollable>> {
+        // Create a pollable that's always ready
+        struct AlwaysReadyPollable;
+        #[async_trait::async_trait]
+        impl wasmtime_wasi_io::poll::Pollable for AlwaysReadyPollable {
+            async fn ready(&mut self) {}
+        }
+        let pollable = AlwaysReadyPollable;
+        let resource = self.inner.table().push(pollable)?;
+        wasmtime_wasi_io::poll::subscribe(self.inner.table(), resource)
     }
 
     fn write_zeroes(
