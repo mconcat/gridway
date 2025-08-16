@@ -8,6 +8,7 @@ use crate::vfs::VirtualFilesystem;
 use bytes::Bytes;
 use std::io::SeekFrom;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use wasmtime_wasi::p2::StreamError;
 use wasmtime_wasi_io::poll::Pollable;
 use wasmtime_wasi_io::streams::{
@@ -16,16 +17,26 @@ use wasmtime_wasi_io::streams::{
 
 /// File handle containing VFS file descriptor and position
 /// Made public for use in vfs_wasi_impl
-#[derive(Clone)]
 pub struct FileHandle {
     /// VFS file descriptor
     pub vfs_fd: u64,
-    /// Current position in file
-    pub position: u64,
+    /// Current position in file (thread-safe)
+    pub position: Arc<AtomicU64>,
     /// Reference to VFS
     pub vfs: Arc<Mutex<VirtualFilesystem>>,
     /// Whether file is open for writing
     pub writable: bool,
+}
+
+impl Clone for FileHandle {
+    fn clone(&self) -> Self {
+        Self {
+            vfs_fd: self.vfs_fd,
+            position: Arc::clone(&self.position),
+            vfs: Arc::clone(&self.vfs),
+            writable: self.writable,
+        }
+    }
 }
 
 /// Input stream backed by a VFS file descriptor
@@ -65,12 +76,15 @@ impl VfsInputStream {
     /// Read data from the stream (implementation)
     pub fn read_impl(&mut self, len: usize) -> Result<Vec<u8>, StreamError> {
         let vfs = self.handle.vfs.lock().map_err(|_| StreamError::Closed)?;
+        
+        // Get current position atomically
+        let current_pos = self.handle.position.load(Ordering::SeqCst);
 
         // Seek to current position
         if vfs
             .seek(
                 self.handle.vfs_fd as u32,
-                SeekFrom::Start(self.handle.position),
+                SeekFrom::Start(current_pos),
             )
             .is_err()
         {
@@ -81,8 +95,8 @@ impl VfsInputStream {
         let mut buffer = vec![0u8; len];
         match vfs.read(self.handle.vfs_fd as u32, &mut buffer) {
             Ok(bytes_read) => {
-                // Update position
-                self.handle.position += bytes_read as u64;
+                // Update position atomically
+                self.handle.position.fetch_add(bytes_read as u64, Ordering::SeqCst);
                 // Truncate buffer to actual bytes read
                 buffer.truncate(bytes_read);
                 Ok(buffer)
@@ -93,9 +107,28 @@ impl VfsInputStream {
 
     /// Skip bytes in the stream (implementation)
     pub fn skip_impl(&mut self, len: u64) -> Result<u64, StreamError> {
-        // For skipping, we just advance the position without reading
-        self.handle.position += len;
-        Ok(len)
+        // Get file size to ensure we don't skip beyond EOF
+        let vfs = self.handle.vfs.lock().map_err(|_| StreamError::Closed)?;
+        
+        // Get current position atomically
+        let current_pos = self.handle.position.load(Ordering::SeqCst);
+        
+        // Get file size by seeking to end and back
+        let original_pos = vfs.seek(self.handle.vfs_fd as u32, SeekFrom::Current(0))
+            .map_err(|_| StreamError::Closed)?;
+        let file_size = vfs.seek(self.handle.vfs_fd as u32, SeekFrom::End(0))
+            .map_err(|_| StreamError::Closed)?;
+        // Seek back to original position
+        vfs.seek(self.handle.vfs_fd as u32, SeekFrom::Start(original_pos as u64))
+            .map_err(|_| StreamError::Closed)?;
+        
+        // Calculate actual skip amount (don't go beyond EOF)
+        let remaining = file_size.saturating_sub(current_pos);
+        let actual_skip = len.min(remaining);
+        
+        // Update position atomically
+        self.handle.position.fetch_add(actual_skip, Ordering::SeqCst);
+        Ok(actual_skip)
     }
 
     /// Get a subscribable pollable (always ready for P0)
@@ -146,12 +179,15 @@ impl VfsOutputStream {
         }
 
         let vfs = self.handle.vfs.lock().map_err(|_| StreamError::Closed)?;
+        
+        // Get current position atomically
+        let current_pos = self.handle.position.load(Ordering::SeqCst);
 
         // Seek to current position
         if vfs
             .seek(
                 self.handle.vfs_fd as u32,
-                SeekFrom::Start(self.handle.position),
+                SeekFrom::Start(current_pos),
             )
             .is_err()
         {
@@ -161,8 +197,8 @@ impl VfsOutputStream {
         // Write at current position
         match vfs.write(self.handle.vfs_fd as u32, contents) {
             Ok(bytes_written) => {
-                // Update position
-                self.handle.position += bytes_written as u64;
+                // Update position atomically
+                self.handle.position.fetch_add(bytes_written as u64, Ordering::SeqCst);
                 Ok(())
             }
             Err(_) => Err(StreamError::Closed),
@@ -190,9 +226,18 @@ impl VfsOutputStream {
             return Err(StreamError::Closed);
         }
 
-        // Create a buffer of zeroes and write it
-        let zeros = vec![0u8; len as usize];
-        self.write_impl(&zeros)
+        // Write zeroes in chunks to avoid large allocations
+        const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
+        let chunk = vec![0u8; CHUNK_SIZE];
+        let mut remaining = len as usize;
+        
+        while remaining > 0 {
+            let write_size = remaining.min(CHUNK_SIZE);
+            self.write_impl(&chunk[..write_size])?;
+            remaining -= write_size;
+        }
+        
+        Ok(())
     }
 
     /// Get a subscribable pollable (always ready for P0)
@@ -218,19 +263,34 @@ mod tests {
     use crate::vfs::VirtualFilesystem;
     use gridway_store::MemStore;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn create_test_vfs() -> Arc<Mutex<VirtualFilesystem>> {
-        let vfs = VirtualFilesystem::new();
+        let mut vfs = VirtualFilesystem::new();
         let store = Arc::new(Mutex::new(MemStore::new()));
         vfs.mount_store("test".to_string(), store).unwrap();
-        // Add capabilities to allow all operations for testing
-        // Use root path to allow all operations on all paths
-        vfs.add_capability(crate::vfs::Capability::Read(PathBuf::from("/")))
-            .unwrap();
-        vfs.add_capability(crate::vfs::Capability::Write(PathBuf::from("/")))
-            .unwrap();
-        vfs.add_capability(crate::vfs::Capability::Execute(PathBuf::from("/")))
-            .unwrap();
+        
+        // For tests, we'll grant capabilities to all the specific paths we'll use
+        let test_paths = vec![
+            "/test/input_test.txt",
+            "/test/skip_test.txt",
+            "/test/output_test.txt",
+            "/test/zeroes_test.txt",
+            "/test/check_write_test.txt",
+            "/test/position_test.txt",
+            "/test/empty.txt",
+            "/test/small.txt",
+            "/test/large_zeroes.txt",
+            "/test/concurrent.txt",
+        ];
+        
+        for path in test_paths {
+            vfs.add_capability(crate::vfs::Capability::Read(PathBuf::from(path)))
+                .unwrap();
+            vfs.add_capability(crate::vfs::Capability::Write(PathBuf::from(path)))
+                .unwrap();
+        }
+        
         Arc::new(Mutex::new(vfs))
     }
 
@@ -257,7 +317,7 @@ mod tests {
         // Create input stream
         let handle = FileHandle {
             vfs_fd: fd as u64,
-            position: 0,
+            position: Arc::new(AtomicU64::new(0)),
             vfs: vfs.clone(),
             writable: false,
         };
@@ -299,19 +359,19 @@ mod tests {
         // Create input stream
         let handle = FileHandle {
             vfs_fd: fd as u64,
-            position: 0,
+            position: Arc::new(AtomicU64::new(0)),
             vfs: vfs.clone(),
             writable: false,
         };
         let mut stream = VfsInputStream::new(handle);
 
-        // Skip 15 bytes
+        // Skip 15 bytes (skips "Skip this part!")
         let skipped = stream.skip_impl(15).unwrap();
         assert_eq!(skipped, 15);
 
-        // Read after skip
+        // Read after skip - should read " Read this" (10 bytes including leading space)
         let data = stream.read_impl(10).unwrap();
-        assert_eq!(&data, b"Read this.");
+        assert_eq!(&data, b" Read this");
 
         // Clean up
         let vfs = vfs.lock().unwrap();
@@ -332,7 +392,7 @@ mod tests {
         // Create output stream
         let handle = FileHandle {
             vfs_fd: fd as u64,
-            position: 0,
+            position: Arc::new(AtomicU64::new(0)),
             vfs: vfs.clone(),
             writable: true,
         };
@@ -371,7 +431,7 @@ mod tests {
         // Create output stream
         let handle = FileHandle {
             vfs_fd: fd as u64,
-            position: 0,
+            position: Arc::new(AtomicU64::new(0)),
             vfs: vfs.clone(),
             writable: true,
         };
@@ -415,7 +475,7 @@ mod tests {
         // Create writable output stream
         let handle = FileHandle {
             vfs_fd: fd as u64,
-            position: 0,
+            position: Arc::new(AtomicU64::new(0)),
             vfs: vfs.clone(),
             writable: true,
         };
@@ -428,7 +488,7 @@ mod tests {
         // Create read-only stream
         let ro_handle = FileHandle {
             vfs_fd: fd as u64,
-            position: 0,
+            position: Arc::new(AtomicU64::new(0)),
             vfs: vfs.clone(),
             writable: false,
         };
@@ -478,7 +538,7 @@ mod tests {
         // Create input stream
         let handle = FileHandle {
             vfs_fd: fd as u64,
-            position: 5, // Start at position 5
+            position: Arc::new(AtomicU64::new(5)), // Start at position 5
             vfs: vfs.clone(),
             writable: false,
         };
@@ -491,6 +551,191 @@ mod tests {
         // Position should have advanced
         let data = stream.read_impl(4).unwrap();
         assert_eq!(&data, b"9ABC");
+
+        // Clean up
+        let vfs = vfs.lock().unwrap();
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_edge_cases_empty_read() {
+        let vfs = create_test_vfs();
+
+        // Create an empty file
+        let path = PathBuf::from("/test/empty.txt");
+        {
+            let vfs = vfs.lock().unwrap();
+            let fd = vfs.create(&path).unwrap();
+            vfs.close(fd).unwrap();
+        }
+
+        // Open file for reading
+        let fd = {
+            let vfs = vfs.lock().unwrap();
+            vfs.open(&path, false).unwrap()
+        };
+
+        // Create input stream
+        let handle = FileHandle {
+            vfs_fd: fd as u64,
+            position: Arc::new(AtomicU64::new(0)),
+            vfs: vfs.clone(),
+            writable: false,
+        };
+        let mut stream = VfsInputStream::new(handle);
+
+        // Read from empty file should return empty
+        let data = stream.read_impl(10).unwrap();
+        assert_eq!(data.len(), 0);
+
+        // Clean up
+        let vfs = vfs.lock().unwrap();
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_skip_beyond_eof() {
+        let vfs = create_test_vfs();
+
+        // Create a small file
+        let test_content = b"12345";
+        let path = PathBuf::from("/test/small.txt");
+        {
+            let vfs = vfs.lock().unwrap();
+            let fd = vfs.create(&path).unwrap();
+            vfs.write(fd, test_content).unwrap();
+            vfs.close(fd).unwrap();
+        }
+
+        // Open file for reading
+        let fd = {
+            let vfs = vfs.lock().unwrap();
+            vfs.open(&path, false).unwrap()
+        };
+
+        // Create input stream
+        let handle = FileHandle {
+            vfs_fd: fd as u64,
+            position: Arc::new(AtomicU64::new(0)),
+            vfs: vfs.clone(),
+            writable: false,
+        };
+        let mut stream = VfsInputStream::new(handle);
+
+        // Skip beyond EOF should be limited
+        let skipped = stream.skip_impl(100).unwrap();
+        assert_eq!(skipped, 5); // Should only skip to EOF
+
+        // Further skips should return 0
+        let skipped = stream.skip_impl(10).unwrap();
+        assert_eq!(skipped, 0);
+
+        // Clean up
+        let vfs = vfs.lock().unwrap();
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_large_write_zeroes() {
+        let vfs = create_test_vfs();
+
+        // Create a file for writing
+        let path = PathBuf::from("/test/large_zeroes.txt");
+        let fd = {
+            let vfs = vfs.lock().unwrap();
+            vfs.create(&path).unwrap()
+        };
+
+        // Create output stream
+        let handle = FileHandle {
+            vfs_fd: fd as u64,
+            position: Arc::new(AtomicU64::new(0)),
+            vfs: vfs.clone(),
+            writable: true,
+        };
+        let mut stream = VfsOutputStream::new(handle);
+
+        // Write a large number of zeroes (testing chunked implementation)
+        let large_size = 256 * 1024; // 256KB
+        stream.write_zeroes(large_size).unwrap();
+
+        // Verify size
+        {
+            let vfs = vfs.lock().unwrap();
+            // Get file size by seeking to end
+            let file_size = vfs.seek(fd, SeekFrom::End(0)).unwrap();
+            assert_eq!(file_size, large_size);
+            
+            // Verify content is all zeroes
+            vfs.seek(fd, SeekFrom::Start(0)).unwrap();
+            let mut buffer = vec![0xff; 1024]; // Initialize with non-zero
+            let bytes_read = vfs.read(fd, &mut buffer).unwrap();
+            assert_eq!(bytes_read, 1024);
+            assert!(buffer.iter().all(|&b| b == 0));
+        }
+
+        // Clean up
+        let vfs = vfs.lock().unwrap();
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_concurrent_position_updates() {
+        use std::thread;
+        
+        let vfs = create_test_vfs();
+
+        // Create a file with test content
+        let test_content = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let path = PathBuf::from("/test/concurrent.txt");
+        {
+            let vfs = vfs.lock().unwrap();
+            let fd = vfs.create(&path).unwrap();
+            vfs.write(fd, test_content).unwrap();
+            vfs.close(fd).unwrap();
+        }
+
+        // Open file for reading
+        let fd = {
+            let vfs = vfs.lock().unwrap();
+            vfs.open(&path, false).unwrap()
+        };
+
+        // Create shared position
+        let position = Arc::new(AtomicU64::new(0));
+
+        // Spawn multiple threads reading from the same handle
+        let mut handles = vec![];
+        for _ in 0..3 {
+            let handle = FileHandle {
+                vfs_fd: fd as u64,
+                position: Arc::clone(&position),
+                vfs: vfs.clone(),
+                writable: false,
+            };
+            
+            let h = thread::spawn(move || {
+                let mut stream = VfsInputStream::new(handle);
+                let mut all_data = Vec::new();
+                for _ in 0..3 {
+                    let data = stream.read_impl(2).unwrap_or_default();
+                    all_data.extend_from_slice(&data);
+                }
+                all_data
+            });
+            handles.push(h);
+        }
+
+        // Wait for all threads and collect results
+        let results: Vec<Vec<u8>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        
+        // Total bytes read should be consistent
+        let total_bytes: usize = results.iter().map(|r| r.len()).sum();
+        assert!(total_bytes <= test_content.len());
+
+        // Final position should match total bytes read
+        let final_pos = position.load(Ordering::SeqCst);
+        assert_eq!(final_pos as usize, total_bytes);
 
         // Clean up
         let vfs = vfs.lock().unwrap();

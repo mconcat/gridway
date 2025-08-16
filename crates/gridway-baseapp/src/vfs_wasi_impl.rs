@@ -9,6 +9,7 @@ use crate::vfs::{Capability, VfsError, VirtualFilesystem};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::bindings::filesystem::{preopens, types as fs_types};
 use wasmtime_wasi::p2::bindings::io::poll::{self as io_poll};
@@ -777,7 +778,7 @@ impl fs_types::HostDescriptor for VfsFilesystem {
                 DescriptorKind::File {
                     handle: FileHandle {
                         vfs_fd,
-                        position: 0,
+                        position: Arc::new(AtomicU64::new(0)),
                         vfs: self.vfs.clone(),
                         writable: needs_write, // Map WRITE flag to writable
                     },
@@ -1038,8 +1039,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         match self.descriptors.get(&fd).cloned() {
             Some(DescriptorKind::File { handle }) => {
                 // Create a new file handle with the specified offset
-                let mut stream_handle = handle.clone();
-                stream_handle.position = offset;
+                let stream_handle = handle.clone();
+                stream_handle.position.store(offset, Ordering::SeqCst);
 
                 // Create the input stream and box it
                 let stream = VfsInputStream::new(stream_handle);
@@ -1075,8 +1076,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
                 }
 
                 // Create a new file handle with the specified offset
-                let mut stream_handle = handle.clone();
-                stream_handle.position = offset;
+                let stream_handle = handle.clone();
+                stream_handle.position.store(offset, Ordering::SeqCst);
 
                 // Create the output stream and box it
                 let stream = VfsOutputStream::new(stream_handle);
@@ -1121,8 +1122,8 @@ impl fs_types::HostDescriptor for VfsFilesystem {
                 };
 
                 // Create a new file handle positioned at end of file
-                let mut stream_handle = handle.clone();
-                stream_handle.position = file_size;
+                let stream_handle = handle.clone();
+                stream_handle.position.store(file_size, Ordering::SeqCst);
 
                 // Create the output stream and box it
                 let stream = VfsOutputStream::new(stream_handle);
