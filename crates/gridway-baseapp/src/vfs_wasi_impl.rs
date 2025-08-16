@@ -38,6 +38,7 @@ struct MountCapabilities {
 }
 
 /// Descriptor kinds in our filesystem
+#[derive(Clone)]
 enum DescriptorKind {
     /// Directory descriptor
     Dir {
@@ -85,18 +86,8 @@ impl DirectoryStream {
     }
 }
 
-/// File handle for open files
-#[derive(Clone)]
-struct FileHandle {
-    /// VFS file descriptor
-    vfs_fd: u64,
-    /// Current position in file
-    position: u64,
-    /// Reference to VFS
-    vfs: Arc<Mutex<VirtualFilesystem>>,
-    /// Whether file is open for writing
-    writable: bool,
-}
+// FileHandle type is imported from vfs_streams_simple module
+use crate::vfs_streams_simple::FileHandle;
 
 /// Our VFS-backed filesystem implementation
 ///
@@ -1037,38 +1028,116 @@ impl fs_types::HostDescriptor for VfsFilesystem {
 
     fn read_via_stream(
         &mut self,
-        _descriptor: Resource<fs_types::Descriptor>,
-        _offset: fs_types::Filesize,
+        descriptor: Resource<fs_types::Descriptor>,
+        offset: fs_types::Filesize,
     ) -> Result<Resource<io_streams::InputStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
     {
-        // Stream support will be added in a future iteration
-        // For now, return unsupported to allow the system to compile
-        Err(fs_types::ErrorCode::Unsupported.into())
+        use crate::vfs_streams_simple::VfsInputStream;
+
+        let fd = descriptor.rep();
+        match self.descriptors.get(&fd).cloned() {
+            Some(DescriptorKind::File { handle }) => {
+                // Create a new file handle with the specified offset
+                let mut stream_handle = handle.clone();
+                stream_handle.position = offset;
+
+                // Create the input stream and box it
+                let stream = VfsInputStream::new(stream_handle);
+                let boxed_stream: Box<dyn wasmtime_wasi::p2::InputStream> = Box::new(stream);
+
+                // Push to resource table and return
+                let resource = self
+                    .table
+                    .push(boxed_stream)
+                    .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
+                Ok(resource)
+            }
+            Some(DescriptorKind::Dir { .. }) => Err(fs_types::ErrorCode::IsDirectory.into()),
+            None => Err(fs_types::ErrorCode::BadDescriptor.into()),
+        }
     }
 
     fn write_via_stream(
         &mut self,
-        _descriptor: Resource<fs_types::Descriptor>,
-        _offset: fs_types::Filesize,
+        descriptor: Resource<fs_types::Descriptor>,
+        offset: fs_types::Filesize,
     ) -> Result<
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-        // Stream support will be added in a future iteration
-        // For now, return unsupported to allow the system to compile
-        Err(fs_types::ErrorCode::Unsupported.into())
+        use crate::vfs_streams_simple::VfsOutputStream;
+
+        let fd = descriptor.rep();
+        match self.descriptors.get(&fd).cloned() {
+            Some(DescriptorKind::File { handle }) => {
+                if !handle.writable {
+                    return Err(fs_types::ErrorCode::Access.into());
+                }
+
+                // Create a new file handle with the specified offset
+                let mut stream_handle = handle.clone();
+                stream_handle.position = offset;
+
+                // Create the output stream and box it
+                let stream = VfsOutputStream::new(stream_handle);
+                let boxed_stream: Box<dyn wasmtime_wasi::p2::OutputStream> = Box::new(stream);
+
+                // Push to resource table and return
+                let resource = self
+                    .table
+                    .push(boxed_stream)
+                    .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
+                Ok(resource)
+            }
+            Some(DescriptorKind::Dir { .. }) => Err(fs_types::ErrorCode::IsDirectory.into()),
+            None => Err(fs_types::ErrorCode::BadDescriptor.into()),
+        }
     }
 
     fn append_via_stream(
         &mut self,
-        _descriptor: Resource<fs_types::Descriptor>,
+        descriptor: Resource<fs_types::Descriptor>,
     ) -> Result<
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-        // Stream support will be added in a future iteration
-        // For now, return unsupported to allow the system to compile
-        Err(fs_types::ErrorCode::Unsupported.into())
+        use crate::vfs_streams_simple::VfsOutputStream;
+
+        let fd = descriptor.rep();
+        match self.descriptors.get(&fd).cloned() {
+            Some(DescriptorKind::File { handle }) => {
+                if !handle.writable {
+                    return Err(fs_types::ErrorCode::Access.into());
+                }
+
+                // For append, get the current file size to set position at end
+                let file_size = {
+                    let vfs = handle.vfs.lock().map_err(|_| {
+                        wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io)
+                    })?;
+                    vfs.stat_by_fd(handle.vfs_fd as u32)
+                        .map(|info| info.size)
+                        .unwrap_or(0)
+                };
+
+                // Create a new file handle positioned at end of file
+                let mut stream_handle = handle.clone();
+                stream_handle.position = file_size;
+
+                // Create the output stream and box it
+                let stream = VfsOutputStream::new(stream_handle);
+                let boxed_stream: Box<dyn wasmtime_wasi::p2::OutputStream> = Box::new(stream);
+
+                // Push to resource table and return
+                let resource = self
+                    .table
+                    .push(boxed_stream)
+                    .map_err(|_| wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::Io))?;
+                Ok(resource)
+            }
+            Some(DescriptorKind::Dir { .. }) => Err(fs_types::ErrorCode::IsDirectory.into()),
+            None => Err(fs_types::ErrorCode::BadDescriptor.into()),
+        }
     }
 }
 
@@ -1104,9 +1173,6 @@ impl fs_types::HostDirectoryEntryStream for VfsFilesystem {
         Ok(())
     }
 }
-
-// FileHandle has been moved to vfs_streams_simple.rs and made public
-// Stream implementations will be added in a future phase
 
 /// Custom context that uses our VFS filesystem
 pub struct VfsWasiContext {
