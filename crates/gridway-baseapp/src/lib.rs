@@ -15,6 +15,7 @@ pub mod module_router;
 pub mod prefixed_kvstore_resource;
 pub mod vfs;
 pub mod vfs_host;
+pub mod vfs_streams;
 pub mod vfs_streams_simple;
 pub mod vfs_wasi_adapter;
 pub mod vfs_wasi_impl;
@@ -32,6 +33,10 @@ mod test_kvstore_integration;
 mod test_prefixed_kvstore;
 #[cfg(test)]
 mod test_vfs_debug;
+#[cfg(test)]
+mod test_vfs_streams_creation;
+#[cfg(test)]
+mod test_vfs_streams_simple;
 #[cfg(test)]
 mod test_vfs_wasi_impl;
 #[cfg(test)]
