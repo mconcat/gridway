@@ -693,6 +693,23 @@ impl VirtualFilesystem {
         }
     }
 
+    /// Get the size of an open file
+    pub fn get_size(&self, fd: u32) -> Result<u64> {
+        debug!("Getting size for fd:: {}", fd);
+
+        let fds = self
+            .file_descriptors
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        let file_desc = fds.get(&fd).ok_or(VfsError::FdNotFound(fd))?;
+
+        // Return the size of the content buffer
+        let size = file_desc.content.len() as u64;
+        debug!("File size for fd:: {} is {} bytes", fd, size);
+        Ok(size)
+    }
+
     /// Close a file descriptor and flush changes to store
     pub fn close(&self, fd: u32) -> Result<()> {
         debug!("Closing fd:: {}", fd);
