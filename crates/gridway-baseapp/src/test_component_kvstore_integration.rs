@@ -5,9 +5,9 @@ mod tests {
     use gridway_store::{KVStore, MemStore};
     use std::sync::{Arc, Mutex};
 
-    #[test]
+    #[tokio::test]
     #[ignore = "Requires kvstore interface which is being removed"]
-    fn test_component_kvstore_isolation() {
+    async fn test_component_kvstore_isolation() {
         // Create a base store
         let base_store = Arc::new(Mutex::new(MemStore::new()));
         let host = ComponentHost::new(base_store.clone()).unwrap();
@@ -87,6 +87,7 @@ mod tests {
                 1_000_000,    // gas_limit
                 vec![],       // No byzantine validators
             )
+            .await
             .unwrap();
 
         assert!(begin_result.gas_used > 0);
@@ -108,6 +109,7 @@ mod tests {
                 "test-chain", // chain_id
                 1_000_000,    // gas_limit
             )
+            .await
             .unwrap();
 
         assert!(end_result.gas_used > 0);
@@ -129,9 +131,9 @@ mod tests {
         }
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore = "Requires kvstore interface which is being removed"]
-    fn test_component_kvstore_persistence() {
+    async fn test_component_kvstore_persistence() {
         let base_store = Arc::new(Mutex::new(MemStore::new()));
         let host = ComponentHost::new(base_store.clone()).unwrap();
 
@@ -168,6 +170,7 @@ mod tests {
                 1_000_000,    // gas_limit
                 vec![],
             )
+            .await
             .unwrap();
         assert!(result1.gas_used > 0);
 
@@ -180,6 +183,7 @@ mod tests {
                 1_000_000,    // gas_limit
                 vec![],
             )
+            .await
             .unwrap();
         assert!(result2.gas_used > 0);
 

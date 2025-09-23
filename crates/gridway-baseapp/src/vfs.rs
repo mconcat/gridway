@@ -88,7 +88,7 @@ pub struct FileInfo {
 }
 
 /// File descriptor representing an open file in the VFS
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileDescriptor {
     /// Unique file descriptor ID
     pub fd: u32,
@@ -201,6 +201,12 @@ impl VirtualFilesystem {
         Ok(())
     }
 
+    /// Get a store by namespace
+    pub fn get_store(&self, namespace: &str) -> Option<Arc<Mutex<dyn KVStore>>> {
+        let stores = self.stores.lock().ok()?;
+        stores.get(namespace).cloned()
+    }
+
     /// Mount an interface at a specific path
     pub fn mount(&self, path: PathBuf, mount: Mount) -> Result<()> {
         debug!("Mounting interface at path:: {}", path.display());
@@ -259,8 +265,37 @@ impl VirtualFilesystem {
         }
     }
 
+    /// Check if a namespace has any keys with the given prefix (excluding directory markers)
+    pub fn has_prefix(&self, namespace: &str, prefix: &[u8]) -> Result<bool> {
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        if let Some(store) = stores.get(namespace) {
+            let store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+
+            let iter = store.prefix_iterator(prefix);
+
+            // Check if there are any non-directory-marker entries
+            for (key, value) in iter {
+                // Skip directory markers (keys ending with '/' and empty values)
+                if key.ends_with(b"/") && value.is_empty() {
+                    continue;
+                }
+                // Found a real file or non-empty entry
+                return Ok(true);
+            }
+            Ok(false)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Parse a virtual path into namespace and key components
-    fn parse_path(&self, path: &Path) -> Result<(String, Vec<u8>)> {
+    pub fn parse_path(&self, path: &Path) -> Result<(String, Vec<u8>)> {
         let mounts = self
             .mounts
             .lock()
@@ -353,16 +388,45 @@ impl VirtualFilesystem {
             .clone();
         drop(stores);
 
+        // Create file descriptor
+        let fd = self.next_fd_id()?;
+
+        // Check if this is a directory (empty key)
+        if key.is_empty() {
+            // Directory open - no content to read
+            let file_desc = FileDescriptor::new(fd, path.to_path_buf(), namespace, key, writable);
+
+            let mut fds = self
+                .file_descriptors
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+            fds.insert(fd, file_desc);
+
+            info!(
+                "Successfully opened directory:: {} with fd:: {}",
+                path.display(),
+                fd
+            );
+            return Ok(fd);
+        }
+
         // Read current content if file exists
         let content = {
             let store = store
                 .lock()
                 .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
-            store.get(&key)?.unwrap_or_default()
+
+            // If not writable (i.e., not creating), file must exist
+            if !writable {
+                store
+                    .get(&key)?
+                    .ok_or_else(|| VfsError::PathNotFound(path.to_string_lossy().to_string()))?
+            } else {
+                // If writable, create empty file if doesn't exist
+                store.get(&key)?.unwrap_or_default()
+            }
         };
 
-        // Create file descriptor
-        let fd = self.next_fd_id()?;
         let mut file_desc = FileDescriptor::new(fd, path.to_path_buf(), namespace, key, writable);
         file_desc.content = content;
 
@@ -629,6 +693,23 @@ impl VirtualFilesystem {
         }
     }
 
+    /// Get the size of an open file
+    pub fn get_size(&self, fd: u32) -> Result<u64> {
+        debug!("Getting size for fd:: {}", fd);
+
+        let fds = self
+            .file_descriptors
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        let file_desc = fds.get(&fd).ok_or(VfsError::FdNotFound(fd))?;
+
+        // Return the size of the content buffer
+        let size = file_desc.content.len() as u64;
+        debug!("File size for fd:: {} is {} bytes", fd, size);
+        Ok(size)
+    }
+
     /// Close a file descriptor and flush changes to store
     pub fn close(&self, fd: u32) -> Result<()> {
         debug!("Closing fd:: {}", fd);
@@ -640,7 +721,7 @@ impl VirtualFilesystem {
 
         let file_desc = fds.remove(&fd).ok_or(VfsError::FdNotFound(fd))?;
 
-        // If file was writable and has content, write back to store
+        // If file was writable, write back to store (even if empty)
         if file_desc.writable && !file_desc.key.is_empty() {
             let stores = self
                 .stores
@@ -703,6 +784,170 @@ impl VirtualFilesystem {
         self.open(path, true)
     }
 
+    /// Get a file descriptor by ID (read-only)
+    pub fn get_file_descriptor(&self, fd: u32) -> Option<FileDescriptor> {
+        let fds = self.file_descriptors.lock().ok()?;
+        fds.get(&fd).cloned()
+    }
+    
+    /// Get a mutable reference to a file descriptor
+    pub fn get_file_descriptor_mut(&mut self, _fd: u32) -> Option<&mut FileDescriptor> {
+        // This is more complex - for now return None and update stream implementation
+        // In production, this would need careful synchronization
+        None
+    }
+
+    /// Set the size of a file (truncate or extend)
+    pub fn set_size(&self, fd: u32, new_size: u64) -> Result<()> {
+        debug!("Setting size of fd:: {} to {}", fd, new_size);
+
+        let mut fds = self
+            .file_descriptors
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        let file_desc = fds.get_mut(&fd).ok_or(VfsError::FdNotFound(fd))?;
+
+        if !file_desc.writable {
+            return Err(VfsError::AccessDenied(
+                "File not open for writing".to_string(),
+            ));
+        }
+
+        if file_desc.key.is_empty() {
+            return Err(VfsError::InvalidOperation(
+                "Cannot set size of directory".to_string(),
+            ));
+        }
+
+        // Resize the content buffer
+        file_desc.content.resize(new_size as usize, 0);
+
+        // If position is beyond new size, reset it
+        if file_desc.position > new_size {
+            file_desc.position = new_size;
+        }
+
+        // For truncation operations, write back to store immediately
+        // This ensures WASI consistency - truncation is a structural change that
+        // must be immediately visible to maintain filesystem semantics, unlike
+        // regular writes which can be buffered until close() for performance
+        if file_desc.writable && !file_desc.key.is_empty() {
+            let namespace = file_desc.namespace.clone();
+            let key = file_desc.key.clone();
+            let content = file_desc.content.clone();
+
+            drop(fds); // Release the file descriptor lock before acquiring store lock
+
+            let stores = self
+                .stores
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+            let store = stores
+                .get(&namespace)
+                .ok_or_else(|| {
+                    VfsError::PathNotFound(format!("Namespace not found:: {namespace}"))
+                })?
+                .clone();
+            drop(stores);
+
+            let mut store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store.set(&key, &content)?;
+        }
+
+        debug!("Set size of fd:: {} to {}", fd, new_size);
+        Ok(())
+    }
+
+    /// Check if a file exists at the given path
+    pub fn exists(&self, path: &Path) -> bool {
+        debug!("Checking existence of path:: {}", path.display());
+
+        // Try to parse the path
+        let (namespace, key) = match self.parse_path(path) {
+            Ok(result) => result,
+            Err(_) => return false,
+        };
+
+        // Check if the namespace exists
+        let stores = match self.stores.lock() {
+            Ok(stores) => stores,
+            Err(_) => return false,
+        };
+
+        let store = match stores.get(&namespace) {
+            Some(store) => store.clone(),
+            None => return false,
+        };
+        drop(stores);
+
+        // Check if the key exists in the store
+        let store = match store.lock() {
+            Ok(store) => store,
+            Err(_) => return false,
+        };
+
+        // For directories, check if it's a directory marker or has entries
+        if key.is_empty() || key.ends_with(b"/") {
+            // Check for directory marker
+            if store.has(&key).unwrap_or(false) {
+                return true;
+            }
+            // Check if there are any entries with this prefix
+            let prefix = if key.ends_with(b"/") {
+                key.clone()
+            } else {
+                let mut p = key.clone();
+                p.push(b'/');
+                p
+            };
+            let mut iter = store.prefix_iterator(&prefix);
+            iter.next().is_some()
+        } else {
+            // For files, just check if the key exists
+            store.has(&key).unwrap_or(false)
+        }
+    }
+
+    /// Create a directory (logical operation in KV store)
+    pub fn create_directory(&self, path: &Path) -> Result<()> {
+        debug!("Creating directory:: {}", path.display());
+
+        // Check write access
+        self.check_access(path, "write")?;
+
+        let (namespace, key) = self.parse_path(path)?;
+
+        // In a KV store, directories are implicit
+        // We can optionally create a marker entry
+        if !key.is_empty() {
+            let stores = self
+                .stores
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+            let store = stores
+                .get(&namespace)
+                .ok_or_else(|| {
+                    VfsError::PathNotFound(format!("Namespace not found:: {namespace}"))
+                })?
+                .clone();
+            drop(stores);
+
+            // Create a directory marker (empty value)
+            let mut dir_key = key.clone();
+            dir_key.push(b'/');
+            let mut store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store.set(&dir_key, &[])?;
+        }
+
+        info!("Successfully created directory:: {}", path.display());
+        Ok(())
+    }
+
     /// Delete a file
     pub fn unlink(&self, path: &Path) -> Result<()> {
         debug!("Deleting file:: {}", path.display());
@@ -735,6 +980,196 @@ impl VirtualFilesystem {
 
         info!("Successfully deleted file:: {}", path.display());
         Ok(())
+    }
+
+    /// Remove an empty directory
+    ///
+    /// Returns an error if:
+    /// - The directory doesn't exist (ENOENT)
+    /// - The directory is not empty (ENOTEMPTY)
+    /// - Access is denied
+    pub fn remove_directory(&self, path: &Path) -> Result<()> {
+        debug!("Removing directory:: {}", path.display());
+
+        // Check write access
+        self.check_access(path, "write")?;
+
+        let (namespace, key_prefix) = self.parse_path(path)?;
+
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+        let store = stores
+            .get(&namespace)
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found:: {namespace}")))?
+            .clone();
+        drop(stores);
+
+        // Check if directory exists and is empty
+        let mut dir_key = key_prefix.clone();
+        if !key_prefix.is_empty() {
+            dir_key.push(b'/');
+        }
+
+        let directory_exists = {
+            let store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+
+            // Check if directory marker exists
+            let has_marker = store.has(&dir_key)?;
+
+            // Check for any files with this prefix (excluding the marker itself)
+            let mut has_files = false;
+            for (key, value) in store.prefix_iterator(&key_prefix) {
+                // Skip the directory marker itself
+                if key == dir_key && value.is_empty() {
+                    continue;
+                }
+                has_files = true;
+                break;
+            }
+
+            if has_files {
+                return Err(VfsError::DirectoryNotEmpty(
+                    path.to_string_lossy().to_string(),
+                ));
+            }
+
+            has_marker
+        };
+
+        // If directory doesn't exist (no marker and no files), return error
+        if !directory_exists {
+            return Err(VfsError::PathNotFound(format!(
+                "Directory not found: {}",
+                path.display()
+            )));
+        }
+
+        // Remove directory marker
+        if !key_prefix.is_empty() {
+            let mut store = store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store.delete(&dir_key)?;
+        }
+
+        info!("Successfully removed directory:: {}", path.display());
+        Ok(())
+    }
+
+    /// Rename/move a file or directory
+    ///
+    /// ## Overwrite Behavior
+    /// If the destination path already exists, it will be overwritten.
+    /// This matches POSIX rename(2) semantics where the destination is atomically replaced.
+    ///
+    /// ## Implementation Note
+    /// Currently implemented as copy+delete which is not atomic. A true atomic
+    /// rename would require transaction support in the underlying store.
+    pub fn rename(&self, old_path: &Path, new_path: &Path) -> Result<()> {
+        debug!("Renaming {} to {}", old_path.display(), new_path.display());
+
+        // Check access
+        self.check_access(old_path, "read")?;
+        self.check_access(old_path, "write")?;
+        self.check_access(new_path, "write")?;
+
+        let (old_namespace, old_key) = self.parse_path(old_path)?;
+        let (new_namespace, new_key) = self.parse_path(new_path)?;
+
+        // Get the stores
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        let old_store = stores
+            .get(&old_namespace)
+            .ok_or_else(|| {
+                VfsError::PathNotFound(format!("Namespace not found:: {old_namespace}"))
+            })?
+            .clone();
+
+        let new_store = if old_namespace == new_namespace {
+            old_store.clone()
+        } else {
+            stores
+                .get(&new_namespace)
+                .ok_or_else(|| {
+                    VfsError::PathNotFound(format!("Namespace not found:: {new_namespace}"))
+                })?
+                .clone()
+        };
+        drop(stores);
+
+        // Read content from old location
+        let content = {
+            let store = old_store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store
+                .get(&old_key)?
+                .ok_or_else(|| VfsError::PathNotFound(old_path.to_string_lossy().to_string()))?
+        };
+
+        // Write to new location (overwrites if exists)
+        {
+            let mut store = new_store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store.set(&new_key, &content)?;
+        }
+
+        // Delete from old location
+        {
+            let mut store = old_store
+                .lock()
+                .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+            store.delete(&old_key)?;
+        }
+
+        info!(
+            "Successfully renamed {} to {}",
+            old_path.display(),
+            new_path.display()
+        );
+        Ok(())
+    }
+
+    /// Get file information by file descriptor
+    ///
+    /// This helper method returns FileInfo (size and type) based on the
+    /// current content/state of an open file descriptor.
+    pub fn stat_by_fd(&self, fd: u32) -> Result<FileInfo> {
+        debug!("Getting stat for fd:: {}", fd);
+
+        let fds = self
+            .file_descriptors
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+
+        let file_desc = fds.get(&fd).ok_or(VfsError::FdNotFound(fd))?;
+
+        // Check if it's a directory (empty key means directory)
+        if file_desc.key.is_empty() {
+            Ok(FileInfo {
+                file_type: FileType::Directory,
+                size: 0, // Directories always have size 0
+                modified: SystemTime::now(),
+                path: file_desc.path.clone(),
+            })
+        } else {
+            // For files, return the size based on current content buffer
+            Ok(FileInfo {
+                file_type: FileType::File,
+                size: file_desc.content.len() as u64,
+                modified: SystemTime::now(),
+                path: file_desc.path.clone(),
+            })
+        }
     }
 
     /// List all open file descriptors (for debugging)
@@ -926,6 +1361,108 @@ mod tests {
             .unwrap();
         let dir_info = vfs.stat(&dir_path).unwrap();
         assert_eq!(dir_info.file_type, FileType::Directory);
+    }
+
+    #[test]
+    fn test_stat_by_fd() {
+        let vfs = setup_test_vfs();
+
+        // Test file stat by fd
+        let path = PathBuf::from("/auth/test_file");
+        vfs.add_capability(Capability::Write(path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(path.clone())).unwrap();
+
+        // Create a file and write data
+        let fd = vfs.create(&path).unwrap();
+        let test_data = b"This is test data for stat_by_fd";
+        vfs.write(fd, test_data).unwrap();
+
+        // Get stat by fd before closing
+        let stat = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat.file_type, FileType::File);
+        assert_eq!(stat.size, test_data.len() as u64);
+        assert_eq!(stat.path, path);
+
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_stat_by_fd_directory() {
+        let vfs = setup_test_vfs();
+
+        // Test directory stat by fd
+        let dir_path = PathBuf::from("/auth/");
+        vfs.add_capability(Capability::Read(dir_path.clone()))
+            .unwrap();
+
+        let fd = vfs.open(&dir_path, false).unwrap();
+
+        // Get stat by fd for directory
+        let stat = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat.file_type, FileType::Directory);
+        assert_eq!(stat.size, 0); // Directories always have size 0
+        assert_eq!(stat.path, dir_path);
+
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_stat_by_fd_after_write() {
+        let vfs = setup_test_vfs();
+
+        let path = PathBuf::from("/bank/account");
+        vfs.add_capability(Capability::Write(path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(path.clone())).unwrap();
+
+        // Create file and get initial stat
+        let fd = vfs.create(&path).unwrap();
+        let stat1 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat1.size, 0); // Empty file initially
+
+        // Write some data
+        let data1 = b"initial data";
+        vfs.write(fd, data1).unwrap();
+        let stat2 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat2.size, data1.len() as u64);
+
+        // Write more data (appending)
+        let data2 = b" and more data";
+        vfs.write(fd, data2).unwrap();
+        let stat3 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat3.size, (data1.len() + data2.len()) as u64);
+
+        vfs.close(fd).unwrap();
+    }
+
+    #[test]
+    fn test_stat_by_fd_after_set_size() {
+        let vfs = setup_test_vfs();
+
+        let path = PathBuf::from("/auth/resizable");
+        vfs.add_capability(Capability::Write(path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(path.clone())).unwrap();
+
+        let fd = vfs.create(&path).unwrap();
+
+        // Write some initial data
+        let data = b"test data for resizing";
+        vfs.write(fd, data).unwrap();
+
+        // Check initial size
+        let stat1 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat1.size, data.len() as u64);
+
+        // Truncate the file
+        vfs.set_size(fd, 5).unwrap();
+        let stat2 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat2.size, 5);
+
+        // Extend the file
+        vfs.set_size(fd, 100).unwrap();
+        let stat3 = vfs.stat_by_fd(fd).unwrap();
+        assert_eq!(stat3.size, 100);
+
+        vfs.close(fd).unwrap();
     }
 
     #[test]

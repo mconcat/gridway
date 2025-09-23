@@ -14,6 +14,11 @@ pub mod module_governance;
 pub mod module_router;
 pub mod prefixed_kvstore_resource;
 pub mod vfs;
+pub mod vfs_host;
+pub mod vfs_streams;
+pub mod vfs_streams_simple;
+pub mod vfs_wasi_adapter;
+pub mod vfs_wasi_impl;
 pub mod wasi_host;
 
 #[cfg(test)]
@@ -26,6 +31,14 @@ mod test_component_kvstore_integration;
 mod test_kvstore_integration;
 #[cfg(test)]
 mod test_prefixed_kvstore;
+#[cfg(test)]
+mod test_vfs_debug;
+#[cfg(test)]
+mod test_vfs_streams_creation;
+#[cfg(test)]
+mod test_vfs_streams_simple;
+#[cfg(test)]
+mod test_vfs_wasi_impl;
 #[cfg(test)]
 mod test_wasi;
 #[cfg(test)]
@@ -472,13 +485,15 @@ impl BaseApp {
                     .load_component("begin-blocker", &component_bytes, info)
                 {
                     Ok(_) => {
-                        match self.component_host.execute_begin_blocker(
+                        // Block on async execution since this is called from sync context
+                        let runtime = tokio::runtime::Handle::current();
+                        match runtime.block_on(self.component_host.execute_begin_blocker(
                             height,
                             time,
                             chain_id,
                             1_000_000,
                             vec![],
-                        ) {
+                        )) {
                             Ok(result) => {
                                 if !result.success {
                                     return Err(BaseAppError::AbciError(
@@ -663,10 +678,12 @@ impl BaseApp {
                     .load_component("end-blocker", &component_bytes, info)
                 {
                     Ok(_) => {
-                        match self
-                            .component_host
-                            .execute_end_blocker(height, time, chain_id, 1_000_000)
-                        {
+                        // Block on async execution since this is called from sync context
+                        let runtime = tokio::runtime::Handle::current();
+                        match runtime.block_on(
+                            self.component_host
+                                .execute_end_blocker(height, time, chain_id, 1_000_000),
+                        ) {
                             Ok(result) => {
                                 if !result.success {
                                     return Err(BaseAppError::AbciError(
@@ -951,12 +968,14 @@ impl BaseApp {
                 .load_component("tx-decoder", &component_bytes, info)
             {
                 Ok(_) => {
-                    match self.component_host.execute_tx_decoder(
+                    // Block on async execution since this is called from sync context
+                    let runtime = tokio::runtime::Handle::current();
+                    match runtime.block_on(self.component_host.execute_tx_decoder(
                         "tx-decoder",
                         &request.tx_bytes,
                         &request.encoding,
                         request.validate,
-                    ) {
+                    )) {
                         Ok(result) => {
                             if !result.success {
                                 return Err(BaseAppError::TxFailed(
@@ -1639,7 +1658,14 @@ mod tests {
             Ok(_) => {
                 println!("Component loaded successfully");
                 // Test tx decoder execution
-                match component_host.execute_tx_decoder("tx-decoder", "dGVzdA==", "base64", false) {
+                // Block on async execution since this is called from sync context
+                let runtime = tokio::runtime::Handle::current();
+                match runtime.block_on(component_host.execute_tx_decoder(
+                    "tx-decoder",
+                    "dGVzdA==",
+                    "base64",
+                    false,
+                )) {
                     Ok(result) => {
                         println!("Exit code:: {}", result.exit_code);
                         println!("Stdout:: {}", String::from_utf8_lossy(&result.stdout));
@@ -1700,12 +1726,14 @@ mod tests {
             Ok(_) => {
                 println!("Component loaded successfully");
                 // Test tx decoder execution with the same data
-                match component_host.execute_tx_decoder(
+                // Block on async execution since this is called from sync context
+                let runtime = tokio::runtime::Handle::current();
+                match runtime.block_on(component_host.execute_tx_decoder(
                     "tx-decoder",
                     "dGVzdCB0cmFuc2FjdGlvbg==",
                     "base64",
                     false,
-                ) {
+                )) {
                     Ok(result) => {
                         println!("Exit code:: {}", result.exit_code);
                         println!("Stdout:: {}", String::from_utf8_lossy(&result.stdout));
