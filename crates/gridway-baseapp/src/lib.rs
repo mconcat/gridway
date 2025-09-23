@@ -34,6 +34,10 @@ mod test_prefixed_kvstore;
 #[cfg(test)]
 mod test_vfs_debug;
 #[cfg(test)]
+mod test_vfs_streams_creation;
+#[cfg(test)]
+mod test_vfs_streams_simple;
+#[cfg(test)]
 mod test_vfs_wasi_impl;
 #[cfg(test)]
 mod test_wasi;

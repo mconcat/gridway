@@ -88,7 +88,7 @@ pub struct FileInfo {
 }
 
 /// File descriptor representing an open file in the VFS
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileDescriptor {
     /// Unique file descriptor ID
     pub fd: u32,
@@ -782,6 +782,19 @@ impl VirtualFilesystem {
 
         // Open file for writing (creates empty file)
         self.open(path, true)
+    }
+
+    /// Get a file descriptor by ID (read-only)
+    pub fn get_file_descriptor(&self, fd: u32) -> Option<FileDescriptor> {
+        let fds = self.file_descriptors.lock().ok()?;
+        fds.get(&fd).cloned()
+    }
+    
+    /// Get a mutable reference to a file descriptor
+    pub fn get_file_descriptor_mut(&mut self, _fd: u32) -> Option<&mut FileDescriptor> {
+        // This is more complex - for now return None and update stream implementation
+        // In production, this would need careful synchronization
+        None
     }
 
     /// Set the size of a file (truncate or extend)
