@@ -8,8 +8,8 @@
 use crate::vfs::{Capability, VfsError, VirtualFilesystem};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::bindings::filesystem::{preopens, types as fs_types};
 use wasmtime_wasi::p2::bindings::io::poll::{self as io_poll};

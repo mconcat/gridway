@@ -449,9 +449,10 @@ impl io_streams::HostInputStream for VfsWasiAdapter {
             .get_mut::<Box<dyn wasmtime_wasi::p2::InputStream>>(&stream)
             .map_err(|e| {
                 // Better error reporting: distinguish between invalid resource and other errors
-                wasmtime_wasi::p2::StreamError::LastOperationFailed(
-                    anyhow::anyhow!("Failed to get input stream from resource table: {}", e)
-                )
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get input stream from resource table: {}",
+                    e
+                ))
             })?;
 
         // Read from the stream
@@ -489,9 +490,10 @@ impl io_streams::HostInputStream for VfsWasiAdapter {
             .table()
             .get_mut::<Box<dyn wasmtime_wasi::p2::InputStream>>(&stream)
             .map_err(|e| {
-                wasmtime_wasi::p2::StreamError::LastOperationFailed(
-                    anyhow::anyhow!("Failed to get input stream from resource table: {}", e)
-                )
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get input stream from resource table: {}",
+                    e
+                ))
             })?;
 
         // Skip bytes in the stream
@@ -539,9 +541,10 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
             .table()
             .get_mut::<Box<dyn wasmtime_wasi::p2::OutputStream>>(&stream)
             .map_err(|e| {
-                wasmtime_wasi::p2::StreamError::LastOperationFailed(
-                    anyhow::anyhow!("Failed to get output stream from resource table: {}", e)
-                )
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get output stream from resource table: {}",
+                    e
+                ))
             })?;
 
         // Write to the stream
@@ -560,9 +563,10 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
             .table()
             .get_mut::<Box<dyn wasmtime_wasi::p2::OutputStream>>(&stream)
             .map_err(|e| {
-                wasmtime_wasi::p2::StreamError::LastOperationFailed(
-                    anyhow::anyhow!("Failed to get output stream from resource table: {}", e)
-                )
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get output stream from resource table: {}",
+                    e
+                ))
             })?;
 
         // Write and flush
@@ -581,9 +585,10 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
             .table()
             .get_mut::<Box<dyn wasmtime_wasi::p2::OutputStream>>(&stream)
             .map_err(|e| {
-                wasmtime_wasi::p2::StreamError::LastOperationFailed(
-                    anyhow::anyhow!("Failed to get output stream from resource table: {}", e)
-                )
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get output stream from resource table: {}",
+                    e
+                ))
             })?;
 
         // Flush the stream
@@ -608,9 +613,10 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
             .table()
             .get_mut::<Box<dyn wasmtime_wasi::p2::OutputStream>>(&stream)
             .map_err(|e| {
-                wasmtime_wasi::p2::StreamError::LastOperationFailed(
-                    anyhow::anyhow!("Failed to get output stream from resource table: {}", e)
-                )
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get output stream from resource table: {}",
+                    e
+                ))
             })?;
 
         // Check how much can be written

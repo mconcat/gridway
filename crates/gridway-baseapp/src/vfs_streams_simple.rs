@@ -7,8 +7,8 @@
 use crate::vfs::VirtualFilesystem;
 use bytes::Bytes;
 use std::io::SeekFrom;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use wasmtime_wasi::p2::StreamError;
 use wasmtime_wasi_io::poll::Pollable;
 use wasmtime_wasi_io::streams::{
@@ -76,16 +76,13 @@ impl VfsInputStream {
     /// Read data from the stream (implementation)
     pub fn read_impl(&mut self, len: usize) -> Result<Vec<u8>, StreamError> {
         let vfs = self.handle.vfs.lock().map_err(|_| StreamError::Closed)?;
-        
+
         // Get current position atomically
         let current_pos = self.handle.position.load(Ordering::SeqCst);
 
         // Seek to current position
         if vfs
-            .seek(
-                self.handle.vfs_fd as u32,
-                SeekFrom::Start(current_pos),
-            )
+            .seek(self.handle.vfs_fd as u32, SeekFrom::Start(current_pos))
             .is_err()
         {
             return Err(StreamError::Closed);
@@ -96,7 +93,9 @@ impl VfsInputStream {
         match vfs.read(self.handle.vfs_fd as u32, &mut buffer) {
             Ok(bytes_read) => {
                 // Update position atomically
-                self.handle.position.fetch_add(bytes_read as u64, Ordering::SeqCst);
+                self.handle
+                    .position
+                    .fetch_add(bytes_read as u64, Ordering::SeqCst);
                 // Truncate buffer to actual bytes read
                 buffer.truncate(bytes_read);
                 Ok(buffer)
@@ -109,25 +108,29 @@ impl VfsInputStream {
     pub fn skip_impl(&mut self, len: u64) -> Result<u64, StreamError> {
         // Get file size to ensure we don't skip beyond EOF
         let vfs = self.handle.vfs.lock().map_err(|_| StreamError::Closed)?;
-        
+
         // Get current position atomically
         let current_pos = self.handle.position.load(Ordering::SeqCst);
-        
+
         // Get file size by seeking to end and back
-        let original_pos = vfs.seek(self.handle.vfs_fd as u32, SeekFrom::Current(0))
+        let original_pos = vfs
+            .seek(self.handle.vfs_fd as u32, SeekFrom::Current(0))
             .map_err(|_| StreamError::Closed)?;
-        let file_size = vfs.seek(self.handle.vfs_fd as u32, SeekFrom::End(0))
+        let file_size = vfs
+            .seek(self.handle.vfs_fd as u32, SeekFrom::End(0))
             .map_err(|_| StreamError::Closed)?;
         // Seek back to original position
-        vfs.seek(self.handle.vfs_fd as u32, SeekFrom::Start(original_pos as u64))
+        vfs.seek(self.handle.vfs_fd as u32, SeekFrom::Start(original_pos))
             .map_err(|_| StreamError::Closed)?;
-        
+
         // Calculate actual skip amount (don't go beyond EOF)
         let remaining = file_size.saturating_sub(current_pos);
         let actual_skip = len.min(remaining);
-        
+
         // Update position atomically
-        self.handle.position.fetch_add(actual_skip, Ordering::SeqCst);
+        self.handle
+            .position
+            .fetch_add(actual_skip, Ordering::SeqCst);
         Ok(actual_skip)
     }
 
@@ -179,16 +182,13 @@ impl VfsOutputStream {
         }
 
         let vfs = self.handle.vfs.lock().map_err(|_| StreamError::Closed)?;
-        
+
         // Get current position atomically
         let current_pos = self.handle.position.load(Ordering::SeqCst);
 
         // Seek to current position
         if vfs
-            .seek(
-                self.handle.vfs_fd as u32,
-                SeekFrom::Start(current_pos),
-            )
+            .seek(self.handle.vfs_fd as u32, SeekFrom::Start(current_pos))
             .is_err()
         {
             return Err(StreamError::Closed);
@@ -198,7 +198,9 @@ impl VfsOutputStream {
         match vfs.write(self.handle.vfs_fd as u32, contents) {
             Ok(bytes_written) => {
                 // Update position atomically
-                self.handle.position.fetch_add(bytes_written as u64, Ordering::SeqCst);
+                self.handle
+                    .position
+                    .fetch_add(bytes_written as u64, Ordering::SeqCst);
                 Ok(())
             }
             Err(_) => Err(StreamError::Closed),
@@ -230,13 +232,13 @@ impl VfsOutputStream {
         const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
         let chunk = vec![0u8; CHUNK_SIZE];
         let mut remaining = len as usize;
-        
+
         while remaining > 0 {
             let write_size = remaining.min(CHUNK_SIZE);
             self.write_impl(&chunk[..write_size])?;
             remaining -= write_size;
         }
-        
+
         Ok(())
     }
 
@@ -266,10 +268,10 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     fn create_test_vfs() -> Arc<Mutex<VirtualFilesystem>> {
-        let mut vfs = VirtualFilesystem::new();
+        let vfs = VirtualFilesystem::new();
         let store = Arc::new(Mutex::new(MemStore::new()));
         vfs.mount_store("test".to_string(), store).unwrap();
-        
+
         // For tests, we'll grant capabilities to all the specific paths we'll use
         let test_paths = vec![
             "/test/input_test.txt",
@@ -283,14 +285,14 @@ mod tests {
             "/test/large_zeroes.txt",
             "/test/concurrent.txt",
         ];
-        
+
         for path in test_paths {
             vfs.add_capability(crate::vfs::Capability::Read(PathBuf::from(path)))
                 .unwrap();
             vfs.add_capability(crate::vfs::Capability::Write(PathBuf::from(path)))
                 .unwrap();
         }
-        
+
         Arc::new(Mutex::new(vfs))
     }
 
@@ -665,7 +667,7 @@ mod tests {
             // Get file size by seeking to end
             let file_size = vfs.seek(fd, SeekFrom::End(0)).unwrap();
             assert_eq!(file_size, large_size);
-            
+
             // Verify content is all zeroes
             vfs.seek(fd, SeekFrom::Start(0)).unwrap();
             let mut buffer = vec![0xff; 1024]; // Initialize with non-zero
@@ -682,7 +684,7 @@ mod tests {
     #[test]
     fn test_concurrent_position_updates() {
         use std::thread;
-        
+
         let vfs = create_test_vfs();
 
         // Create a file with test content
@@ -713,7 +715,7 @@ mod tests {
                 vfs: vfs.clone(),
                 writable: false,
             };
-            
+
             let h = thread::spawn(move || {
                 let mut stream = VfsInputStream::new(handle);
                 let mut all_data = Vec::new();
@@ -728,7 +730,7 @@ mod tests {
 
         // Wait for all threads and collect results
         let results: Vec<Vec<u8>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-        
+
         // Total bytes read should be consistent
         let total_bytes: usize = results.iter().map(|r| r.len()).sum();
         assert!(total_bytes <= test_content.len());
