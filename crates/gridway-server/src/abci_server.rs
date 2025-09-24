@@ -811,7 +811,7 @@ mod tests {
         assert!(response.is_err());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_check_tx() {
         let app = BaseApp::new("test-app".to_string()).expect("Failed to create BaseApp");
         let server = AbciServer::new(app, "test-chain".to_string());

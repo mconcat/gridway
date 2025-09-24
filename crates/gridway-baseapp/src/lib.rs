@@ -486,14 +486,17 @@ impl BaseApp {
                 {
                     Ok(_) => {
                         // Block on async execution since this is called from sync context
-                        let runtime = tokio::runtime::Handle::current();
-                        match runtime.block_on(self.component_host.execute_begin_blocker(
-                            height,
-                            time,
-                            chain_id,
-                            1_000_000,
-                            vec![],
-                        )) {
+                        match tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(
+                                self.component_host.execute_begin_blocker(
+                                    height,
+                                    time,
+                                    chain_id,
+                                    1_000_000,
+                                    vec![],
+                                ),
+                            )
+                        }) {
                             Ok(result) => {
                                 if !result.success {
                                     return Err(BaseAppError::AbciError(
@@ -679,11 +682,12 @@ impl BaseApp {
                 {
                     Ok(_) => {
                         // Block on async execution since this is called from sync context
-                        let runtime = tokio::runtime::Handle::current();
-                        match runtime.block_on(
-                            self.component_host
-                                .execute_end_blocker(height, time, chain_id, 1_000_000),
-                        ) {
+                        match tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(
+                                self.component_host
+                                    .execute_end_blocker(height, time, chain_id, 1_000_000),
+                            )
+                        }) {
                             Ok(result) => {
                                 if !result.success {
                                     return Err(BaseAppError::AbciError(
@@ -969,13 +973,16 @@ impl BaseApp {
             {
                 Ok(_) => {
                     // Block on async execution since this is called from sync context
-                    let runtime = tokio::runtime::Handle::current();
-                    match runtime.block_on(self.component_host.execute_tx_decoder(
-                        "tx-decoder",
-                        &request.tx_bytes,
-                        &request.encoding,
-                        request.validate,
-                    )) {
+                    match tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(
+                            self.component_host.execute_tx_decoder(
+                                "tx-decoder",
+                                &request.tx_bytes,
+                                &request.encoding,
+                                request.validate,
+                            ),
+                        )
+                    }) {
                         Ok(result) => {
                             if !result.success {
                                 return Err(BaseAppError::TxFailed(
@@ -1624,8 +1631,8 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    #[test]
-    fn test_minimal_wasi_module() {
+    #[tokio::test]
+    async fn test_minimal_wasi_module() {
         // Test with a WASI component using ComponentHost
         let base_store = Arc::new(Mutex::new(MemStore::new()));
         let component_host = ComponentHost::new(base_store).unwrap();
@@ -1658,14 +1665,10 @@ mod tests {
             Ok(_) => {
                 println!("Component loaded successfully");
                 // Test tx decoder execution
-                // Block on async execution since this is called from sync context
-                let runtime = tokio::runtime::Handle::current();
-                match runtime.block_on(component_host.execute_tx_decoder(
-                    "tx-decoder",
-                    "dGVzdA==",
-                    "base64",
-                    false,
-                )) {
+                match component_host
+                    .execute_tx_decoder("tx-decoder", "dGVzdA==", "base64", false)
+                    .await
+                {
                     Ok(result) => {
                         println!("Exit code:: {}", result.exit_code);
                         println!("Stdout:: {}", String::from_utf8_lossy(&result.stdout));
@@ -1689,8 +1692,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_wasi_module_direct() {
+    #[tokio::test]
+    async fn test_wasi_module_direct() {
         // Direct test of WASI component execution
         let base_store = Arc::new(Mutex::new(MemStore::new()));
         let component_host = ComponentHost::new(base_store).unwrap();
@@ -1726,14 +1729,10 @@ mod tests {
             Ok(_) => {
                 println!("Component loaded successfully");
                 // Test tx decoder execution with the same data
-                // Block on async execution since this is called from sync context
-                let runtime = tokio::runtime::Handle::current();
-                match runtime.block_on(component_host.execute_tx_decoder(
-                    "tx-decoder",
-                    "dGVzdCB0cmFuc2FjdGlvbg==",
-                    "base64",
-                    false,
-                )) {
+                match component_host
+                    .execute_tx_decoder("tx-decoder", "dGVzdCB0cmFuc2FjdGlvbg==", "base64", false)
+                    .await
+                {
                     Ok(result) => {
                         println!("Exit code:: {}", result.exit_code);
                         println!("Stdout:: {}", String::from_utf8_lossy(&result.stdout));
@@ -1782,8 +1781,8 @@ mod tests {
         assert!(app.context.is_none());
     }
 
-    #[test]
-    fn test_check_tx() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_check_tx() {
         // This test requires WASI modules to be built
         // In CI, they're built before tests run
         // For local development, run: ./scripts/build-wasi-modules.sh
@@ -1795,8 +1794,8 @@ mod tests {
         assert_eq!(response.code, 1);
     }
 
-    #[test]
-    fn test_deliver_tx() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_deliver_tx() {
         let mut app = BaseApp::new("test-app".to_string()).unwrap();
 
         // No context - should fail
@@ -1858,8 +1857,8 @@ mod tests {
         assert_eq!(codes.len(), 0);
     }
 
-    #[test]
-    fn test_governance_message_handling() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_governance_message_handling() {
         let app = BaseApp::new("test-app".to_string()).unwrap();
 
         // Create a mock transaction with governance message
@@ -1944,8 +1943,8 @@ mod tests {
         assert!(valid);
     }
 
-    #[test]
-    fn test_check_tx_with_recheck_mode() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_check_tx_with_recheck_mode() {
         let app = BaseApp::new("test-app".to_string()).unwrap();
 
         // Test with ReCheck mode

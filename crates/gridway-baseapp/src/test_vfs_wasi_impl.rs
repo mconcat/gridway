@@ -496,7 +496,7 @@ mod tests {
         );
 
         // Verify the error is Access (due to read-only mount)
-        if let Err(err) = result {
+        if let Err(_err) = result {
             // The error should be Access since config mount doesn't have write capability
             // We can't easily check the specific error type without exposing internals,
             // but the fact that it fails is the important test

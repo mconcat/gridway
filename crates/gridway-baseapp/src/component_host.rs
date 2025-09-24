@@ -928,20 +928,6 @@ impl ComponentHost {
             ComponentHostError::WasiSetup(format!("Failed to add filesystem::preopens: {e}"))
         })?;
 
-        // Add io streams support (returns Unsupported for now per Issue #66)
-        wasmtime_wasi::p2::bindings::io::streams::add_to_linker::<ComponentState, HasVfs>(
-            linker,
-            |cx: &mut ComponentState| &mut cx.vfs_wasi,
-        )
-        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add io::streams: {e}")))?;
-
-        // Add io poll support (returns Unsupported for now per Issue #66)
-        wasmtime_wasi::p2::bindings::io::poll::add_to_linker::<ComponentState, HasVfs>(
-            linker,
-            |cx: &mut ComponentState| &mut cx.vfs_wasi,
-        )
-        .map_err(|e| ComponentHostError::WasiSetup(format!("Failed to add io::poll: {e}")))?;
-
         // 2. Add CLI subsystems (required by components)
         wasmtime_wasi::p2::bindings::cli::environment::add_to_linker::<ComponentState, HasWasiImpl>(
             linker,

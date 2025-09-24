@@ -435,52 +435,90 @@ impl io_streams::Host for VfsWasiAdapter {
     }
 }
 
-// Minimal stream trait implementations that return explicit errors
-// These satisfy Issue #66's requirement for trait implementations while deferring full functionality
+// Stream trait implementations using VFS streams
 impl io_streams::HostInputStream for VfsWasiAdapter {
     fn read(
         &mut self,
-        _stream: Resource<io_streams::InputStream>,
-        _len: u64,
+        stream: Resource<io_streams::InputStream>,
+        len: u64,
     ) -> Result<Vec<u8>, wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // Get the stream from the resource table (it's already boxed)
+        let stream_ref = self
+            .inner
+            .table()
+            .get_mut::<Box<dyn wasmtime_wasi::p2::InputStream>>(&stream)
+            .map_err(|e| {
+                // Better error reporting: distinguish between invalid resource and other errors
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get input stream from resource table: {}",
+                    e
+                ))
+            })?;
+
+        // Read from the stream
+        match stream_ref.read(len as usize) {
+            Ok(bytes) => Ok(bytes.to_vec()),
+            Err(wasmtime_wasi_io::streams::StreamError::Closed) => {
+                Err(wasmtime_wasi::p2::StreamError::Closed)
+            }
+            Err(wasmtime_wasi_io::streams::StreamError::LastOperationFailed(e)) => {
+                Err(wasmtime_wasi::p2::StreamError::LastOperationFailed(e))
+            }
+            Err(wasmtime_wasi_io::streams::StreamError::Trap(e)) => {
+                Err(wasmtime_wasi::p2::StreamError::Trap(e))
+            }
+        }
     }
 
     async fn blocking_read(
         &mut self,
-        _stream: Resource<io_streams::InputStream>,
-        _len: u64,
+        stream: Resource<io_streams::InputStream>,
+        len: u64,
     ) -> Result<Vec<u8>, wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // For P0, blocking read is the same as regular read (synchronous)
+        self.read(stream, len)
     }
 
     fn skip(
         &mut self,
-        _stream: Resource<io_streams::InputStream>,
-        _len: u64,
+        stream: Resource<io_streams::InputStream>,
+        len: u64,
     ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // Get the stream from the resource table (it's already boxed)
+        let stream_ref = self
+            .inner
+            .table()
+            .get_mut::<Box<dyn wasmtime_wasi::p2::InputStream>>(&stream)
+            .map_err(|e| {
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get input stream from resource table: {}",
+                    e
+                ))
+            })?;
+
+        // Skip bytes in the stream
+        stream_ref.skip(len as usize).map(|n| n as u64)
     }
 
     async fn blocking_skip(
         &mut self,
-        _stream: Resource<io_streams::InputStream>,
-        _len: u64,
+        stream: Resource<io_streams::InputStream>,
+        len: u64,
     ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // For P0, blocking skip is the same as regular skip (synchronous)
+        self.skip(stream, len)
     }
 
     fn subscribe(
         &mut self,
         _stream: Resource<io_streams::InputStream>,
     ) -> Result<Resource<io_poll::Pollable>, anyhow::Error> {
-        Err(anyhow::anyhow!(
-            "VFS stream subscribe not yet implemented (Issue #66)"
-        ))
+        use crate::vfs_streams_simple::AlwaysReadyPollable;
+
+        // Create an always-ready pollable for P0
+        let pollable = AlwaysReadyPollable;
+        let resource = self.inner.table().push(pollable)?;
+        wasmtime_wasi_io::poll::subscribe(self.inner.table(), resource)
     }
 
     async fn drop(&mut self, stream: Resource<io_streams::InputStream>) -> wasmtime::Result<()> {
@@ -494,56 +532,104 @@ impl io_streams::HostInputStream for VfsWasiAdapter {
 impl io_streams::HostOutputStream for VfsWasiAdapter {
     fn write(
         &mut self,
-        _stream: Resource<io_streams::OutputStream>,
-        _contents: Vec<u8>,
+        stream: Resource<io_streams::OutputStream>,
+        contents: Vec<u8>,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // Get the stream from the resource table (it's already boxed)
+        let stream_ref = self
+            .inner
+            .table()
+            .get_mut::<Box<dyn wasmtime_wasi::p2::OutputStream>>(&stream)
+            .map_err(|e| {
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get output stream from resource table: {}",
+                    e
+                ))
+            })?;
+
+        // Write to the stream
+        use bytes::Bytes;
+        stream_ref.write(Bytes::from(contents))
     }
 
     async fn blocking_write_and_flush(
         &mut self,
-        _stream: Resource<io_streams::OutputStream>,
-        _contents: Vec<u8>,
+        stream: Resource<io_streams::OutputStream>,
+        contents: Vec<u8>,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // Get the stream from the resource table (it's already boxed)
+        let stream_ref = self
+            .inner
+            .table()
+            .get_mut::<Box<dyn wasmtime_wasi::p2::OutputStream>>(&stream)
+            .map_err(|e| {
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get output stream from resource table: {}",
+                    e
+                ))
+            })?;
+
+        // Write and flush
+        use bytes::Bytes;
+        stream_ref.write(Bytes::from(contents))?;
+        stream_ref.flush()
     }
 
     fn flush(
         &mut self,
-        _stream: Resource<io_streams::OutputStream>,
+        stream: Resource<io_streams::OutputStream>,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // Get the stream from the resource table (it's already boxed)
+        let stream_ref = self
+            .inner
+            .table()
+            .get_mut::<Box<dyn wasmtime_wasi::p2::OutputStream>>(&stream)
+            .map_err(|e| {
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get output stream from resource table: {}",
+                    e
+                ))
+            })?;
+
+        // Flush the stream
+        stream_ref.flush()
     }
 
     async fn blocking_flush(
         &mut self,
-        _stream: Resource<io_streams::OutputStream>,
+        stream: Resource<io_streams::OutputStream>,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // For P0, blocking flush is the same as regular flush (synchronous)
+        self.flush(stream)
     }
 
     fn check_write(
         &mut self,
-        _stream: Resource<io_streams::OutputStream>,
+        stream: Resource<io_streams::OutputStream>,
     ) -> Result<u64, wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // Get the stream from the resource table (it's already boxed)
+        let stream_ref = self
+            .inner
+            .table()
+            .get_mut::<Box<dyn wasmtime_wasi::p2::OutputStream>>(&stream)
+            .map_err(|e| {
+                wasmtime_wasi::p2::StreamError::LastOperationFailed(anyhow::anyhow!(
+                    "Failed to get output stream from resource table: {}",
+                    e
+                ))
+            })?;
+
+        // Check how much can be written
+        stream_ref.check_write().map(|n| n as u64)
     }
 
     fn subscribe(
         &mut self,
         _stream: Resource<io_streams::OutputStream>,
     ) -> wasmtime::Result<Resource<wasmtime_wasi_io::poll::DynPollable>> {
-        // Create a pollable that's always ready
-        struct AlwaysReadyPollable;
-        #[async_trait::async_trait]
-        impl wasmtime_wasi_io::poll::Pollable for AlwaysReadyPollable {
-            async fn ready(&mut self) {}
-        }
+        use crate::vfs_streams_simple::AlwaysReadyPollable;
+
+        // Create an always-ready pollable for P0
         let pollable = AlwaysReadyPollable;
         let resource = self.inner.table().push(pollable)?;
         wasmtime_wasi_io::poll::subscribe(self.inner.table(), resource)
@@ -551,20 +637,32 @@ impl io_streams::HostOutputStream for VfsWasiAdapter {
 
     fn write_zeroes(
         &mut self,
-        _stream: Resource<io_streams::OutputStream>,
-        _len: u64,
+        stream: Resource<io_streams::OutputStream>,
+        len: u64,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // For now, just write actual zeroes
+        let zeros = vec![0u8; len as usize];
+        self.write(stream, zeros)
     }
 
     async fn blocking_write_zeroes_and_flush(
         &mut self,
-        _stream: Resource<io_streams::OutputStream>,
-        _len: u64,
+        stream: Resource<io_streams::OutputStream>,
+        len: u64,
     ) -> Result<(), wasmtime_wasi::p2::StreamError> {
-        // Return Closed to indicate stream is not available (less noisy than trap)
-        Err(wasmtime_wasi::p2::StreamError::Closed)
+        // Write zeroes and flush
+        let zeros = vec![0u8; len as usize];
+        // Get the stream from the resource table (it's already boxed)
+        let stream_ref = self
+            .inner
+            .table()
+            .get_mut::<Box<dyn wasmtime_wasi::p2::OutputStream>>(&stream)
+            .map_err(|_| wasmtime_wasi::p2::StreamError::Closed)?;
+
+        // Write and flush
+        use bytes::Bytes;
+        stream_ref.write(Bytes::from(zeros))?;
+        stream_ref.flush()
     }
 
     fn splice(
