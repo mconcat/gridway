@@ -40,12 +40,8 @@ struct MountCapabilities {
 }
 
 /// Descriptor kinds in our filesystem
-<<<<<<< HEAD
 #[derive(Clone)]
-enum DescriptorKind {
-=======
-pub enum DescriptorKind {
->>>>>>> origin/feat/vfs
+pub(crate) enum DescriptorKind {
     /// Directory descriptor
     Dir {
         mount_id: usize,
@@ -92,23 +88,8 @@ impl DirectoryStream {
     }
 }
 
-<<<<<<< HEAD
 // FileHandle type is imported from vfs_streams_simple module
 use crate::vfs_streams_simple::FileHandle;
-=======
-/// File handle for open files
-#[derive(Clone)]
-pub struct FileHandle {
-    /// VFS file descriptor
-    pub vfs_fd: u64,
-    /// Current position in file
-    pub position: u64,
-    /// Reference to VFS
-    pub vfs: Arc<Mutex<VirtualFilesystem>>,
-    /// Whether file is open for writing
-    pub writable: bool,
-}
->>>>>>> origin/feat/vfs
 
 /// Our VFS-backed filesystem implementation
 ///
@@ -264,7 +245,7 @@ impl VfsFilesystem {
             false
         }
     }
-    
+
     /// Check if file handle has read permission
     fn has_read_permission(&self, _file_handle: &FileHandle) -> bool {
         // For now, allow read access if file was not opened write-only
@@ -1062,7 +1043,6 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         offset: fs_types::Filesize,
     ) -> Result<Resource<io_streams::InputStream>, wasmtime_wasi::TrappableError<fs_types::ErrorCode>>
     {
-<<<<<<< HEAD
         use crate::vfs_streams_simple::VfsInputStream;
 
         let fd = descriptor.rep();
@@ -1086,45 +1066,6 @@ impl fs_types::HostDescriptor for VfsFilesystem {
             Some(DescriptorKind::Dir { .. }) => Err(fs_types::ErrorCode::IsDirectory.into()),
             None => Err(fs_types::ErrorCode::BadDescriptor.into()),
         }
-=======
-        // Get the descriptor ID
-        let desc_id = descriptor.rep();
-
-        // Look up the descriptor kind
-        let desc_kind = self.descriptors.get(&desc_id).ok_or_else(|| {
-            wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::BadDescriptor)
-        })?;
-
-        // Verify this is a file (not a directory)
-        let file_handle = match desc_kind {
-            DescriptorKind::File { handle } => handle.clone(),
-            DescriptorKind::Dir { .. } => {
-                return Err(fs_types::ErrorCode::IsDirectory.into());
-            }
-        };
-
-        // Verify read access
-        if file_handle.writable && !self.has_read_permission(&file_handle) {
-            return Err(fs_types::ErrorCode::Access.into());
-        }
-
-        // Create input stream
-        let stream = VfsInputStream::new(
-            file_handle.vfs_fd as u32,
-            offset,
-            file_handle.vfs.clone(),
-        );
-
-        // Box the stream as required by resource table
-        let boxed_stream: Box<dyn wasmtime_wasi_io::streams::InputStream> = Box::new(stream);
-
-        // Store stream in resource table
-        let stream_resource = self.table.push(boxed_stream).map_err(|_| {
-            wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::NoEntry)
-        })?;
-
-        Ok(stream_resource)
->>>>>>> origin/feat/vfs
     }
 
     fn write_via_stream(
@@ -1135,7 +1076,6 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-<<<<<<< HEAD
         use crate::vfs_streams_simple::VfsOutputStream;
 
         let fd = descriptor.rep();
@@ -1163,45 +1103,6 @@ impl fs_types::HostDescriptor for VfsFilesystem {
             Some(DescriptorKind::Dir { .. }) => Err(fs_types::ErrorCode::IsDirectory.into()),
             None => Err(fs_types::ErrorCode::BadDescriptor.into()),
         }
-=======
-        // Get the descriptor ID
-        let desc_id = descriptor.rep();
-
-        // Look up the descriptor kind
-        let desc_kind = self.descriptors.get(&desc_id).ok_or_else(|| {
-            wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::BadDescriptor)
-        })?;
-
-        // Verify this is a file (not a directory)
-        let file_handle = match desc_kind {
-            DescriptorKind::File { handle } => handle.clone(),
-            DescriptorKind::Dir { .. } => {
-                return Err(fs_types::ErrorCode::IsDirectory.into());
-            }
-        };
-
-        // Verify write access
-        if !file_handle.writable {
-            return Err(fs_types::ErrorCode::Access.into());
-        }
-
-        // Create output stream
-        let stream = VfsOutputStream::new_write(
-            file_handle.vfs_fd as u32,
-            offset,
-            file_handle.vfs.clone(),
-        );
-
-        // Box the stream as required by resource table
-        let boxed_stream: Box<dyn wasmtime_wasi_io::streams::OutputStream> = Box::new(stream);
-
-        // Store stream in resource table
-        let stream_resource = self.table.push(boxed_stream).map_err(|_| {
-            wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::NoEntry)
-        })?;
-
-        Ok(stream_resource)
->>>>>>> origin/feat/vfs
     }
 
     fn append_via_stream(
@@ -1211,7 +1112,6 @@ impl fs_types::HostDescriptor for VfsFilesystem {
         Resource<io_streams::OutputStream>,
         wasmtime_wasi::TrappableError<fs_types::ErrorCode>,
     > {
-<<<<<<< HEAD
         use crate::vfs_streams_simple::VfsOutputStream;
 
         let fd = descriptor.rep();
@@ -1249,44 +1149,6 @@ impl fs_types::HostDescriptor for VfsFilesystem {
             Some(DescriptorKind::Dir { .. }) => Err(fs_types::ErrorCode::IsDirectory.into()),
             None => Err(fs_types::ErrorCode::BadDescriptor.into()),
         }
-=======
-        // Get the descriptor ID
-        let desc_id = descriptor.rep();
-
-        // Look up the descriptor kind
-        let desc_kind = self.descriptors.get(&desc_id).ok_or_else(|| {
-            wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::BadDescriptor)
-        })?;
-
-        // Verify this is a file (not a directory)
-        let file_handle = match desc_kind {
-            DescriptorKind::File { handle } => handle.clone(),
-            DescriptorKind::Dir { .. } => {
-                return Err(fs_types::ErrorCode::IsDirectory.into());
-            }
-        };
-
-        // Verify write access (append requires write permission)
-        if !file_handle.writable {
-            return Err(fs_types::ErrorCode::Access.into());
-        }
-
-        // Create output stream in append mode
-        let stream = VfsOutputStream::new_append(
-            file_handle.vfs_fd as u32,
-            file_handle.vfs.clone(),
-        );
-
-        // Box the stream as required by resource table
-        let boxed_stream: Box<dyn wasmtime_wasi_io::streams::OutputStream> = Box::new(stream);
-
-        // Store stream in resource table
-        let stream_resource = self.table.push(boxed_stream).map_err(|_| {
-            wasmtime_wasi::TrappableError::from(fs_types::ErrorCode::NoEntry)
-        })?;
-
-        Ok(stream_resource)
->>>>>>> origin/feat/vfs
     }
 }
 
