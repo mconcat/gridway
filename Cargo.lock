@@ -1993,6 +1993,8 @@ dependencies = [
  "anyhow",
  "base64",
  "cap-std",
+ "commonware-codec",
+ "commonware-cryptography",
  "gridway-crypto",
  "gridway-store",
  "gridway-telemetry",

@@ -13,10 +13,10 @@ use gridway_consensus::{
     engine,
     types::{PublicKey, EPOCH, NAMESPACE},
 };
-use gridway_baseapp::BaseApp;
+use gridway_baseapp::{BaseApp, Account};
 
 use clap::{Arg, Command};
-use commonware_codec::{Decode, DecodeExt};
+use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
     bls12381::primitives::{group, sharing::Sharing, variant::MinSig},
@@ -57,6 +57,10 @@ const MAX_FETCH_SIZE: usize = 512 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
+/// Fixed seeds for deterministic genesis keypairs (testing only!)
+const ALICE_SEED: u64 = 1;
+const BOB_SEED: u64 = 2;
+
 // ============================================================================
 // HTTP API server for transaction submission and balance queries
 // ============================================================================
@@ -79,6 +83,7 @@ fn start_http_server(addr: SocketAddr, app: GridwayApp) {
         println!("HTTP API listening on http://{}", addr);
         println!("  POST /tx                        — submit transaction");
         println!("  GET  /balance/{{address}}/{{denom}}  — query balance");
+        println!("  GET  /account/{{address}}           — query account info");
 
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
@@ -139,6 +144,7 @@ fn handle_http_request(
     let response = match (method, path) {
         ("POST", "/tx") => handle_submit_tx(app, &body),
         ("GET", p) if p.starts_with("/balance/") => handle_balance_query(app, p),
+        ("GET", p) if p.starts_with("/account/") => handle_account_query(app, p),
         ("GET", "/health") => http_response(200, "application/json", r#"{"status":"ok"}"#),
         _ => http_response(404, "application/json", r#"{"error":"not found"}"#),
     };
@@ -191,6 +197,42 @@ fn handle_balance_query(app: &GridwayApp, path: &str) -> String {
         address, denom, balance
     );
     http_response(200, "application/json", &body)
+}
+
+fn handle_account_query(app: &GridwayApp, path: &str) -> String {
+    let address = path.trim_start_matches("/account/");
+    if address.is_empty() {
+        return http_response(
+            400,
+            "application/json",
+            r#"{"error":"use /account/{address}"}"#,
+        );
+    }
+
+    let account = match app.baseapp().lock() {
+        Ok(baseapp) => baseapp.get_account(address),
+        Err(_) => {
+            return http_response(
+                500,
+                "application/json",
+                r#"{"error":"internal: lock poisoned"}"#,
+            );
+        }
+    };
+
+    match account {
+        Some(acct) => {
+            let body = format!(
+                r#"{{"address":"{}","public_key":"{}","sequence":{}}}"#,
+                address, acct.public_key, acct.sequence
+            );
+            http_response(200, "application/json", &body)
+        }
+        None => {
+            let body = format!(r#"{{"error":"account not found: {}"}}"#, address);
+            http_response(404, "application/json", &body)
+        }
+    }
 }
 
 fn http_response(status: u16, content_type: &str, body: &str) -> String {
@@ -311,18 +353,49 @@ fn main() {
         );
 
         // ====================================================================
-        // Create BaseApp with genesis state
+        // Create BaseApp with genesis state using deterministic keypairs
         // ====================================================================
         let mut baseapp = BaseApp::new("gridway".to_string()).expect("Failed to create BaseApp");
 
-        // Set genesis balances
-        baseapp.set_balance("alice", "ugridway", 1_000_000).expect("Failed to set alice balance");
-        baseapp.set_balance("bob", "ugridway", 0).expect("Failed to set bob balance");
+        // Generate deterministic keypairs from fixed seeds
+        let alice_key = commonware_cryptography::ed25519::PrivateKey::from_seed(ALICE_SEED);
+        let alice_pk = alice_key.public_key();
+        let alice_addr = gridway_crypto::Address::from_public_key(&alice_pk).to_hex();
+
+        let bob_key = commonware_cryptography::ed25519::PrivateKey::from_seed(BOB_SEED);
+        let bob_pk = bob_key.public_key();
+        let bob_addr = gridway_crypto::Address::from_public_key(&bob_pk).to_hex();
+
+        // Print genesis keypair info for test script use
+        println!("=== GENESIS KEYPAIRS ===");
+        println!("ALICE_PRIVKEY={}", hex::encode(alice_key.encode()));
+        println!("ALICE_PUBKEY={}", hex::encode(alice_pk.as_ref()));
+        println!("ALICE_ADDRESS={}", alice_addr);
+        println!("BOB_PRIVKEY={}", hex::encode(bob_key.encode()));
+        println!("BOB_PUBKEY={}", hex::encode(bob_pk.as_ref()));
+        println!("BOB_ADDRESS={}", bob_addr);
+        println!("========================");
+
+        // Create accounts
+        baseapp.set_account(&alice_addr, &Account {
+            public_key: hex::encode(alice_pk.as_ref()),
+            sequence: 0,
+        }).expect("Failed to set alice account");
+        baseapp.set_account(&bob_addr, &Account {
+            public_key: hex::encode(bob_pk.as_ref()),
+            sequence: 0,
+        }).expect("Failed to set bob account");
+
+        // Set genesis balances using hex addresses
+        baseapp.set_balance(&alice_addr, "ugridway", 1_000_000).expect("Failed to set alice balance");
+        baseapp.set_balance(&bob_addr, "ugridway", 0).expect("Failed to set bob balance");
 
         // Commit genesis state so the Merkle root reflects initial balances
         let genesis_root = baseapp.commit().expect("Failed to commit genesis state");
         info!(
             state_root = hex::encode(genesis_root),
+            alice_address = %alice_addr,
+            bob_address = %bob_addr,
             "committed genesis state (alice: 1_000_000 ugridway, bob: 0 ugridway)"
         );
 
@@ -454,6 +527,7 @@ fn main() {
         info!("  Consensus: commonware-consensus (simplex BFT)");
         info!("  Networking: commonware-p2p (authenticated)");
         info!("  Execution: gridway-baseapp (WASM microkernel + native bank)");
+        info!("  TX Auth: ed25519 signatures with sequence numbers");
         if tx_port > 0 {
             info!("  HTTP API: http://0.0.0.0:{}", tx_port);
         }

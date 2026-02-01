@@ -7,6 +7,7 @@
 //! - ABCI-specific code (begin_block/end_block/deliver_tx flow) removed
 //! - Simplified to `execute_block(txs) -> StateRoot` for consensus integration
 //! - VFS, ComponentHost, WASI bridge preserved intact
+//! - Ed25519 TX authentication via commonware-cryptography
 
 pub mod capabilities;
 pub mod component_bindings;
@@ -16,27 +17,41 @@ pub mod module_router;
 pub mod vfs;
 pub mod wasi_host;
 
+use commonware_codec::DecodeExt;
+
 use gridway_store::{GlobalAppStore, MerkleStore, KVStore};
 #[cfg(test)]
 use gridway_store::MemStore;
 use gridway_types::{Event, EventAttribute, TxResponse};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+
 use thiserror::Error;
 
 // Import microkernel components
 use crate::capabilities::CapabilityManager;
 use crate::component_host::{ComponentHost, ComponentInfo, ComponentType};
 use crate::module_governance::ModuleGovernance;
-use crate::module_router::{ExecutionContext, ModuleRouter};
+use crate::module_router::ModuleRouter;
 use crate::vfs::VirtualFilesystem;
 use crate::wasi_host::WasiHost;
 
 pub use module_governance::{
     CodeMetadata, ModuleInstallConfig, MsgInstallModule, MsgStoreCode, MsgUpgradeModule,
 };
+
+/// Account model for TX authentication.
+///
+/// Stored in the "auth" namespace as JSON under key `account_{address}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Account {
+    /// Hex-encoded 32-byte ed25519 public key
+    pub public_key: String,
+    /// Sequence number (nonce) for replay protection
+    pub sequence: u64,
+}
 
 /// BaseApp errors
 #[derive(Error, Debug)]
@@ -61,6 +76,9 @@ pub enum BaseAppError {
 
     #[error("chain initialization failed: {0}")]
     InitChainFailed(String),
+
+    #[error("auth error: {0}")]
+    AuthError(String),
 }
 
 /// Result type alias
@@ -80,6 +98,7 @@ pub struct BlockContext {
 /// - No ABCI begin_block/end_block lifecycle
 /// - Single `execute_block()` entry point for consensus
 /// - State committed via `commit()` returning Merkle root
+/// - Ed25519 TX auth with sequence numbers
 pub struct BaseApp {
     /// Application name
     name: String,
@@ -259,6 +278,109 @@ impl BaseApp {
     }
 
     // =========================================================================
+    // Account management (auth store)
+    // =========================================================================
+
+    /// Store an account in the auth namespace.
+    pub fn set_account(&mut self, address: &str, account: &Account) -> Result<()> {
+        let key = format!("account_{address}");
+        let value = serde_json::to_string(account)
+            .map_err(|e| BaseAppError::Store(format!("Failed to serialize account: {e}")))?;
+        self.global_store.set_namespaced("auth", key.as_bytes(), value.as_bytes())
+            .map_err(|e| BaseAppError::Store(format!("Failed to set account: {e}")))?;
+        Ok(())
+    }
+
+    /// Get an account from the auth namespace.
+    pub fn get_account(&self, address: &str) -> Option<Account> {
+        let key = format!("account_{address}");
+        match self.global_store.get_namespaced("auth", key.as_bytes()) {
+            Ok(Some(value)) => {
+                let json_str = String::from_utf8(value).ok()?;
+                serde_json::from_str(&json_str).ok()
+            }
+            _ => None,
+        }
+    }
+
+    /// Increment the sequence number for an account.
+    pub fn increment_sequence(&mut self, address: &str) -> Result<()> {
+        let mut account = self.get_account(address)
+            .ok_or_else(|| BaseAppError::AuthError(format!("account not found: {address}")))?;
+        account.sequence += 1;
+        self.set_account(address, &account)
+    }
+
+    // =========================================================================
+    // TX Authentication
+    // =========================================================================
+
+    /// Authenticate a transaction: verify signature, sequence, and sender authorization.
+    ///
+    /// Returns (signer_address, parsed body as serde_json::Value) on success.
+    fn authenticate_tx(&self, decoded_tx: &serde_json::Value) -> Result<(String, serde_json::Value)> {
+        // Extract public_key and signature
+        let public_key_hex = decoded_tx.get("public_key")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| BaseAppError::AuthError("missing public_key field".into()))?;
+
+        let signature_hex = decoded_tx.get("signature")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| BaseAppError::AuthError("missing signature field".into()))?;
+
+        let body = decoded_tx.get("body")
+            .ok_or_else(|| BaseAppError::InvalidTx("missing body field".into()))?;
+
+        // Decode hex public key → ed25519 PublicKey
+        let pk_bytes = hex::decode(public_key_hex)
+            .map_err(|e| BaseAppError::AuthError(format!("invalid public_key hex: {e}")))?;
+        let pk = commonware_cryptography::ed25519::PublicKey::decode(pk_bytes.as_ref())
+            .map_err(|e| BaseAppError::AuthError(format!("invalid ed25519 public key: {e}")))?;
+
+        // Decode hex signature → ed25519 Signature
+        let sig_bytes = hex::decode(signature_hex)
+            .map_err(|e| BaseAppError::AuthError(format!("invalid signature hex: {e}")))?;
+        let sig = commonware_cryptography::ed25519::Signature::decode(sig_bytes.as_ref())
+            .map_err(|e| BaseAppError::AuthError(format!("invalid ed25519 signature: {e}")))?;
+
+        // Derive address from public key
+        let signer_address = gridway_crypto::Address::from_public_key(&pk).to_hex();
+
+        // Serialize body to canonical JSON bytes for verification
+        let body_bytes = serde_json::to_string(body)
+            .map_err(|e| BaseAppError::AuthError(format!("failed to serialize body: {e}")))?;
+
+        // Verify signature
+        if !gridway_crypto::verify_tx_body(&pk, body_bytes.as_bytes(), &sig) {
+            return Err(BaseAppError::AuthError("signature verification failed".into()));
+        }
+
+        // Check sequence number
+        let tx_sequence = body.get("sequence")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let account = self.get_account(&signer_address)
+            .ok_or_else(|| BaseAppError::AuthError(format!("account not found: {signer_address}")))?;
+
+        if tx_sequence != account.sequence {
+            return Err(BaseAppError::AuthError(format!(
+                "sequence mismatch: expected {}, got {tx_sequence}",
+                account.sequence
+            )));
+        }
+
+        // Verify sender authorization: check that the public key matches the stored account
+        if account.public_key != public_key_hex {
+            return Err(BaseAppError::AuthError(format!(
+                "public key mismatch for address {signer_address}"
+            )));
+        }
+
+        Ok((signer_address, body.clone()))
+    }
+
+    // =========================================================================
     // Consensus interface — simplified for Commonware integration
     // =========================================================================
 
@@ -346,7 +468,7 @@ impl BaseApp {
         &self.last_state_root
     }
 
-    /// Execute a single transaction
+    /// Execute a single transaction with ed25519 signature verification.
     pub fn execute_transaction(&mut self, tx_bytes: &[u8], height: u64) -> Result<TxResponse> {
         // Try to decode as JSON transaction
         let decoded_tx: serde_json::Value = match serde_json::from_slice(tx_bytes) {
@@ -357,9 +479,12 @@ impl BaseApp {
             }
         };
 
-        let messages = decoded_tx
-            .get("body")
-            .and_then(|b| b.get("messages"))
+        // === TX Authentication ===
+        // Authenticate: verify signature, sequence, and sender
+        let (signer_address, body) = self.authenticate_tx(&decoded_tx)?;
+
+        let messages = body
+            .get("messages")
             .and_then(|m| m.as_array())
             .ok_or_else(|| BaseAppError::InvalidTx("no messages in transaction".to_string()))?;
 
@@ -371,6 +496,15 @@ impl BaseApp {
                 .get("@type")
                 .and_then(|t| t.as_str())
                 .ok_or_else(|| BaseAppError::InvalidTx(format!("message {idx} missing @type")))?;
+
+            // Verify from_address matches signer for messages that have one
+            if let Some(from_addr) = msg_value.get("from_address").and_then(|v| v.as_str()) {
+                if from_addr != signer_address {
+                    return Err(BaseAppError::AuthError(format!(
+                        "message {idx}: from_address '{from_addr}' does not match signer '{signer_address}'"
+                    )));
+                }
+            }
 
             match type_url {
                 "/cosmos.bank.v1beta1.MsgSend" | "/gridway.bank.v1.MsgSend" => {
@@ -434,6 +568,9 @@ impl BaseApp {
                 }
             }
         }
+
+        // === Increment sequence after successful execution ===
+        self.increment_sequence(&signer_address)?;
 
         Ok(TxResponse::success(
             "transaction executed successfully".to_string(),
@@ -515,7 +652,7 @@ impl BaseApp {
     }
 
     /// Fallback: execute transaction via WASM tx decoder
-    fn execute_transaction_via_wasm(&mut self, tx_bytes: &[u8], _height: u64) -> Result<TxResponse> {
+    fn execute_transaction_via_wasm(&mut self, _tx_bytes: &[u8], _height: u64) -> Result<TxResponse> {
         // If tx-decoder WASM is not available, return placeholder
         Ok(TxResponse::success(
             "placeholder: tx decoder not loaded".to_string(),
@@ -588,6 +725,23 @@ mod tests {
         app.set_balance("alice", "uatom", 1000).unwrap();
         let balance = app.get_balance("alice", "uatom").unwrap();
         assert_eq!(balance, 1000);
+    }
+
+    #[test]
+    fn test_account_crud() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+        let account = Account {
+            public_key: "abcd1234".to_string(),
+            sequence: 0,
+        };
+        app.set_account("test_addr", &account).unwrap();
+        let loaded = app.get_account("test_addr").unwrap();
+        assert_eq!(loaded.public_key, "abcd1234");
+        assert_eq!(loaded.sequence, 0);
+
+        app.increment_sequence("test_addr").unwrap();
+        let loaded = app.get_account("test_addr").unwrap();
+        assert_eq!(loaded.sequence, 1);
     }
 
     #[test]

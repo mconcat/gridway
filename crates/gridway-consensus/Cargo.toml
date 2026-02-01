@@ -49,3 +49,7 @@ path = "src/bin/gridway_node.rs"
 [[bin]]
 name = "gridway-setup"
 path = "src/bin/setup.rs"
+
+[[bin]]
+name = "gridway-keygen"
+path = "src/bin/gridway_keygen.rs"

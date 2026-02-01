@@ -1,75 +1,37 @@
 //! Transaction types for gridway.
 //!
-//! Replaces Cosmos SDK protobuf-based transaction types with simpler
-//! JSON-serializable types. The WASM modules still process transactions
-//! through the same pipeline, just without protobuf encoding.
+//! Uses a simple signed TX format with ed25519 signatures.
+//! The signature covers the canonical JSON bytes of the body.
 
 use serde::{Deserialize, Serialize};
 
-/// A raw transaction as received from clients
+/// A signed transaction as submitted by clients.
+///
+/// The `signature` is computed over the canonical JSON serialization of `body`
+/// using the gridway-tx namespace with ed25519.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RawTx {
+pub struct SignedTx {
     pub body: TxBody,
-    pub auth_info: AuthInfo,
-    pub signatures: Vec<Vec<u8>>,
+    /// Hex-encoded 32-byte ed25519 public key
+    pub public_key: String,
+    /// Hex-encoded 64-byte ed25519 signature over body JSON
+    pub signature: String,
 }
 
 /// Transaction body containing messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxBody {
-    pub messages: Vec<TxMessage>,
-    pub memo: String,
-    pub timeout_height: u64,
-}
-
-/// A message within a transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TxMessage {
-    pub type_url: String,
-    pub value: Vec<u8>,
-}
-
-/// Authentication info for a transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthInfo {
-    pub signer_infos: Vec<SignerInfo>,
-    pub fee: Fee,
-}
-
-/// Signer information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignerInfo {
-    pub public_key: Option<TxMessage>,
-    pub mode_info: ModeInfo,
+    pub messages: Vec<serde_json::Value>,
+    #[serde(default = "default_chain_id")]
+    pub chain_id: String,
+    #[serde(default)]
     pub sequence: u64,
+    #[serde(default)]
+    pub memo: String,
 }
 
-/// Signing mode info
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModeInfo {
-    pub single: Option<ModeInfoSingle>,
-}
-
-/// Single signing mode
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModeInfoSingle {
-    pub mode: u32,
-}
-
-/// Transaction fee
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Fee {
-    pub amount: Vec<FeeAmount>,
-    pub gas_limit: u64,
-    pub payer: String,
-    pub granter: String,
-}
-
-/// Fee amount in a specific denomination
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeeAmount {
-    pub denom: String,
-    pub amount: String,
+fn default_chain_id() -> String {
+    "gridway-1".to_string()
 }
 
 /// Bank send message
@@ -136,7 +98,7 @@ impl TxResponse {
 }
 
 /// Gridway transaction — the decoded form used internally
-pub type GridwayTx = RawTx;
+pub type GridwayTx = SignedTx;
 
 /// Trait for SDK messages (kept for compatibility with module router)
 pub trait SdkMsg: Send + Sync {
@@ -144,4 +106,72 @@ pub trait SdkMsg: Send + Sync {
     fn validate_basic(&self) -> std::result::Result<(), String>;
     fn encode(&self) -> Vec<u8> { vec![] }
     fn as_any(&self) -> &dyn std::any::Any where Self: Sized + 'static { self }
+}
+
+// === Legacy types kept for backward compatibility with module_router ===
+
+/// A raw transaction (legacy format, kept for module router compat)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawTx {
+    pub body: LegacyTxBody,
+    pub auth_info: AuthInfo,
+    pub signatures: Vec<Vec<u8>>,
+}
+
+/// Legacy transaction body
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LegacyTxBody {
+    pub messages: Vec<TxMessage>,
+    pub memo: String,
+    pub timeout_height: u64,
+}
+
+/// A message within a transaction (legacy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TxMessage {
+    pub type_url: String,
+    pub value: Vec<u8>,
+}
+
+/// Authentication info for a transaction (legacy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthInfo {
+    pub signer_infos: Vec<SignerInfo>,
+    pub fee: Fee,
+}
+
+/// Signer information (legacy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignerInfo {
+    pub public_key: Option<TxMessage>,
+    pub mode_info: ModeInfo,
+    pub sequence: u64,
+}
+
+/// Signing mode info (legacy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModeInfo {
+    pub single: Option<ModeInfoSingle>,
+}
+
+/// Single signing mode (legacy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModeInfoSingle {
+    pub mode: u32,
+}
+
+/// Transaction fee (legacy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Fee {
+    pub amount: Vec<FeeAmount>,
+    pub gas_limit: u64,
+    pub payer: String,
+    pub granter: String,
+}
+
+/// Fee amount in a specific denomination (legacy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeeAmount {
+    pub denom: String,
+    pub amount: String,
 }

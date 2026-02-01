@@ -12,6 +12,8 @@ gridway-store = { path = "../gridway-store" }
 gridway-types = { path = "../gridway-types" }
 gridway-crypto = { path = "../gridway-crypto" }
 gridway-telemetry = { path = "../gridway-telemetry" }
+commonware-cryptography = { version = "0.0.65", features = ["mocks"] }
+commonware-codec = "0.0.65"
 thiserror = "2.0"
 tokio = { version = "1.0", features = ["full"] }
 hex = "0.4"
