@@ -1,0 +1,23 @@
+[package]
+name = "hook"
+version = "0.1.0"
+edition = "2021"
+authors = ["Gridway Blockchain <contact@gridway.zone>"]
+license = "Apache-2.0"
+description = "WASI Hook module component for Gridway blockchain — block lifecycle hooks"
+
+[dependencies]
+wit-bindgen = { version = "0.36", features = ["default"] }
+wit-bindgen-rt = { version = "0.36" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+
+[lib]
+name = "hook"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+package = "gridway:framework"
+target = { path = "../../../wit", world = "hook-world" }

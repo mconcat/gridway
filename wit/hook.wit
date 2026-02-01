@@ -1,0 +1,60 @@
+package gridway:framework@0.1.0;
+
+/// Block execution hook interface.
+///
+/// Replaces the Cosmos ABCI BeginBlocker/EndBlocker pattern.
+/// Hooks are called by the host during execute_block():
+///   1. pre-execute  — before any TX processing (inflation, epoch transitions, etc.)
+///   2. post-execute — after all TXs processed (reward distribution, settlement, etc.)
+///
+/// Hook modules access state through the kvstore interface and can emit events.
+interface hook {
+    /// Block context provided to hook functions
+    record block-context {
+        /// Current block height
+        height: u64,
+        /// Block timestamp (Unix seconds)
+        timestamp: u64,
+        /// Chain identifier
+        chain-id: string,
+        /// Proposer public key (if known)
+        proposer: option<list<u8>>,
+    }
+
+    /// Event attribute key-value pair
+    record event-attribute {
+        key: string,
+        value: string,
+    }
+
+    /// Event emitted during hook execution
+    record event {
+        /// Event type
+        event-type: string,
+        /// Event attributes
+        attributes: list<event-attribute>,
+    }
+
+    /// Result from hook execution
+    record hook-result {
+        /// Whether the hook executed successfully
+        success: bool,
+        /// Events emitted during execution
+        events: list<event>,
+        /// Error message if failed
+        error: option<string>,
+    }
+
+    /// Called before TX processing in a block.
+    /// Use for: inflation minting, epoch transitions, parameter updates, etc.
+    pre-execute: func(ctx: block-context) -> hook-result;
+
+    /// Called after all TXs in a block have been processed.
+    /// Use for: reward distribution, settlement, validator set updates, etc.
+    post-execute: func(ctx: block-context, tx-count: u32, total-gas: u64) -> hook-result;
+}
+
+world hook-world {
+    import kvstore;
+    export hook;
+}

@@ -1,0 +1,30 @@
+package gridway:framework@0.1.0;
+
+/// KVStore resource for blockchain state access.
+///
+/// Provides a namespace-scoped key-value store interface backed by the
+/// Virtual Filesystem (VFS) and Merkle trie. WASM modules use this to
+/// read and write application state.
+interface kvstore {
+    /// Resource handle for a KVStore
+    resource store {
+        /// Get a value by key
+        get: func(key: list<u8>) -> option<list<u8>>;
+
+        /// Set a key-value pair
+        set: func(key: list<u8>, value: list<u8>);
+
+        /// Delete a key
+        delete: func(key: list<u8>);
+
+        /// Check if a key exists
+        has: func(key: list<u8>) -> bool;
+
+        /// Iterate over a range of keys
+        /// Returns list of (key, value) pairs
+        range: func(start: option<list<u8>>, end: option<list<u8>>, limit: u32) -> list<tuple<list<u8>, list<u8>>>;
+    }
+
+    /// Open a store by name (namespace)
+    open-store: func(name: string) -> result<store, string>;
+}

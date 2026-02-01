@@ -4,7 +4,7 @@
 //! WASM modules that interact with state through the Virtual Filesystem (VFS).
 //!
 //! This version has been adapted for the Commonware Library migration:
-//! - ABCI-specific code (begin_block/end_block/deliver_tx flow) removed
+//! - Commonware native: single execute_block() entry point, no ABCI lifecycle
 //! - Simplified to `execute_block(txs) -> StateRoot` for consensus integration
 //! - VFS, ComponentHost, WASI bridge preserved intact
 //! - Ed25519 TX authentication via commonware-cryptography
@@ -95,7 +95,7 @@ pub struct BlockContext {
 /// Base application — acts as microkernel host for WASM modules.
 ///
 /// Simplified for Commonware integration:
-/// - No ABCI begin_block/end_block lifecycle
+/// - No ABCI lifecycle — single execute_block() entry point for consensus
 /// - Single `execute_block()` entry point for consensus
 /// - State committed via `commit()` returning Merkle root
 /// - Ed25519 TX auth with sequence numbers
@@ -178,7 +178,7 @@ impl BaseApp {
         // Initialize module paths
         let module_base_path = Self::find_module_base_path();
         let mut module_paths = HashMap::new();
-        for name in ["begin_blocker", "end_blocker", "tx_decoder", "ante_handler", "bank"] {
+        for name in ["hook", "validator", "bank"] {
             module_paths.insert(
                 name.to_string(),
                 format!("{module_base_path}/{name}_component.wasm"),
@@ -619,7 +619,7 @@ impl BaseApp {
         let info = ComponentInfo {
             name: "bank".to_string(),
             path: bank_path.clone().into(),
-            component_type: ComponentType::BeginBlocker,
+            component_type: ComponentType::Module,
             gas_limit: 1_000_000,
         };
         let _ = self.component_host.load_component("bank", &component_bytes, info);

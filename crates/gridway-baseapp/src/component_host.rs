@@ -2,13 +2,17 @@
 //!
 //! This module provides the WASI component runtime host that enables dynamic loading
 //! and execution of WASM components using the component model and WIT interfaces.
+//!
+//! Supports three component types:
+//! - **Module**: Domain-specific logic (bank, staking, gov, etc.)
+//! - **Hook**: Block lifecycle hooks (pre/post execute)
+//! - **Validator**: Transaction validation pipeline
 
-use crate::component_bindings::ante_handler::AnteHandlerWorld;
-use crate::component_bindings::tx_decoder::TxDecoderWorld;
+use crate::component_bindings::hook::HookWorld;
+use crate::component_bindings::validator::ValidatorWorld;
 use crate::vfs::VirtualFilesystem;
 // VFS-backed kvstore interface — bridging WASI modules to JMT state
-use crate::component_bindings::ante_handler::gridway::framework::kvstore;
-use hex;
+use crate::component_bindings::module::gridway::framework::kvstore;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -55,7 +59,7 @@ pub struct ComponentInfo {
     pub name: String,
     /// Component path
     pub path: PathBuf,
-    /// Component type (ante-handler, tx-decoder, etc.)
+    /// Component type
     pub component_type: ComponentType,
     /// Gas limit for execution
     pub gas_limit: u64,
@@ -64,11 +68,12 @@ pub struct ComponentInfo {
 /// Component types
 #[derive(Clone, Debug, PartialEq)]
 pub enum ComponentType {
-    AnteHandler,
-    BeginBlocker,
-    EndBlocker,
-    TxDecoder,
-    Module, // Generic application module
+    /// Domain module (bank, staking, gov, etc.)
+    Module,
+    /// Block execution hook (pre/post execute)
+    Hook,
+    /// Transaction validator (decode + validate + auth)
+    Validator,
 }
 
 /// Execution result from a component
@@ -366,170 +371,17 @@ impl ComponentHost {
         Ok(())
     }
 
-    /// Execute an ante-handler component
-    #[allow(clippy::too_many_arguments)]
-    pub fn execute_ante_handler(
-        &self,
-        component_name: &str,
-        block_height: u64,
-        block_time: u64,
-        chain_id: &str,
-        gas_limit: u64,
-        sequence: u64,
-        tx_bytes: Vec<u8>,
-    ) -> Result<ComponentResult> {
-        debug!("Executing ante-handler component: {}", component_name);
-
-        // Get the component
-        let component = {
-            let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            components
-                .get(component_name)
-                .ok_or_else(|| ComponentHostError::ComponentNotFound(component_name.to_string()))?
-                .clone()
-        };
-
-        // Create WASI context
+    /// Create a store with WASI context and fuel limit for a component
+    fn create_store(&self, component_name: &str) -> Result<Store<ComponentState>> {
         let wasi = WasiCtxBuilder::new().build();
-
         let state = ComponentState {
             table: wasmtime_wasi::ResourceTable::new(),
             wasi,
             component_name: component_name.to_string(),
             vfs: self.vfs.clone(),
         };
-
         let mut store = Store::new(&self.engine, state);
 
-        // Set fuel limit
-        let component_gas_limit = {
-            let info = self.component_info.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            info.get(component_name)
-                .map(|i| i.gas_limit)
-                .unwrap_or(self.default_gas_limit)
-        };
-        store
-            .set_fuel(component_gas_limit)
-            .map_err(|e| ComponentHostError::ComponentExecution(e.to_string()))?;
-
-        // Create linker and add WASI
-        let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
-
-        // Add VFS-backed kvstore interface
-        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
-            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
-
-        // Instantiate the component with bindings
-        let bindings = AnteHandlerWorld::instantiate(&mut store, &component, &linker)
-            .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
-
-        // Create the context
-        let context = crate::component_bindings::ante_handler::exports::gridway::framework::ante_handler::TxContext {
-            block_height,
-            block_time,
-            chain_id: chain_id.to_string(),
-            gas_limit,
-            sequence,
-            simulate: false,
-            is_check_tx: false,
-            is_recheck: false,
-        };
-
-        // Execute the component
-        let response = bindings
-            .gridway_framework_ante_handler()
-            .call_ante_handle(&mut store, &context, &tx_bytes)
-            .map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
-            })?;
-
-        // Get remaining fuel for gas tracking
-        let gas_used = component_gas_limit - store.get_fuel().unwrap_or(0);
-
-        // Convert events to JSON for stdout
-        let events_data: Vec<serde_json::Value> = response
-            .events
-            .iter()
-            .map(|event| {
-                let attributes: Vec<serde_json::Value> = event
-                    .attributes
-                    .iter()
-                    .map(|attr| {
-                        serde_json::json!({
-                            "key": attr.key,
-                            "value": attr.value
-                        })
-                    })
-                    .collect();
-                serde_json::json!({
-                    "event_type": event.event_type,
-                    "attributes": attributes
-                })
-            })
-            .collect();
-        let events_json = serde_json::to_string(&events_data).unwrap_or_default();
-
-        let error_stderr = if let Some(ref error) = response.error {
-            error.as_bytes().to_vec()
-        } else {
-            Vec::new()
-        };
-
-        Ok(ComponentResult {
-            success: response.success,
-            exit_code: if response.success { 0 } else { 1 },
-            data: Some(serde_json::json!({
-                "gas_used": response.gas_used,
-                "priority": response.priority,
-                "events": events_data
-            })),
-            error: response.error,
-            stdout: events_json.as_bytes().to_vec(),
-            stderr: error_stderr,
-            gas_used,
-        })
-    }
-
-    /// Execute a tx-decoder component
-    pub fn execute_tx_decoder(
-        &self,
-        component_name: &str,
-        tx_bytes: &str,
-        encoding: &str,
-        validate: bool,
-    ) -> Result<ComponentResult> {
-        debug!("Executing tx-decoder component: {}", component_name);
-
-        // Get the component
-        let component = {
-            let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            components
-                .get(component_name)
-                .ok_or_else(|| ComponentHostError::ComponentNotFound(component_name.to_string()))?
-                .clone()
-        };
-
-        // Create WASI context
-        let wasi = WasiCtxBuilder::new().build();
-
-        let state = ComponentState {
-            table: wasmtime_wasi::ResourceTable::new(),
-            wasi,
-            component_name: component_name.to_string(),
-            vfs: self.vfs.clone(),
-        };
-
-        let mut store = Store::new(&self.engine, state);
-
-        // Set fuel limit
         let gas_limit = {
             let info = self.component_info.lock().map_err(|e| {
                 ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
@@ -542,298 +394,277 @@ impl ComponentHost {
             .set_fuel(gas_limit)
             .map_err(|e| ComponentHostError::ComponentExecution(e.to_string()))?;
 
-        // Create linker and add WASI
+        Ok(store)
+    }
+
+    /// Create a linker with WASI and kvstore bindings
+    fn create_linker(&self) -> Result<Linker<ComponentState>> {
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
+        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(
+            &mut linker,
+            |state| state,
+        )
+        .map_err(|e| {
+            ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}"))
+        })?;
+        Ok(linker)
+    }
 
-        // Add VFS-backed kvstore interface
-        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
-            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
+    /// Get a loaded component by name
+    fn get_component(&self, name: &str) -> Result<Component> {
+        let components = self.components.lock().map_err(|e| {
+            ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
+        })?;
+        components
+            .get(name)
+            .ok_or_else(|| ComponentHostError::ComponentNotFound(name.to_string()))
+            .cloned()
+    }
 
-        // Instantiate the component with bindings
-        let bindings = TxDecoderWorld::instantiate(&mut store, &component, &linker)
+    /// Get fuel-based gas consumption from a store
+    fn fuel_gas_used(&self, store: &mut Store<ComponentState>) -> u64 {
+        let gas_limit = {
+            let info = self.component_info.lock().ok();
+            info.and_then(|i| {
+                i.values()
+                    .next()
+                    .map(|v| v.gas_limit)
+            })
+            .unwrap_or(self.default_gas_limit)
+        };
+        gas_limit - store.get_fuel().unwrap_or(0)
+    }
+
+    /// Convert component events to JSON
+    fn events_to_json(
+        events: &[(String, Vec<(String, String)>)],
+    ) -> Vec<serde_json::Value> {
+        events
+            .iter()
+            .map(|(event_type, attributes)| {
+                let attrs: Vec<serde_json::Value> = attributes
+                    .iter()
+                    .map(|(key, value)| {
+                        serde_json::json!({ "key": key, "value": value })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "event_type": event_type,
+                    "attributes": attrs
+                })
+            })
+            .collect()
+    }
+
+    // =========================================================================
+    // Hook execution (replaces begin-blocker / end-blocker)
+    // =========================================================================
+
+    /// Execute the pre-execute hook (called before TX processing).
+    pub fn execute_hook_pre(
+        &self,
+        component_name: &str,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+        proposer: Option<Vec<u8>>,
+    ) -> Result<ComponentResult> {
+        debug!("Executing hook pre-execute: {}", component_name);
+
+        let component = self.get_component(component_name)?;
+        let mut store = self.create_store(component_name)?;
+        let linker = self.create_linker()?;
+
+        let bindings = HookWorld::instantiate(&mut store, &component, &linker)
             .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
-        // Create decode request using the generated types
-        let request = crate::component_bindings::tx_decoder::exports::gridway::framework::tx_decoder::DecodeRequest {
-            tx_bytes: tx_bytes.to_string(),
-            encoding: encoding.to_string(),
-            validate,
-        };
-
-        // Call decode-tx function through the generated interface
-        let response = bindings
-            .gridway_framework_tx_decoder()
-            .call_decode_tx(&mut store, &request)
-            .map_err(|e| ComponentHostError::ComponentExecution(e.to_string()))?;
-
-        // Get gas consumed
-        let gas_used = self.get_gas_consumed(&mut store);
-
-        // Convert response to ComponentResult
-        let stdout_data = response.decoded_tx.clone().unwrap_or_default();
-        let data = response
-            .decoded_tx
-            .and_then(|s| serde_json::from_str(&s).ok());
-
-        Ok(ComponentResult {
-            success: response.success,
-            exit_code: if response.success { 0 } else { 1 },
-            data,
-            error: response.error.clone(),
-            stdout: stdout_data.as_bytes().to_vec(),
-            stderr: response.error.unwrap_or_default().as_bytes().to_vec(),
-            gas_used,
-        })
-    }
-
-    /// Execute a begin-blocker component
-    pub fn execute_begin_blocker(
-        &self,
-        block_height: u64,
-        block_time: u64,
-        chain_id: &str,
-        gas_limit: u64,
-        byzantine_validators: Vec<String>,
-    ) -> Result<ComponentResult> {
-        debug!("Executing begin-blocker component");
-
-        // Get the component (assume "begin-blocker" as the component name)
-        let component = {
-            let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            components
-                .get("begin-blocker")
-                .ok_or_else(|| ComponentHostError::ComponentNotFound("begin-blocker".to_string()))?
-                .clone()
-        };
-
-        // Create store
-        let mut store = Store::new(
-            &self.engine,
-            ComponentState {
-                table: wasmtime_wasi::ResourceTable::new(),
-                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
-                component_name: "begin-blocker".to_string(),
-                vfs: self.vfs.clone(),
-            },
-        );
-
-        // Set fuel for gas limiting
-        store.set_fuel(gas_limit).map_err(|e| {
-            ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}"))
-        })?;
-
-        // Create linker and add WASI
-        let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
-
-        // Add VFS-backed kvstore interface
-        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
-            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
-
-        // Instantiate the component with bindings
-        let bindings = crate::component_bindings::begin_blocker::BeginBlockerWorld::instantiate(
-            &mut store, &component, &linker,
-        )
-        .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
-
-        // Create the request
-        let evidence_list: Vec<crate::component_bindings::begin_blocker::exports::gridway::framework::begin_blocker::Evidence> = byzantine_validators
-            .into_iter()
-            .map(|_| crate::component_bindings::begin_blocker::exports::gridway::framework::begin_blocker::Evidence {
-                validator_address: vec![],
-                evidence_type: "duplicate_vote".to_string(),
-                height: block_height,
-            })
-            .collect();
-
-        let request = crate::component_bindings::begin_blocker::exports::gridway::framework::begin_blocker::BeginBlockRequest {
-            height: block_height,
-            time: block_time,
+        let ctx = crate::component_bindings::hook::exports::gridway::framework::hook::BlockContext {
+            height,
+            timestamp,
             chain_id: chain_id.to_string(),
-            byzantine_validators: evidence_list,
+            proposer,
         };
 
-        // Execute the component
         let response = bindings
-            .gridway_framework_begin_blocker()
-            .call_begin_block(&mut store, &request)
+            .gridway_framework_hook()
+            .call_pre_execute(&mut store, &ctx)
             .map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
+                ComponentHostError::ComponentExecution(format!("Hook pre-execute failed: {e}"))
             })?;
 
-        // Get remaining fuel for gas tracking
-        let gas_used = gas_limit - store.get_fuel().unwrap_or(0);
+        let gas_used = self.fuel_gas_used(&mut store);
 
-        // Convert events to JSON for stdout
-        let events_data: Vec<serde_json::Value> = response
+        let events: Vec<(String, Vec<(String, String)>)> = response
             .events
             .iter()
-            .map(|event| {
-                let attributes: Vec<serde_json::Value> = event
-                    .attributes
-                    .iter()
-                    .map(|attr| {
-                        serde_json::json!({
-                            "key": attr.key,
-                            "value": attr.value
-                        })
-                    })
-                    .collect();
-                serde_json::json!({
-                    "event_type": event.event_type,
-                    "attributes": attributes
-                })
+            .map(|e| {
+                (
+                    e.event_type.clone(),
+                    e.attributes.iter().map(|a| (a.key.clone(), a.value.clone())).collect(),
+                )
             })
             .collect();
-        let events_json = serde_json::to_string(&events_data).unwrap_or_default();
-
-        let error_stderr = if let Some(ref error) = response.error {
-            error.as_bytes().to_vec()
-        } else {
-            Vec::new()
-        };
+        let events_data = Self::events_to_json(&events);
 
         Ok(ComponentResult {
             success: response.success,
             exit_code: if response.success { 0 } else { 1 },
-            data: Some(serde_json::json!({"events": events_data})),
+            data: Some(serde_json::json!({ "events": events_data })),
             error: response.error,
-            stdout: events_json.as_bytes().to_vec(),
-            stderr: error_stderr,
+            stdout: serde_json::to_string(&events_data).unwrap_or_default().into_bytes(),
+            stderr: Vec::new(),
             gas_used,
         })
     }
 
-    /// Execute an end-blocker component  
-    pub fn execute_end_blocker(
+    /// Execute the post-execute hook (called after TX processing).
+    pub fn execute_hook_post(
         &self,
-        block_height: u64,
-        _block_time: u64,
+        component_name: &str,
+        height: u64,
+        timestamp: u64,
         chain_id: &str,
-        gas_limit: u64,
+        proposer: Option<Vec<u8>>,
+        tx_count: u32,
+        total_gas: u64,
     ) -> Result<ComponentResult> {
-        debug!("Executing end-blocker component");
+        debug!("Executing hook post-execute: {}", component_name);
 
-        // Get the component (assume "end-blocker" as the component name)
-        let component = {
-            let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            components
-                .get("end-blocker")
-                .ok_or_else(|| ComponentHostError::ComponentNotFound("end-blocker".to_string()))?
-                .clone()
+        let component = self.get_component(component_name)?;
+        let mut store = self.create_store(component_name)?;
+        let linker = self.create_linker()?;
+
+        let bindings = HookWorld::instantiate(&mut store, &component, &linker)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
+
+        let ctx = crate::component_bindings::hook::exports::gridway::framework::hook::BlockContext {
+            height,
+            timestamp,
+            chain_id: chain_id.to_string(),
+            proposer,
         };
 
-        // Create store
-        let mut store = Store::new(
-            &self.engine,
-            ComponentState {
-                table: wasmtime_wasi::ResourceTable::new(),
-                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
-                component_name: "end-blocker".to_string(),
-                vfs: self.vfs.clone(),
-            },
-        );
+        let response = bindings
+            .gridway_framework_hook()
+            .call_post_execute(&mut store, &ctx, tx_count, total_gas)
+            .map_err(|e| {
+                ComponentHostError::ComponentExecution(format!("Hook post-execute failed: {e}"))
+            })?;
 
-        // Set fuel for gas limiting
-        store.set_fuel(gas_limit).map_err(|e| {
-            ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}"))
-        })?;
+        let gas_used = self.fuel_gas_used(&mut store);
 
-        // Create linker and add WASI
-        let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
+        let events: Vec<(String, Vec<(String, String)>)> = response
+            .events
+            .iter()
+            .map(|e| {
+                (
+                    e.event_type.clone(),
+                    e.attributes.iter().map(|a| (a.key.clone(), a.value.clone())).collect(),
+                )
+            })
+            .collect();
+        let events_data = Self::events_to_json(&events);
 
-        // Add VFS-backed kvstore interface
-        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
-            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
+        Ok(ComponentResult {
+            success: response.success,
+            exit_code: if response.success { 0 } else { 1 },
+            data: Some(serde_json::json!({ "events": events_data })),
+            error: response.error,
+            stdout: serde_json::to_string(&events_data).unwrap_or_default().into_bytes(),
+            stderr: Vec::new(),
+            gas_used,
+        })
+    }
 
-        // Instantiate the component with bindings
-        let bindings = crate::component_bindings::end_blocker::EndBlockerWorld::instantiate(
-            &mut store, &component, &linker,
-        )
-        .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
+    // =========================================================================
+    // Validator execution (replaces ante-handler + tx-decoder)
+    // =========================================================================
 
-        // Create the request
-        let request = crate::component_bindings::end_blocker::exports::gridway::framework::end_blocker::EndBlockRequest {
-            height: block_height,
+    /// Validate a raw transaction through the WASM validator component.
+    pub fn execute_validator(
+        &self,
+        component_name: &str,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+        raw_tx: &[u8],
+    ) -> Result<ComponentResult> {
+        debug!("Executing validator: {}", component_name);
+
+        let component = self.get_component(component_name)?;
+        let mut store = self.create_store(component_name)?;
+        let linker = self.create_linker()?;
+
+        let bindings = ValidatorWorld::instantiate(&mut store, &component, &linker)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
+
+        let ctx = crate::component_bindings::validator::exports::gridway::framework::validator::TxContext {
+            height,
+            timestamp,
             chain_id: chain_id.to_string(),
         };
 
-        // Execute the component
         let response = bindings
-            .gridway_framework_end_blocker()
-            .call_end_block(&mut store, &request)
+            .gridway_framework_validator()
+            .call_validate(&mut store, &ctx, raw_tx)
             .map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
+                ComponentHostError::ComponentExecution(format!("Validator execution failed: {e}"))
             })?;
 
-        // Get remaining fuel for gas tracking
-        let gas_used = gas_limit - store.get_fuel().unwrap_or(0);
+        let gas_used = self.fuel_gas_used(&mut store);
 
-        // Convert events and validator updates to JSON for stdout
-        let events_data: Vec<serde_json::Value> = response
-            .events
-            .iter()
-            .map(|event| {
-                let attributes: Vec<serde_json::Value> = event
-                    .attributes
-                    .iter()
-                    .map(|attr| {
-                        serde_json::json!({
-                            "key": attr.key,
-                            "value": attr.value
-                        })
+        // Convert validated TX to JSON data
+        let tx_data = response.tx.as_ref().map(|tx| {
+            let messages: Vec<serde_json::Value> = tx
+                .messages
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "type_url": m.type_url,
+                        "data": m.data,
                     })
-                    .collect();
-                serde_json::json!({
-                    "event_type": event.event_type,
-                    "attributes": attributes
                 })
+                .collect();
+            serde_json::json!({
+                "sender": tx.sender,
+                "messages": messages,
+                "sequence": tx.sequence,
+                "gas_limit": tx.gas_limit,
             })
-            .collect();
-        let validator_updates_data: Vec<serde_json::Value> = response
-            .validator_updates
-            .iter()
-            .map(|update| {
-                serde_json::json!({
-                    "pub_key": {
-                        "type_url": update.pub_key.key_type,
-                        "value": hex::encode(&update.pub_key.value)
-                    },
-                    "power": update.power
-                })
-            })
-            .collect();
-        let output_data = serde_json::json!({
-            "events": events_data,
-            "validator_updates": validator_updates_data
         });
-        let output_json = serde_json::to_string(&output_data).unwrap_or_default();
 
-        let error_stderr = if let Some(ref error) = response.error {
-            error.as_bytes().to_vec()
-        } else {
-            Vec::new()
-        };
+        let events: Vec<(String, Vec<(String, String)>)> = response
+            .events
+            .iter()
+            .map(|e| {
+                (
+                    e.event_type.clone(),
+                    e.attributes.iter().map(|a| (a.key.clone(), a.value.clone())).collect(),
+                )
+            })
+            .collect();
+        let events_data = Self::events_to_json(&events);
 
         Ok(ComponentResult {
-            success: response.success,
-            exit_code: if response.success { 0 } else { 1 },
-            data: Some(output_data),
+            success: response.valid,
+            exit_code: if response.valid { 0 } else { 1 },
+            data: Some(serde_json::json!({
+                "tx": tx_data,
+                "gas_used": response.gas_used,
+                "events": events_data,
+            })),
             error: response.error,
-            stdout: output_json.as_bytes().to_vec(),
-            stderr: error_stderr,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
             gas_used,
         })
     }
+
+    // =========================================================================
+    // Module execution (unchanged)
+    // =========================================================================
 
     /// Execute a module component (e.g., bank, staking)
     pub fn execute_module(
@@ -849,41 +680,22 @@ impl ComponentHost {
     ) -> Result<ComponentResult> {
         debug!("Executing module component: {}", module_name);
 
-        // Get the component by module name
-        let component = {
-            let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            components
-                .get(module_name)
-                .ok_or_else(|| ComponentHostError::ComponentNotFound(module_name.to_string()))?
-                .clone()
+        let component = self.get_component(module_name)?;
+
+        // Create store with specific gas limit
+        let wasi = WasiCtxBuilder::new().inherit_stdio().build();
+        let state = ComponentState {
+            table: wasmtime_wasi::ResourceTable::new(),
+            wasi,
+            component_name: module_name.to_string(),
+            vfs: self.vfs.clone(),
         };
+        let mut store = Store::new(&self.engine, state);
+        store
+            .set_fuel(gas_limit)
+            .map_err(|e| ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}")))?;
 
-        // Create store
-        let mut store = Store::new(
-            &self.engine,
-            ComponentState {
-                table: wasmtime_wasi::ResourceTable::new(),
-                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
-                component_name: module_name.to_string(),
-                vfs: self.vfs.clone(),
-            },
-        );
-
-        // Set fuel for gas limiting
-        store.set_fuel(gas_limit).map_err(|e| {
-            ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}"))
-        })?;
-
-        // Create linker and add WASI
-        let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
-
-        // Add VFS-backed kvstore interface
-        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
-            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
+        let linker = self.create_linker()?;
 
         // Instantiate the component with module-world bindings
         let bindings = crate::component_bindings::module::ModuleWorld::instantiate(
@@ -962,9 +774,6 @@ impl ComponentHost {
         store.get_fuel().unwrap_or(0)
     }
 }
-
-// Component interface bindings would go here
-// For now, we're using a simplified approach
 
 #[cfg(test)]
 mod tests {
