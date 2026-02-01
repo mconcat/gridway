@@ -8,7 +8,6 @@
 use crate::application::GridwayApp;
 use crate::types::{Finalization, GridwayScheme, PublicKey, EPOCH, EPOCH_LENGTH, NAMESPACE};
 
-use gridway_baseapp::BaseApp;
 use gridway_types::GridwayBlock;
 
 use commonware_broadcast::buffered;
@@ -138,7 +137,7 @@ impl<
     > Engine<E, B, S>
 {
     /// Create a new [Engine].
-    pub async fn new(context: E, cfg: Config<B, S>) -> Self {
+    pub async fn new(context: E, cfg: Config<B, S>, app: GridwayApp) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -266,8 +265,6 @@ impl<
         .await;
 
         // Create the application
-        let baseapp = BaseApp::new("gridway".to_string()).expect("Failed to create BaseApp");
-        let app = GridwayApp::new(baseapp);
         let marshaled = GridwayMarshaled::new(
             context.with_label("marshaled"),
             app,

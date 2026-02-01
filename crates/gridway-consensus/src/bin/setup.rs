@@ -52,7 +52,7 @@ fn main() {
                 .long("start-port")
                 .default_value("4545")
                 .value_parser(value_parser!(u16))
-                .help("Starting port number (each validator uses 2 ports)"),
+                .help("Starting port number (each validator uses 3 ports: p2p, metrics, tx)"),
         )
         .arg(
             Arg::new("worker_threads")
@@ -176,6 +176,7 @@ fn main() {
 
             port,
             metrics_port: port + 1,
+            tx_port: port + 2,
             directory,
             worker_threads,
             log_level: log_level.clone(),
@@ -190,7 +191,7 @@ fn main() {
             signature_threads,
         };
         configurations.push((name, peer_config_file, peer_config));
-        port += 2;
+        port += 3; // p2p, metrics, tx
     }
 
     // Write output
@@ -226,5 +227,14 @@ fn main() {
             "  {name}: curl http://localhost:{}/metrics",
             peer_config.metrics_port
         );
+    }
+    println!("\nTo submit transactions / query balances:");
+    for (name, _, peer_config) in &configurations {
+        if peer_config.tx_port > 0 {
+            println!(
+                "  {name}: curl http://localhost:{}/balance/alice/ugridway",
+                peer_config.tx_port
+            );
+        }
     }
 }

@@ -8,10 +8,12 @@
 //! - gridway-baseapp for WASM microkernel execution
 
 use gridway_consensus::{
+    application::GridwayApp,
     config::{NodeConfig, Peers},
     engine,
     types::{PublicKey, EPOCH, NAMESPACE},
 };
+use gridway_baseapp::BaseApp;
 
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
@@ -27,6 +29,7 @@ use commonware_utils::{from_hex_formatted, ordered::Set, union_unique, NZUsize, 
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
+    io::{BufRead, BufReader, Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU32,
     path::PathBuf,
@@ -53,6 +56,160 @@ const MAX_FETCH_COUNT: usize = 16;
 const MAX_FETCH_SIZE: usize = 512 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+
+// ============================================================================
+// HTTP API server for transaction submission and balance queries
+// ============================================================================
+
+/// Start a simple HTTP server for TX submission and balance queries.
+///
+/// Runs in a separate OS thread (std::thread) so it doesn't interfere with
+/// the commonware async runtime. Uses blocking I/O — perfectly fine for a
+/// demo/testnet API that handles a handful of requests.
+fn start_http_server(addr: SocketAddr, app: GridwayApp) {
+    std::thread::spawn(move || {
+        let listener = match std::net::TcpListener::bind(addr) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("Failed to bind HTTP server on {}: {}", addr, e);
+                return;
+            }
+        };
+        // Use println here since tracing may not be set up on this thread
+        println!("HTTP API listening on http://{}", addr);
+        println!("  POST /tx                        — submit transaction");
+        println!("  GET  /balance/{{address}}/{{denom}}  — query balance");
+
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            let app = app.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = handle_http_request(stream, &app) {
+                    eprintln!("HTTP request error: {}", e);
+                }
+            });
+        }
+    });
+}
+
+fn handle_http_request(
+    mut stream: std::net::TcpStream,
+    app: &GridwayApp,
+) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+    let mut reader = BufReader::new(&stream);
+
+    // Read request line
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line)?;
+    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+    if parts.len() < 2 {
+        let resp = http_response(400, "application/json", r#"{"error":"bad request"}"#);
+        stream.write_all(resp.as_bytes())?;
+        return Ok(());
+    }
+
+    let method = parts[0];
+    let path = parts[1];
+
+    // Read headers
+    let mut content_length: usize = 0;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+        if line.trim().is_empty() {
+            break;
+        }
+        if let Some(val) = line.to_lowercase().strip_prefix("content-length:") {
+            content_length = val.trim().parse().unwrap_or(0);
+        }
+    }
+
+    // Read body
+    let body = if content_length > 0 {
+        let mut buf = vec![0u8; content_length];
+        reader.read_exact(&mut buf)?;
+        buf
+    } else {
+        Vec::new()
+    };
+
+    // Route request
+    let response = match (method, path) {
+        ("POST", "/tx") => handle_submit_tx(app, &body),
+        ("GET", p) if p.starts_with("/balance/") => handle_balance_query(app, p),
+        ("GET", "/health") => http_response(200, "application/json", r#"{"status":"ok"}"#),
+        _ => http_response(404, "application/json", r#"{"error":"not found"}"#),
+    };
+
+    stream.write_all(response.as_bytes())?;
+    Ok(())
+}
+
+fn handle_submit_tx(app: &GridwayApp, body: &[u8]) -> String {
+    if body.is_empty() {
+        return http_response(400, "application/json", r#"{"error":"empty body"}"#);
+    }
+
+    // Validate it's at least valid JSON
+    if serde_json::from_slice::<serde_json::Value>(body).is_err() {
+        return http_response(400, "application/json", r#"{"error":"invalid JSON"}"#);
+    }
+
+    app.submit_tx(body.to_vec());
+    http_response(200, "application/json", r#"{"status":"submitted"}"#)
+}
+
+fn handle_balance_query(app: &GridwayApp, path: &str) -> String {
+    let stripped = path.trim_start_matches("/balance/");
+    let parts: Vec<&str> = stripped.splitn(2, '/').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+        return http_response(
+            400,
+            "application/json",
+            r#"{"error":"use /balance/{address}/{denom}"}"#,
+        );
+    }
+
+    let address = parts[0];
+    let denom = parts[1];
+
+    let balance = match app.baseapp().lock() {
+        Ok(baseapp) => baseapp.get_balance(address, denom).unwrap_or(0),
+        Err(_) => {
+            return http_response(
+                500,
+                "application/json",
+                r#"{"error":"internal: lock poisoned"}"#,
+            );
+        }
+    };
+
+    let body = format!(
+        r#"{{"address":"{}","denom":"{}","balance":{}}}"#,
+        address, denom, balance
+    );
+    http_response(200, "application/json", &body)
+}
+
+fn http_response(status: u16, content_type: &str, body: &str) -> String {
+    let status_text = match status {
+        200 => "OK",
+        400 => "Bad Request",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        _ => "Unknown",
+    };
+    format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{}",
+        status, status_text, content_type, body.len(), body
+    )
+}
+
+// ============================================================================
+// Main
+// ============================================================================
 
 fn main() {
     // Parse arguments
@@ -86,6 +243,9 @@ fn main() {
     let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
     let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
     let public_key = signer.public_key();
+
+    // Capture tx_port before config is moved into the async block
+    let tx_port = config.tx_port;
 
     // Initialize runtime
     let cfg = tokio::Config::default()
@@ -150,7 +310,36 @@ fn main() {
             "loaded config"
         );
 
+        // ====================================================================
+        // Create BaseApp with genesis state
+        // ====================================================================
+        let mut baseapp = BaseApp::new("gridway".to_string()).expect("Failed to create BaseApp");
+
+        // Set genesis balances
+        baseapp.set_balance("alice", "ugridway", 1_000_000).expect("Failed to set alice balance");
+        baseapp.set_balance("bob", "ugridway", 0).expect("Failed to set bob balance");
+
+        // Commit genesis state so the Merkle root reflects initial balances
+        let genesis_root = baseapp.commit().expect("Failed to commit genesis state");
+        info!(
+            state_root = hex::encode(genesis_root),
+            "committed genesis state (alice: 1_000_000 ugridway, bob: 0 ugridway)"
+        );
+
+        // Create the application wrapper
+        let gridway_app = GridwayApp::new(baseapp);
+
+        // ====================================================================
+        // Start HTTP API server (if tx_port configured)
+        // ====================================================================
+        if tx_port > 0 {
+            let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), tx_port);
+            start_http_server(http_addr, gridway_app.clone());
+        }
+
+        // ====================================================================
         // Configure network
+        // ====================================================================
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
         let mut p2p_cfg = if config.local {
             authenticated::Config::local(
@@ -212,7 +401,7 @@ fn main() {
             .create_strategy(NZUsize!(config.signature_threads))
             .unwrap();
 
-        // Create engine
+        // Create engine (pass the pre-configured GridwayApp)
         let engine_cfg = engine::Config {
             blocker: oracle.clone(),
             partition_prefix: "engine".to_string(),
@@ -236,7 +425,11 @@ fn main() {
             share,
             strategy,
         };
-        let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
+        let engine = engine::Engine::new(
+            context.with_label("engine"),
+            engine_cfg,
+            gridway_app,
+        ).await;
 
         // Create marshal resolver
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
@@ -260,7 +453,10 @@ fn main() {
         info!("Gridway node started");
         info!("  Consensus: commonware-consensus (simplex BFT)");
         info!("  Networking: commonware-p2p (authenticated)");
-        info!("  Execution: gridway-baseapp (WASM microkernel)");
+        info!("  Execution: gridway-baseapp (WASM microkernel + native bank)");
+        if tx_port > 0 {
+            info!("  HTTP API: http://0.0.0.0:{}", tx_port);
+        }
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine_handle]).await {

@@ -20,6 +20,10 @@ pub struct NodeConfig {
     pub port: u16,
     /// Prometheus metrics port.
     pub metrics_port: u16,
+    /// HTTP API port for transaction submission and balance queries.
+    /// Set to 0 to disable.
+    #[serde(default)]
+    pub tx_port: u16,
     /// Directory for persistent storage (consensus state, archives).
     pub directory: String,
     /// Number of tokio worker threads.
