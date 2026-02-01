@@ -11,9 +11,12 @@
 //! - `report()` on finalization → commits state to MerkleStore
 
 pub mod application;
+pub mod config;
+pub mod engine;
 pub mod types;
 
 pub use application::GridwayApp;
+pub use config::{NodeConfig, Peers};
 pub use types::{
     Activity, Finalization, GridwayScheme, Notarization, Seedable,
 };

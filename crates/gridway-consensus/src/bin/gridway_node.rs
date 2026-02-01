@@ -1,71 +1,270 @@
 //! Gridway Node — the main validator binary.
 //!
-//! Wires together all components:
-//! - commonware-runtime for async execution
-//! - commonware-p2p for networking
-//! - commonware-broadcast for message dissemination
+//! Wires together all components following Alto's validator.rs pattern:
+//! - commonware-runtime (tokio) for async execution
+//! - commonware-p2p (authenticated) for networking
+//! - commonware-broadcast (buffered) for message dissemination
 //! - commonware-consensus (simplex) for BFT consensus
 //! - gridway-baseapp for WASM microkernel execution
-//!
-//! This is a minimal placeholder that demonstrates the architecture.
-//! A full implementation would include configuration, key management,
-//! peer discovery, and proper error handling.
 
-use gridway_baseapp::BaseApp;
-use gridway_consensus::GridwayApp;
-use tracing::info;
+use gridway_consensus::{
+    config::{NodeConfig, Peers},
+    engine,
+    types::{PublicKey, EPOCH, NAMESPACE},
+};
+
+use clap::{Arg, Command};
+use commonware_codec::{Decode, DecodeExt};
+use commonware_consensus::{marshal, types::ViewDelta};
+use commonware_cryptography::{
+    bls12381::primitives::{group, sharing::Sharing, variant::MinSig},
+    ed25519::PrivateKey,
+    Signer,
+};
+use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
+use commonware_runtime::{tokio, Metrics, RayonPoolSpawner, Runner};
+use commonware_utils::{from_hex_formatted, ordered::Set, union_unique, NZUsize, NZU32};
+use futures::future::try_join_all;
+use governor::Quota;
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    num::NonZeroU32,
+    path::PathBuf,
+    str::FromStr,
+    time::Duration,
+};
+use tracing::{error, info, Level};
+
+const PENDING_CHANNEL: u64 = 0;
+const RECOVERED_CHANNEL: u64 = 1;
+const RESOLVER_CHANNEL: u64 = 2;
+const BROADCASTER_CHANNEL: u64 = 3;
+const MARSHAL_CHANNEL: u64 = 4;
+
+const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
+const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
+const NULLIFY_RETRY: Duration = Duration::from_secs(10);
+const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
+const SKIP_TIMEOUT: ViewDelta = ViewDelta::new(32);
+const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
+const FETCH_CONCURRENT: usize = 4;
+const MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
+const MAX_FETCH_COUNT: usize = 16;
+const MAX_FETCH_SIZE: usize = 512 * 1024;
+const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
 fn main() {
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    // Parse arguments
+    let matches = Command::new("gridway-node")
+        .about("Validator for a gridway chain.")
+        .arg(Arg::new("peers").long("peers").required(true))
+        .arg(Arg::new("config").long("config").required(true))
+        .get_matches();
 
-    info!("Starting Gridway node...");
-    info!("Architecture: Commonware Library + WASM Microkernel");
+    // Load peers file
+    let peers_file = matches.get_one::<String>("peers").unwrap();
+    let peers_content = std::fs::read_to_string(peers_file).expect("Could not read peers file");
+    let peers: Peers =
+        serde_yaml::from_str(&peers_content).expect("Could not parse peers file");
+    let peer_map: std::collections::HashMap<PublicKey, SocketAddr> = peers
+        .addresses
+        .into_iter()
+        .map(|peer| {
+            let key = from_hex_formatted(&peer.0).expect("Could not parse peer key");
+            let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+            (key, peer.1)
+        })
+        .collect();
 
-    // Create BaseApp with WASM microkernel
-    let baseapp = BaseApp::new("gridway".to_string())
-        .expect("Failed to create BaseApp");
+    // Load config
+    let config_file = matches.get_one::<String>("config").unwrap();
+    let config_content =
+        std::fs::read_to_string(config_file).expect("Could not read config file");
+    let config: NodeConfig =
+        serde_yaml::from_str(&config_content).expect("Could not parse config file");
+    let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
+    let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
+    let public_key = signer.public_key();
 
-    // Create GridwayApp (consensus wrapper)
-    let app = GridwayApp::new(baseapp);
+    // Initialize runtime
+    let cfg = tokio::Config::default()
+        .with_tcp_nodelay(Some(true))
+        .with_worker_threads(config.worker_threads)
+        .with_storage_directory(PathBuf::from(&config.directory))
+        .with_catch_panics(false);
+    let executor = tokio::Runner::new(cfg);
 
-    info!("GridwayApp initialized");
-    info!("  - Consensus: commonware-consensus (simplex)");
-    info!("  - Storage: gridway-store (MerkleStore)");
-    info!("  - Execution: WASM microkernel (VFS + ComponentHost)");
+    // Start runtime
+    executor.start(|context| async move {
+        // Configure telemetry
+        let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
+        tokio::telemetry::init(
+            context.with_label("telemetry"),
+            tokio::telemetry::Logging {
+                level: log_level,
+                json: false,
+            },
+            Some(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                config.metrics_port,
+            )),
+            None,
+        );
 
-    // TODO: Full engine setup following Alto's pattern:
-    //
-    // 1. Load validator configuration (keys, peers, etc.)
-    //    let config = load_config();
-    //
-    // 2. Create BLS12-381 threshold signing scheme
-    //    let scheme = Scheme::signer(NAMESPACE, participants, polynomial, share);
-    //
-    // 3. Create commonware runtime
-    //    let runtime = commonware_runtime::tokio::Executor::init(...);
-    //
-    // 4. Set up p2p networking
-    //    let (p2p_sender, p2p_receiver) = commonware_p2p::authenticated::Engine::new(...);
-    //
-    // 5. Create buffered broadcast engine
-    //    let (buffer, buffer_mailbox) = commonware_broadcast::buffered::Engine::new(...);
-    //
-    // 6. Create marshal actor (block marshaling)
-    //    let (marshal, marshal_mailbox) = commonware_consensus::marshal::Actor::init(...);
-    //
-    // 7. Create simplex consensus engine
-    //    let consensus = commonware_consensus::simplex::Engine::new(...);
-    //
-    // 8. Start all engines and wait
-    //    consensus.start(pending, recovered, resolver).await;
-    //
-    // For now, just show the architecture is wired up:
-    info!("Node architecture validated. Full p2p/consensus engine TODO.");
-    info!("Use `cargo test -p gridway-consensus` to run consensus integration tests.");
+        // Prepare peers
+        let peer_keys: Vec<PublicKey> = peer_map.keys().cloned().collect();
+        let peers_u32 = peer_keys.len() as u32;
+
+        // Build bootstrapper list
+        let mut bootstrappers = Vec::new();
+        for bootstrapper_hex in &config.bootstrappers {
+            let key =
+                from_hex_formatted(bootstrapper_hex).expect("Could not parse bootstrapper key");
+            let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
+            let socket = peer_map
+                .get(&key)
+                .expect("Could not find bootstrapper in peers");
+            bootstrappers.push((key, Ingress::Socket(*socket)));
+        }
+
+        let ip = peer_map
+            .get(&public_key)
+            .expect("Could not find self in peers")
+            .ip();
+        info!(peers = peer_keys.len(), "loaded peers");
+
+        // Parse BLS keys
+        let share = from_hex_formatted(&config.share).expect("Could not parse share");
+        let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
+        let polynomial =
+            from_hex_formatted(&config.polynomial).expect("Could not parse polynomial");
+        let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(peers_u32))
+            .expect("Polynomial is invalid");
+        let identity = polynomial.public();
+        info!(
+            ?public_key,
+            ?identity,
+            ?ip,
+            port = config.port,
+            "loaded config"
+        );
+
+        // Configure network
+        let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
+        let mut p2p_cfg = if config.local {
+            authenticated::Config::local(
+                signer.clone(),
+                &p2p_namespace,
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
+                SocketAddr::new(ip, config.port),
+                bootstrappers,
+                MAX_MESSAGE_SIZE,
+            )
+        } else {
+            authenticated::Config::recommended(
+                signer.clone(),
+                &p2p_namespace,
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
+                SocketAddr::new(ip, config.port),
+                bootstrappers,
+                MAX_MESSAGE_SIZE,
+            )
+        };
+        p2p_cfg.mailbox_size = config.mailbox_size;
+
+        // Start p2p
+        let (mut network, mut oracle) =
+            authenticated::Network::new(context.with_label("network"), p2p_cfg);
+
+        // Provide authorized peers
+        let participants: Set<PublicKey> = Set::from_iter_dedup(peer_keys);
+        oracle.update(EPOCH.get(), participants.clone()).await;
+
+        // Register channels
+        let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let pending = network.register(PENDING_CHANNEL, pending_limit, config.message_backlog);
+
+        let recovered_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let recovered =
+            network.register(RECOVERED_CHANNEL, recovered_limit, config.message_backlog);
+
+        let resolver_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let resolver =
+            network.register(RESOLVER_CHANNEL, resolver_limit, config.message_backlog);
+
+        let broadcaster_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let broadcaster = network.register(
+            BROADCASTER_CHANNEL,
+            broadcaster_limit,
+            config.message_backlog,
+        );
+
+        let marshal_quota = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let marshal_channel =
+            network.register(MARSHAL_CHANNEL, marshal_quota, config.message_backlog);
+
+        // Start network
+        let p2p = network.start();
+
+        // Create parallel strategy
+        let strategy = context
+            .create_strategy(NZUsize!(config.signature_threads))
+            .unwrap();
+
+        // Create engine
+        let engine_cfg = engine::Config {
+            blocker: oracle.clone(),
+            partition_prefix: "engine".to_string(),
+            blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
+            finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
+            me: public_key.clone(),
+            participants,
+            mailbox_size: config.mailbox_size,
+            deque_size: config.deque_size,
+            leader_timeout: LEADER_TIMEOUT,
+            notarization_timeout: NOTARIZATION_TIMEOUT,
+            nullify_retry: NULLIFY_RETRY,
+            activity_timeout: ACTIVITY_TIMEOUT,
+            skip_timeout: SKIP_TIMEOUT,
+            fetch_timeout: FETCH_TIMEOUT,
+            max_fetch_count: MAX_FETCH_COUNT,
+            max_fetch_size: MAX_FETCH_SIZE,
+            fetch_concurrent: FETCH_CONCURRENT,
+            fetch_rate_per_peer: resolver_limit,
+            polynomial,
+            share,
+            strategy,
+        };
+        let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
+
+        // Create marshal resolver
+        let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+            public_key: public_key.clone(),
+            manager: oracle.clone(),
+            blocker: oracle,
+            mailbox_size: config.mailbox_size,
+            initial: Duration::from_secs(1),
+            timeout: Duration::from_secs(2),
+            fetch_retry_timeout: Duration::from_millis(100),
+            priority_requests: false,
+            priority_responses: false,
+        };
+        let marshal_resolver =
+            marshal::resolver::p2p::init(&context, marshal_resolver_cfg, marshal_channel);
+
+        // Start engine
+        let engine_handle =
+            engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);
+
+        info!("Gridway node started");
+        info!("  Consensus: commonware-consensus (simplex BFT)");
+        info!("  Networking: commonware-p2p (authenticated)");
+        info!("  Execution: gridway-baseapp (WASM microkernel)");
+
+        // Wait for any task to error
+        if let Err(e) = try_join_all(vec![p2p, engine_handle]).await {
+            error!(?e, "task failed");
+        }
+    });
 }
