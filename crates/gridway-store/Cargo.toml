@@ -5,13 +5,18 @@ edition = "2021"
 authors = ["mconcat"]
 license = "AGPL-3.0"
 repository = "https://github.com/mconcat/gridway"
-description = "Storage layer for gridway — simple hash-based Merkle state store"
+description = "Storage layer for gridway — Patricia Merkle Trie state store backed by trie-db"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 thiserror = "2.0"
 hex = "0.4"
+# Patricia Merkle Trie
+trie-db = "0.31"
+hash-db = "0.16"
+memory-db = "0.34"
+reference-trie = "0.29"
 
 [dev-dependencies]
 tempfile = "3.14"

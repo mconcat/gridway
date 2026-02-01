@@ -3,7 +3,7 @@
 //! Provides a multi-namespace store backed by a single MerkleStore.
 //! Each module (bank, auth, staking, etc.) gets its own isolated namespace.
 
-use crate::{Hash, KVStore, MerkleStore, MemStore, Result, StoreError};
+use crate::{KVStore, MerkleStore, Result, StoreError};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 

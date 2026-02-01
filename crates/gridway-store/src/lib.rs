@@ -1,14 +1,15 @@
 //! Storage layer for gridway.
 //!
-//! Provides key-value storage abstractions and a simple hash-based Merkle store.
-//! The JMT/RocksDB backend has been replaced with an in-memory store that computes
-//! deterministic state root hashes for consensus. This is suitable for the
-//! experimental Commonware migration — production use would want a persistent backend.
+//! Provides key-value storage abstractions and a Patricia Merkle Trie store
+//! backed by Parity's `trie-db`.  The trie computes deterministic state root
+//! hashes for consensus.  The current backend is in-memory (`MemoryDB`) —
+//! suitable for the experimental Commonware migration.  Production use would
+//! swap in a persistent `HashDB` implementation.
 
 pub mod global;
 pub mod merkle;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 
