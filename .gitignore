@@ -47,3 +47,4 @@ testnet_backup_*/
 *.temp
 tmp/
 temp/.cargo-local/
+.cargo-local/

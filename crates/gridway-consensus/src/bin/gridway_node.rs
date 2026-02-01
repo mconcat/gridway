@@ -84,6 +84,8 @@ fn start_http_server(addr: SocketAddr, app: GridwayApp) {
         println!("  POST /tx                        — submit transaction");
         println!("  GET  /balance/{{address}}/{{denom}}  — query balance");
         println!("  GET  /account/{{address}}           — query account info");
+        println!("  GET  /status                       — node status & state root");
+        println!("  GET  /snapshot                     — full state snapshot (JSON)");
 
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
@@ -146,6 +148,8 @@ fn handle_http_request(
         ("GET", p) if p.starts_with("/balance/") => handle_balance_query(app, p),
         ("GET", p) if p.starts_with("/account/") => handle_account_query(app, p),
         ("GET", "/health") => http_response(200, "application/json", r#"{"status":"ok"}"#),
+        ("GET", "/status") => handle_status(app),
+        ("GET", "/snapshot") => handle_snapshot(app),
         _ => http_response(404, "application/json", r#"{"error":"not found"}"#),
     };
 
@@ -235,6 +239,42 @@ fn handle_account_query(app: &GridwayApp, path: &str) -> String {
     }
 }
 
+fn handle_status(app: &GridwayApp) -> String {
+    match app.baseapp().lock() {
+        Ok(baseapp) => {
+            let root = hex::encode(baseapp.last_state_root());
+            let body = format!(r#"{{"state_root":"{}"}}"#, root);
+            http_response(200, "application/json", &body)
+        }
+        Err(_) => http_response(500, "application/json", r#"{"error":"lock failed"}"#),
+    }
+}
+
+fn handle_snapshot(app: &GridwayApp) -> String {
+    match app.baseapp().lock() {
+        Ok(baseapp) => {
+            match baseapp.export_snapshot() {
+                Ok(snapshot) => {
+                    match serde_json::to_string(&snapshot) {
+                        Ok(json) => http_response(200, "application/json", &json),
+                        Err(e) => http_response(
+                            500,
+                            "application/json",
+                            &format!(r#"{{"error":"serialize: {e}"}}"#),
+                        ),
+                    }
+                }
+                Err(e) => http_response(
+                    500,
+                    "application/json",
+                    &format!(r#"{{"error":"export: {e}"}}"#),
+                ),
+            }
+        }
+        Err(_) => http_response(500, "application/json", r#"{"error":"lock failed"}"#),
+    }
+}
+
 fn http_response(status: u16, content_type: &str, body: &str) -> String {
     let status_text = match status {
         200 => "OK",
@@ -259,6 +299,9 @@ fn main() {
         .about("Validator for a gridway chain.")
         .arg(Arg::new("peers").long("peers").required(true))
         .arg(Arg::new("config").long("config").required(true))
+        .arg(Arg::new("snapshot")
+            .long("snapshot")
+            .help("Path or URL to state snapshot JSON file for fast bootstrap"))
         .get_matches();
 
     // Load peers file
@@ -286,8 +329,9 @@ fn main() {
     let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
     let public_key = signer.public_key();
 
-    // Capture tx_port before config is moved into the async block
+    // Capture tx_port and snapshot path before config is moved into the async block
     let tx_port = config.tx_port;
+    let snapshot_path = matches.get_one::<String>("snapshot").cloned();
 
     // Initialize runtime
     let cfg = tokio::Config::default()
@@ -399,6 +443,46 @@ fn main() {
             "committed genesis state (alice: 1_000_000 ugridway, bob: 0 ugridway)"
         );
 
+        // If a snapshot was provided, import it (overrides genesis state)
+        let skip_replay = if let Some(ref snap_path) = snapshot_path {
+            info!(path = %snap_path, "loading state snapshot for fast bootstrap");
+            let snapshot_data = if snap_path.starts_with("http://") || snap_path.starts_with("https://") {
+                // Download from URL using a simple blocking HTTP GET
+                // (we're still in the async block but this runs once at startup)
+                std::process::Command::new("curl")
+                    .args(["-s", "-f", snap_path])
+                    .output()
+                    .map(|o| {
+                        if o.status.success() {
+                            Ok(o.stdout)
+                        } else {
+                            Err(format!("curl failed with status {}", o.status))
+                        }
+                    })
+                    .unwrap_or_else(|e| Err(format!("curl error: {e}")))
+                    .expect("Failed to download snapshot")
+            } else {
+                std::fs::read(snap_path).expect("Failed to read snapshot file")
+            };
+
+            let snapshot: gridway_store::merkle::StateSnapshot =
+                serde_json::from_slice(&snapshot_data).expect("Failed to parse snapshot JSON");
+            info!(
+                entries = snapshot.entries.len(),
+                version = snapshot.version,
+                root_hash = hex::encode(&snapshot.root_hash),
+                "importing snapshot"
+            );
+            baseapp.import_snapshot(&snapshot).expect("Failed to import snapshot");
+            info!(
+                state_root = hex::encode(baseapp.last_state_root()),
+                "snapshot imported successfully"
+            );
+            true
+        } else {
+            false
+        };
+
         // Create the application wrapper
         let gridway_app = GridwayApp::new(baseapp);
 
@@ -497,6 +581,7 @@ fn main() {
             polynomial,
             share,
             strategy,
+            skip_replay,
         };
         let engine = engine::Engine::new(
             context.with_label("engine"),

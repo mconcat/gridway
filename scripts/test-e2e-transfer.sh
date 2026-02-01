@@ -36,11 +36,29 @@ check() {
     local actual="$3"
     if [ "$expected" = "$actual" ]; then
         echo -e "  ${GREEN}✓${NC} $desc (got: $actual)"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         echo -e "  ${RED}✗${NC} $desc (expected: $expected, got: $actual)"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
+}
+
+
+# Poll until a balance reaches the expected value (or timeout)
+wait_for_balance() {
+    local address="$1"
+    local denom="$2"
+    local expected="$3"
+    local max_wait="${4:-30}"
+    for i in $(seq 1 "$max_wait"); do
+        local bal
+        bal=$(curl -s "${BASE_URL}/balance/${address}/${denom}" | python3 -c "import sys,json; print(json.load(sys.stdin)['balance'])" 2>/dev/null || echo "ERROR")
+        if [ "$bal" = "$expected" ]; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
 }
 
 echo "============================================"
@@ -116,8 +134,8 @@ check "tx submitted" "submitted" "$SUBMIT_STATUS"
 echo ""
 
 # --- Step 5: Wait for finalization ---
-echo "Step 4: Waiting for block finalization (5 seconds)..."
-sleep 5
+echo "Step 4: Waiting for block finalization (polling up to 30s)..."
+wait_for_balance "$ALICE_ADDRESS" "ugridway" "999900" 30 || echo -e "  ${YELLOW}⚠${NC} Timed out waiting for balance change"
 echo ""
 
 # --- Step 6: Check balances changed ---
@@ -150,8 +168,8 @@ SUBMIT_STATUS2=$(echo "$SUBMIT_RESULT2" | python3 -c "import sys,json; print(jso
 check "reverse tx submitted" "submitted" "$SUBMIT_STATUS2"
 echo ""
 
-echo "Waiting for finalization (5 seconds)..."
-sleep 5
+echo "Waiting for finalization (polling up to 30s)..."
+wait_for_balance "$ALICE_ADDRESS" "ugridway" "999950" 30 || echo -e "  ${YELLOW}⚠${NC} Timed out waiting for balance change"
 
 echo "Step 8: Check final balances"
 

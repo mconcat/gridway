@@ -29,7 +29,11 @@ use commonware_runtime::{
     buffer::PoolRef, spawn_cell, Clock, ContextCell, Handle, Metrics, RayonPoolSpawner, Spawner,
     Storage,
 };
-use commonware_storage::archive::immutable;
+use commonware_storage::archive::{
+    immutable,
+    Archive as ArchiveTrait,
+    Identifier as ArchiveId,
+};
 use commonware_utils::{ordered::Set, NZU16, NZUsize, NZU64};
 use futures::{channel::mpsc, future::try_join_all};
 use governor::clock::Clock as GClock;
@@ -88,6 +92,9 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, S: Strategy> {
     pub fetch_rate_per_peer: Quota,
 
     pub strategy: S,
+
+    /// If true, skip block replay on startup (used when state was loaded from a snapshot).
+    pub skip_replay: bool,
 }
 
 /// The engine that drives the gridway consensus.
@@ -232,6 +239,46 @@ impl<
         .await
         .expect("failed to initialize finalized blocks archive");
         info!(elapsed = ?start.elapsed(), "restored finalized blocks archive");
+
+        // === STATE REPLAY ===
+        // Read all finalized blocks from archive and replay through GridwayApp
+        // to rebuild BaseApp state that was lost on restart.
+        // Skipped if state was already loaded from a snapshot.
+        if cfg.skip_replay {
+            info!("skipping block replay (state loaded from snapshot)");
+        } else {
+            let replay_start = Instant::now();
+            let last_idx = ArchiveTrait::last_index(&finalized_blocks);
+            if let Some(last) = last_idx {
+                let first = ArchiveTrait::first_index(&finalized_blocks).unwrap_or(0);
+                info!(first, last, "replaying finalized blocks to rebuild state");
+
+                let mut blocks_to_replay = Vec::new();
+                for idx in first..=last {
+                    match ArchiveTrait::get(&finalized_blocks, ArchiveId::Index(idx)).await {
+                        Ok(Some(block)) => blocks_to_replay.push(block),
+                        Ok(None) => {
+                            warn!(index = idx, "missing block in archive during replay");
+                        }
+                        Err(e) => {
+                            warn!(index = idx, error = %e, "failed to read block from archive");
+                        }
+                    }
+                }
+
+                if !blocks_to_replay.is_empty() {
+                    app.replay_blocks(&blocks_to_replay)
+                        .expect("failed to replay finalized blocks");
+                    info!(
+                        blocks = blocks_to_replay.len(),
+                        elapsed = ?replay_start.elapsed(),
+                        "state replay complete"
+                    );
+                }
+            } else {
+                info!("no finalized blocks in archive, skipping state replay");
+            }
+        }
 
         // Create marshal
         let scheme = GridwayScheme::signer(NAMESPACE, cfg.participants, cfg.polynomial, cfg.share)

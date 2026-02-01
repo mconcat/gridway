@@ -468,6 +468,28 @@ impl BaseApp {
         &self.last_state_root
     }
 
+    /// Clear the set of executed block heights.
+    /// Used before block replay to allow re-execution of previously seen heights.
+    pub fn clear_executed_heights(&mut self) {
+        self.executed_heights.clear();
+    }
+
+    /// Export complete application state as a snapshot.
+    pub fn export_snapshot(&self) -> Result<gridway_store::merkle::StateSnapshot> {
+        let store = self.global_store.get_store();
+        let store = store.lock().map_err(|e| BaseAppError::Store(format!("lock: {e}")))?;
+        Ok(store.to_snapshot())
+    }
+
+    /// Import application state from a snapshot, rebuilding the trie.
+    pub fn import_snapshot(&mut self, snapshot: &gridway_store::merkle::StateSnapshot) -> Result<()> {
+        let store = self.global_store.get_store();
+        let mut store = store.lock().map_err(|e| BaseAppError::Store(format!("lock: {e}")))?;
+        store.from_snapshot(snapshot).map_err(|e| BaseAppError::Store(format!("import: {e}")))?;
+        self.last_state_root = store.root_hash();
+        Ok(())
+    }
+
     /// Execute a single transaction with ed25519 signature verification.
     pub fn execute_transaction(&mut self, tx_bytes: &[u8], height: u64) -> Result<TxResponse> {
         // Try to decode as JSON transaction
@@ -717,6 +739,41 @@ mod tests {
         app.set_balance("alice", "ugridway", 1000).unwrap();
         let hash2 = app.commit().unwrap();
         assert_ne!(hash2, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_clear_executed_heights() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+        let _ = app.execute_block(1, 1000, "test", &[]).unwrap();
+        let _ = app.execute_block(2, 2000, "test", &[]).unwrap();
+
+        // Heights are tracked
+        let (root1, _) = app.execute_block(1, 1000, "test", &[]).unwrap();
+        // Idempotent — returns current state root without re-executing
+
+        // Clear and re-execute
+        app.clear_executed_heights();
+        let (root2, _) = app.execute_block(1, 1000, "test", &[]).unwrap();
+        // Should still produce the same state root for empty blocks
+        assert_eq!(root1, root2);
+    }
+
+    #[test]
+    fn test_export_import_snapshot() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+        app.set_balance("alice", "ugridway", 1000).unwrap();
+        app.set_balance("bob", "ugridway", 500).unwrap();
+        app.commit().unwrap();
+
+        let snapshot = app.export_snapshot().unwrap();
+        assert!(!snapshot.entries.is_empty());
+
+        let mut app2 = BaseApp::new("test-app2".to_string()).unwrap();
+        app2.import_snapshot(&snapshot).unwrap();
+
+        assert_eq!(app2.get_balance("alice", "ugridway").unwrap(), 1000);
+        assert_eq!(app2.get_balance("bob", "ugridway").unwrap(), 500);
+        assert_eq!(app2.last_state_root(), app.last_state_root());
     }
 
     #[test]

@@ -86,6 +86,43 @@ impl GridwayApp {
         }
         pending.drain(..count).collect()
     }
+
+    /// Replay a sequence of finalized blocks to rebuild state.
+    ///
+    /// Used on node restart to catch up BaseApp with persisted block history.
+    /// Genesis state must already be applied before calling this method.
+    pub fn replay_blocks(&self, blocks: &[GridwayBlock]) -> std::result::Result<(), String> {
+        let mut app = self.baseapp.lock().map_err(|e| format!("lock: {e}"))?;
+
+        // Clear executed_heights since we're replaying from scratch.
+        // BaseApp tracks these for idempotency within a session, but on
+        // replay we need to re-execute all blocks.
+        app.clear_executed_heights();
+
+        for block in blocks {
+            let height = block.height.get();
+            match app.execute_block(height, block.timestamp, CHAIN_ID, &block.transactions) {
+                Ok((state_root, _responses)) => {
+                    if state_root != block.state_root {
+                        return Err(format!(
+                            "state root mismatch at height {}: expected {}, got {}",
+                            height,
+                            hex::encode(block.state_root),
+                            hex::encode(state_root)
+                        ));
+                    }
+                    app.commit().map_err(|e| format!("commit at height {height}: {e}"))?;
+                    info!(
+                        height,
+                        state_root = hex::encode(state_root),
+                        "replayed block"
+                    );
+                }
+                Err(e) => return Err(format!("execute_block at height {height}: {e}")),
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<E> commonware_consensus::Application<E> for GridwayApp

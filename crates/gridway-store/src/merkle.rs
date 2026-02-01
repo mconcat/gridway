@@ -7,6 +7,7 @@
 
 use crate::{Hash, KVStore, Result, StoreError};
 use hash_db::Hasher;
+use serde::{Serialize, Deserialize};
 use memory_db::{HashKey, MemoryDB};
 use reference_trie::GenericNoExtensionLayout;
 use sha2::{Digest, Sha256};
@@ -62,6 +63,19 @@ pub type GridwayTrieLayout = GenericNoExtensionLayout<Sha256Hasher>;
 type GridwayMemoryDB = MemoryDB<Sha256Hasher, HashKey<Sha256Hasher>, DBValue>;
 
 // ─── MerkleStore ─────────────────────────────────────────────────────────────
+
+
+/// A snapshot of the entire MerkleStore state.
+/// Can be serialized/deserialized for state sync between nodes.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StateSnapshot {
+    /// All key-value pairs in the trie.
+    pub entries: Vec<(Vec<u8>, Vec<u8>)>,
+    /// The Merkle root hash of the trie.
+    pub root_hash: Hash,
+    /// The version number (number of commits).
+    pub version: u64,
+}
 
 /// A Patricia Merkle Trie state store.
 ///
@@ -122,6 +136,48 @@ impl MerkleStore {
     pub fn commit(&mut self) -> Result<Hash> {
         self.version += 1;
         Ok(self.root)
+    }
+
+    /// Export all key-value pairs from the trie.
+    /// Returns sorted Vec of (key, value) pairs.
+    pub fn export_state(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        self.prefix_iterator(b"").collect()
+    }
+
+    /// Import key-value pairs into a fresh trie, returning the new root hash.
+    /// Clears existing state first.
+    pub fn import_state(&mut self, entries: &[(Vec<u8>, Vec<u8>)]) -> Result<Hash> {
+        // Create fresh MemoryDB and root
+        self.db = GridwayMemoryDB::default();
+        self.root = Hash::default();
+        // Build empty trie
+        {
+            let _ = TrieDBMutBuilder::<GridwayTrieLayout>::new(&mut self.db, &mut self.root).build();
+        }
+        // Insert all entries
+        for (key, value) in entries {
+            self.set(key, value)?;
+        }
+        Ok(self.root)
+    }
+
+    /// Create a snapshot of the current state.
+    pub fn to_snapshot(&self) -> StateSnapshot {
+        StateSnapshot {
+            entries: self.export_state(),
+            root_hash: self.root_hash(),
+            version: self.version(),
+        }
+    }
+
+    /// Restore state from a snapshot.
+    pub fn from_snapshot(&mut self, snapshot: &StateSnapshot) -> Result<()> {
+        let root = self.import_state(&snapshot.entries)?;
+        if root != snapshot.root_hash {
+            return Err(StoreError::InvalidData("snapshot root hash mismatch".into()));
+        }
+        self.version = snapshot.version;
+        Ok(())
     }
 }
 
@@ -298,6 +354,71 @@ mod tests {
         assert_eq!(store.get(b"key1").unwrap(), Some(b"v1".to_vec()));
         store.set(b"key1", b"v2").unwrap();
         assert_eq!(store.get(b"key1").unwrap(), Some(b"v2".to_vec()));
+    }
+
+    #[test]
+    fn test_export_state() {
+        let mut store = MerkleStore::new("test".to_string());
+        store.set(b"key1", b"value1").unwrap();
+        store.set(b"key2", b"value2").unwrap();
+        store.commit().unwrap();
+
+        let entries = store.export_state();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, b"key1".to_vec());
+        assert_eq!(entries[0].1, b"value1".to_vec());
+        assert_eq!(entries[1].0, b"key2".to_vec());
+        assert_eq!(entries[1].1, b"value2".to_vec());
+    }
+
+    #[test]
+    fn test_import_state() {
+        let mut store1 = MerkleStore::new("test1".to_string());
+        store1.set(b"alice", b"1000").unwrap();
+        store1.set(b"bob", b"2000").unwrap();
+        store1.commit().unwrap();
+
+        let entries = store1.export_state();
+        let root1 = store1.root_hash();
+
+        let mut store2 = MerkleStore::new("test2".to_string());
+        let root2 = store2.import_state(&entries).unwrap();
+        assert_eq!(root1, root2);
+    }
+
+    #[test]
+    fn test_snapshot_roundtrip() {
+        let mut store = MerkleStore::new("test".to_string());
+        store.set(b"bank:balance_alice", b"1000").unwrap();
+        store.set(b"bank:balance_bob", b"2000").unwrap();
+        store.set(b"auth:account_alice", b"{}").unwrap();
+        store.commit().unwrap();
+
+        let snapshot = store.to_snapshot();
+        assert_eq!(snapshot.entries.len(), 3);
+        assert_eq!(snapshot.version, 1);
+
+        let mut store2 = MerkleStore::new("test2".to_string());
+        store2.from_snapshot(&snapshot).unwrap();
+        assert_eq!(store2.root_hash(), store.root_hash());
+        assert_eq!(store2.version(), store.version());
+
+        // Verify individual keys
+        assert_eq!(store2.get(b"bank:balance_alice").unwrap(), Some(b"1000".to_vec()));
+        assert_eq!(store2.get(b"bank:balance_bob").unwrap(), Some(b"2000".to_vec()));
+    }
+
+    #[test]
+    fn test_snapshot_root_hash_mismatch() {
+        let mut store = MerkleStore::new("test".to_string());
+        store.set(b"key1", b"value1").unwrap();
+        store.commit().unwrap();
+
+        let mut snapshot = store.to_snapshot();
+        snapshot.root_hash = [0xff; 32]; // corrupt the hash
+
+        let mut store2 = MerkleStore::new("test2".to_string());
+        assert!(store2.from_snapshot(&snapshot).is_err());
     }
 
     #[test]
