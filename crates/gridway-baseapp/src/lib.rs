@@ -443,7 +443,7 @@ impl BaseApp {
         ))
     }
 
-    /// Execute a bank message — tries WASM module first, falls back to native execution.
+    /// Execute a bank message via WASM module. No native fallback — bank.wasm must be loaded.
     fn execute_bank_msg(
         &self,
         msg_value: &serde_json::Value,
@@ -451,153 +451,67 @@ impl BaseApp {
         total_gas_used: &mut u64,
         events: &mut Vec<Event>,
     ) -> Result<()> {
-        // Try WASM execution first
-        if let Some(bank_path) = self.module_paths.get("bank") {
-            if let Ok(component_bytes) = std::fs::read(bank_path) {
-                let info = ComponentInfo {
-                    name: "bank".to_string(),
-                    path: bank_path.clone().into(),
-                    component_type: ComponentType::BeginBlocker,
-                    gas_limit: 1_000_000,
-                };
-                let _ = self.component_host.load_component("bank", &component_bytes, info);
+        let bank_path = self.module_paths.get("bank")
+            .ok_or_else(|| BaseAppError::ExecutionError("bank module path not configured".into()))?;
 
-                let type_url = msg_value.get("@type").and_then(|t| t.as_str()).unwrap_or("");
-                let msg_data = serde_json::to_string(msg_value)
-                    .map_err(|e| BaseAppError::InvalidTx(format!("serialize MsgSend: {e}")))?;
-                let sender = msg_value.get("from_address")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+        let component_bytes = std::fs::read(bank_path)
+            .map_err(|e| BaseAppError::ExecutionError(format!("failed to read bank.wasm at {bank_path}: {e}")))?;
 
-                let timestamp = self.context.as_ref().map(|c| c.timestamp).unwrap_or(0);
-                let chain_id = self.context.as_ref().map(|c| c.chain_id.as_str()).unwrap_or("gridway-1");
+        let info = ComponentInfo {
+            name: "bank".to_string(),
+            path: bank_path.clone().into(),
+            component_type: ComponentType::BeginBlocker,
+            gas_limit: 1_000_000,
+        };
+        let _ = self.component_host.load_component("bank", &component_bytes, info);
 
-                let result = self.component_host.execute_module(
-                    "bank", height, timestamp, chain_id,
-                    type_url, &msg_data, sender, 100_000,
-                );
+        let type_url = msg_value.get("@type").and_then(|t| t.as_str()).unwrap_or("");
+        let msg_data = serde_json::to_string(msg_value)
+            .map_err(|e| BaseAppError::InvalidTx(format!("serialize MsgSend: {e}")))?;
+        let sender = msg_value.get("from_address")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-                match result {
-                    Ok(comp_result) if comp_result.success => {
-                        *total_gas_used += comp_result.gas_used;
-                        if let Some(data) = &comp_result.data {
-                            if let Some(evt_array) = data.get("events").and_then(|e| e.as_array()) {
-                                for evt in evt_array {
-                                    events.push(Event {
-                                        r#type: evt.get("event_type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                                        attributes: evt.get("attributes").and_then(|a| a.as_array()).map(|attrs| {
-                                            attrs.iter().map(|a| EventAttribute {
-                                                key: a.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string(),
-                                                value: a.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                                                index: true,
-                                            }).collect()
-                                        }).unwrap_or_default(),
-                                    });
-                                }
-                            }
+        let timestamp = self.context.as_ref().map(|c| c.timestamp).unwrap_or(0);
+        let chain_id = self.context.as_ref().map(|c| c.chain_id.as_str()).unwrap_or("gridway-1");
+
+        let result = self.component_host.execute_module(
+            "bank", height, timestamp, chain_id,
+            type_url, &msg_data, sender, 100_000,
+        );
+
+        log::info!("bank WASM execute_module result: {:?}", result.as_ref().map(|r| (r.success, &r.error, r.gas_used)));
+
+        match result {
+            Ok(comp_result) if comp_result.success => {
+                *total_gas_used += comp_result.gas_used;
+                if let Some(data) = &comp_result.data {
+                    if let Some(evt_array) = data.get("events").and_then(|e| e.as_array()) {
+                        for evt in evt_array {
+                            events.push(Event {
+                                r#type: evt.get("event_type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+                                attributes: evt.get("attributes").and_then(|a| a.as_array()).map(|attrs| {
+                                    attrs.iter().map(|a| EventAttribute {
+                                        key: a.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string(),
+                                        value: a.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                        index: true,
+                                    }).collect()
+                                }).unwrap_or_default(),
+                            });
                         }
-                        return Ok(());
-                    }
-                    _ => {
-                        // WASM execution failed, fall through to native
-                        log::info!("Bank WASM module execution failed, using native fallback");
                     }
                 }
+                Ok(())
+            }
+            Ok(comp_result) => {
+                Err(BaseAppError::TxFailed(
+                    comp_result.error.unwrap_or("bank WASM execution failed".into())
+                ))
+            }
+            Err(e) => {
+                Err(BaseAppError::ExecutionError(format!("bank WASM module error: {e}")))
             }
         }
-
-        // Native bank execution fallback
-        self.execute_native_bank_msg(msg_value, total_gas_used, events)
-    }
-
-    /// Native bank message execution — handles MsgSend without WASM.
-    ///
-    /// Operates directly on the GlobalAppStore (which goes through the
-    /// Patricia Merkle Trie), ensuring state root changes are tracked correctly.
-    fn execute_native_bank_msg(
-        &self,
-        msg_value: &serde_json::Value,
-        total_gas_used: &mut u64,
-        events: &mut Vec<Event>,
-    ) -> Result<()> {
-        let from = msg_value.get("from_address")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| BaseAppError::InvalidTx("missing from_address".to_string()))?;
-        let to = msg_value.get("to_address")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| BaseAppError::InvalidTx("missing to_address".to_string()))?;
-        let amounts = msg_value.get("amount")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| BaseAppError::InvalidTx("missing amount array".to_string()))?;
-
-        for coin in amounts {
-            let denom = coin.get("denom")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| BaseAppError::InvalidTx("missing denom in coin".to_string()))?;
-            let amount_str = coin.get("amount")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| BaseAppError::InvalidTx("missing amount in coin".to_string()))?;
-            let amount: u64 = amount_str.parse()
-                .map_err(|e| BaseAppError::InvalidTx(format!("invalid amount '{amount_str}': {e}")))?;
-
-            if amount == 0 {
-                continue;
-            }
-
-            // Read sender balance via GlobalAppStore (goes through Merkle trie)
-            let sender_key = format!("balance_{from}_{denom}");
-            let sender_bal: u64 = match self.global_store.get_namespaced("bank", sender_key.as_bytes()) {
-                Ok(Some(v)) => String::from_utf8(v)
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0),
-                _ => 0,
-            };
-
-            if sender_bal < amount {
-                return Err(BaseAppError::TxFailed(format!(
-                    "insufficient funds: {} has {} {}, need {}",
-                    from, sender_bal, denom, amount
-                )));
-            }
-
-            // Read recipient balance
-            let recv_key = format!("balance_{to}_{denom}");
-            let recv_bal: u64 = match self.global_store.get_namespaced("bank", recv_key.as_bytes()) {
-                Ok(Some(v)) => String::from_utf8(v)
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0),
-                _ => 0,
-            };
-
-            // Update balances (writes go through GlobalAppStore → Merkle trie)
-            let new_sender_bal = sender_bal - amount;
-            let new_recv_bal = recv_bal + amount;
-
-            self.global_store.set_namespaced("bank", sender_key.as_bytes(), new_sender_bal.to_string().as_bytes())
-                .map_err(|e| BaseAppError::Store(format!("Failed to update sender balance: {e}")))?;
-            self.global_store.set_namespaced("bank", recv_key.as_bytes(), new_recv_bal.to_string().as_bytes())
-                .map_err(|e| BaseAppError::Store(format!("Failed to update recipient balance: {e}")))?;
-
-            log::info!(
-                "Native bank transfer: {} -> {} ({} {}), sender: {} -> {}, recipient: {} -> {}",
-                from, to, amount, denom,
-                sender_bal, new_sender_bal,
-                recv_bal, new_recv_bal
-            );
-        }
-
-        // Emit transfer event
-        let amount_json = serde_json::to_string(&msg_value["amount"]).unwrap_or_default();
-        events.push(Event::new("transfer", vec![
-            EventAttribute::new("sender", from),
-            EventAttribute::new("recipient", to),
-            EventAttribute::new("amount", &amount_json),
-        ]));
-
-        *total_gas_used += 10_000;
-        Ok(())
     }
 
     /// Fallback: execute transaction via WASM tx decoder

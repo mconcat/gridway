@@ -68,6 +68,7 @@ impl GridwayApp {
     pub fn submit_tx(&self, tx: Vec<u8>) {
         if let Ok(mut pending) = self.pending_txs.lock() {
             pending.push_back(tx);
+            tracing::info!(pending_count = pending.len(), "TX submitted to pending pool");
         }
     }
 
@@ -80,6 +81,9 @@ impl GridwayApp {
     fn drain_pending(&self, max_count: usize) -> Vec<Vec<u8>> {
         let mut pending = self.pending_txs.lock().unwrap();
         let count = pending.len().min(max_count);
+        if count > 0 {
+            tracing::info!(drained = count, remaining = pending.len() - count, "Draining pending txs for proposal");
+        }
         pending.drain(..count).collect()
     }
 }
