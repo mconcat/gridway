@@ -5,26 +5,22 @@ edition = "2021"
 authors = ["mconcat"]
 license = "AGPL-3.0"
 repository = "https://github.com/mconcat/gridway"
-description = "Base application framework for the gridway blockchain"
+description = "Base application framework — WASM microkernel with VFS and ComponentHost"
 
 [dependencies]
 gridway-store = { path = "../gridway-store" }
 gridway-types = { path = "../gridway-types" }
 gridway-crypto = { path = "../gridway-crypto" }
 gridway-telemetry = { path = "../gridway-telemetry" }
-gridway-proto = { path = "../gridway-proto" }
-thiserror = "1.0"
+thiserror = "2.0"
 tokio = { version = "1.0", features = ["full"] }
-cometbft = "0.1.0-alpha.2"
-k256 = "0.13"
 hex = "0.4"
 sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rand = "0.8"
 toml = "0.8"
-# WASI runtime dependencies
-prost = "0.12"
+# WASM runtime dependencies
 wasmtime = "34.0"
 wasmtime-wasi = "34.0"
 wasmparser = "0.218"

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use gridway_types::{AccAddress, SdkError, SdkMsg};
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -69,46 +69,7 @@ pub struct MsgStoreCode {
     pub metadata: CodeMetadata,
 }
 
-impl SdkMsg for MsgStoreCode {
-    fn type_url(&self) -> &'static str {
-        "/gridway.baseapp.v1.MsgStoreCode"
-    }
 
-    fn validate_basic(&self) -> std::result::Result<(), SdkError> {
-        if self.authority.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "authority cannot be empty".to_string(),
-            ));
-        }
-        if self.wasm_code.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "wasm_code cannot be empty".to_string(),
-            ));
-        }
-        if self.metadata.name.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "metadata name cannot be empty".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn get_signers(&self) -> std::result::Result<Vec<AccAddress>, SdkError> {
-        // Parse authority as AccAddress
-        let (_hrp, addr) = AccAddress::from_bech32(&self.authority)
-            .map_err(|_| SdkError::InvalidAddress(self.authority.clone()))?;
-        Ok(vec![addr])
-    }
-
-    fn encode(&self) -> Vec<u8> {
-        // In a real implementation, this would use protobuf encoding
-        serde_json::to_vec(self).unwrap_or_default()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
 
 /// Message to install a new module
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,44 +84,7 @@ pub struct MsgInstallModule {
     pub init_data: Option<Vec<u8>>,
 }
 
-impl SdkMsg for MsgInstallModule {
-    fn type_url(&self) -> &'static str {
-        "/gridway.baseapp.v1.MsgInstallModule"
-    }
 
-    fn validate_basic(&self) -> std::result::Result<(), SdkError> {
-        if self.authority.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "authority cannot be empty".to_string(),
-            ));
-        }
-        if self.code_id == 0 {
-            return Err(SdkError::InvalidRequest(
-                "code_id must be greater than 0".to_string(),
-            ));
-        }
-        if self.config.name.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "module name cannot be empty".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn get_signers(&self) -> std::result::Result<Vec<AccAddress>, SdkError> {
-        let (_hrp, addr) = AccAddress::from_bech32(&self.authority)
-            .map_err(|_| SdkError::InvalidAddress(self.authority.clone()))?;
-        Ok(vec![addr])
-    }
-
-    fn encode(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
 
 /// Message to upgrade an existing module
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,44 +101,7 @@ pub struct MsgUpgradeModule {
     pub force: bool,
 }
 
-impl SdkMsg for MsgUpgradeModule {
-    fn type_url(&self) -> &'static str {
-        "/gridway.baseapp.v1.MsgUpgradeModule"
-    }
 
-    fn validate_basic(&self) -> std::result::Result<(), SdkError> {
-        if self.authority.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "authority cannot be empty".to_string(),
-            ));
-        }
-        if self.module_name.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "module_name cannot be empty".to_string(),
-            ));
-        }
-        if self.new_code_id == 0 {
-            return Err(SdkError::InvalidRequest(
-                "new_code_id must be greater than 0".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn get_signers(&self) -> std::result::Result<Vec<AccAddress>, SdkError> {
-        let (_hrp, addr) = AccAddress::from_bech32(&self.authority)
-            .map_err(|_| SdkError::InvalidAddress(self.authority.clone()))?;
-        Ok(vec![addr])
-    }
-
-    fn encode(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
 
 /// WASM code metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]

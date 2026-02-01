@@ -8,5 +8,5 @@ repository = "https://github.com/mconcat/gridway"
 description = "Error handling types and utilities for the gridway blockchain framework"
 
 [dependencies]
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"

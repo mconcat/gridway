@@ -1,0 +1,43 @@
+[package]
+name = "gridway-consensus"
+version = "0.1.0"
+edition = "2021"
+authors = ["mconcat"]
+license = "AGPL-3.0"
+repository = "https://github.com/mconcat/gridway"
+description = "Commonware consensus integration — implements Application trait wrapping BaseApp"
+
+[dependencies]
+gridway-baseapp = { path = "../gridway-baseapp" }
+gridway-types = { path = "../gridway-types" }
+gridway-crypto = { path = "../gridway-crypto" }
+gridway-store = { path = "../gridway-store" }
+
+# Commonware
+commonware-broadcast = "0.0.65"
+commonware-codec = "0.0.65"
+commonware-consensus = { version = "0.0.65", features = ["mocks"] }
+commonware-cryptography = { version = "0.0.65", features = ["mocks"] }
+commonware-p2p = "0.0.65"
+commonware-resolver = "0.0.65"
+commonware-runtime = "0.0.65"
+commonware-storage = "0.0.65"
+commonware-stream = "0.0.65"
+commonware-utils = "0.0.65"
+commonware-macros = "0.0.65"
+commonware-parallel = "0.0.65"
+
+# External
+bytes = "1.7"
+futures = "0.3"
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+
+[[bin]]
+name = "gridway-node"
+path = "src/bin/gridway_node.rs"
