@@ -5,9 +5,9 @@
 
 use crate::component_bindings::ante_handler::AnteHandlerWorld;
 use crate::component_bindings::tx_decoder::TxDecoderWorld;
-use crate::component_bindings::SimpleKVStoreManager;
-// TODO: Remove kvstore interface (temporary implementation)
-// use crate::kvstore_resource::KVStoreResourceHost;
+use crate::vfs::VirtualFilesystem;
+// VFS-backed kvstore interface — bridging WASI modules to JMT state
+use crate::component_bindings::ante_handler::gridway::framework::kvstore;
 use hex;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -90,16 +90,17 @@ pub struct ComponentResult {
     pub gas_used: u64,
 }
 
-/// Component host state that implements WasiView
+/// Component host state that implements WasiView.
+/// Provides VFS-backed kvstore access to WASI modules.
 pub struct ComponentState {
     table: wasmtime_wasi::ResourceTable,
     wasi: WasiCtx,
     #[allow(dead_code)]
     component_name: String,
-    #[allow(dead_code)]
-    kvstore_manager: SimpleKVStoreManager,
-    // TODO: Remove kvstore interface (temporary implementation)
-    // kvstore_host: KVStoreResourceHost,
+    /// VFS reference for state access from WASI modules.
+    /// When set, WASI modules can use the kvstore interface to access
+    /// JMT-backed state through VFS namespace stores.
+    vfs: Option<Arc<VirtualFilesystem>>,
 }
 
 impl wasmtime_wasi::p2::IoView for ComponentState {
@@ -114,28 +115,31 @@ impl WasiView for ComponentState {
     }
 }
 
-// Import the generated kvstore bindings
-// TODO: Remove kvstore interface (temporary implementation)
-// use crate::component_bindings::ante_handler::gridway::framework::kvstore;
+// ─── VFS-backed kvstore host implementation ──────────────────────────────────
+// This bridges the WIT kvstore interface to the VFS, allowing WASI modules
+// to access JMT-backed blockchain state through standard KVStore operations.
+// Path: WASM module → kvstore WIT interface → ComponentState → VFS → NamespacedStore → JMTStore
 
-/* Commenting out kvstore implementation - to be removed
+/// Host-side handle for a VFS-backed KVStore resource.
+/// Maps to the WIT `resource store` in the kvstore interface.
+/// Each handle represents access to a single namespace in the VFS.
+pub struct VfsStoreHandle {
+    /// The namespace this store provides access to (e.g., "bank", "auth")
+    pub namespace: String,
+}
+
 impl kvstore::HostStore for ComponentState {
     fn get(
         &mut self,
         store_handle: wasmtime::component::Resource<kvstore::Store>,
         key: Vec<u8>,
     ) -> Option<Vec<u8>> {
-        // Convert kvstore::Store to KVStoreResource
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        match self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            Ok(store) => store.get(&key).unwrap_or(None),
-            Err(_) => None,
-        }
+        let vfs = self.vfs.as_ref()?;
+        let vfs_handle =
+            wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+        let handle = self.table.get(&vfs_handle).ok()?;
+        let namespace = handle.namespace.clone();
+        vfs.read_key(&namespace, &key).ok()?
     }
 
     fn set(
@@ -144,14 +148,15 @@ impl kvstore::HostStore for ComponentState {
         key: Vec<u8>,
         value: Vec<u8>,
     ) {
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        if let Ok(store) = self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            let _ = store.set(&key, &value);
+        if let Some(vfs) = self.vfs.as_ref() {
+            let vfs_handle =
+                wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+            if let Ok(handle) = self.table.get(&vfs_handle) {
+                let namespace = handle.namespace.clone();
+                if let Err(e) = vfs.write_key(&namespace, &key, &value) {
+                    tracing::error!("kvstore set failed for {namespace}:: {e}");
+                }
+            }
         }
     }
 
@@ -160,14 +165,15 @@ impl kvstore::HostStore for ComponentState {
         store_handle: wasmtime::component::Resource<kvstore::Store>,
         key: Vec<u8>,
     ) {
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        if let Ok(store) = self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            let _ = store.delete(&key);
+        if let Some(vfs) = self.vfs.as_ref() {
+            let vfs_handle =
+                wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+            if let Ok(handle) = self.table.get(&vfs_handle) {
+                let namespace = handle.namespace.clone();
+                if let Err(e) = vfs.delete_key(&namespace, &key) {
+                    tracing::error!("kvstore delete failed for {namespace}:: {e}");
+                }
+            }
         }
     }
 
@@ -176,16 +182,15 @@ impl kvstore::HostStore for ComponentState {
         store_handle: wasmtime::component::Resource<kvstore::Store>,
         key: Vec<u8>,
     ) -> bool {
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        match self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            Ok(store) => store.has(&key).unwrap_or(false),
-            Err(_) => false,
-        }
+        self.vfs
+            .as_ref()
+            .and_then(|vfs| {
+                let vfs_handle =
+                    wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+                let handle = self.table.get(&vfs_handle).ok()?;
+                vfs.has_key(&handle.namespace, &key).ok()
+            })
+            .unwrap_or(false)
     }
 
     fn range(
@@ -195,25 +200,29 @@ impl kvstore::HostStore for ComponentState {
         end: Option<Vec<u8>>,
         limit: u32,
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        match self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            Ok(store) => store
-                .range(start.as_deref(), end.as_deref(), limit)
-                .unwrap_or_default(),
-            Err(_) => Vec::new(),
-        }
+        self.vfs
+            .as_ref()
+            .and_then(|vfs| {
+                let vfs_handle =
+                    wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+                let handle = self.table.get(&vfs_handle).ok()?;
+                vfs.range_keys(
+                    &handle.namespace,
+                    start.as_deref(),
+                    end.as_deref(),
+                    limit,
+                )
+                .ok()
+            })
+            .unwrap_or_default()
     }
 
     fn drop(
         &mut self,
-        _rep: wasmtime::component::Resource<kvstore::Store>,
+        rep: wasmtime::component::Resource<kvstore::Store>,
     ) -> wasmtime::Result<()> {
-        // Resource cleanup is handled by the resource table
+        let vfs_handle = wasmtime::component::Resource::<VfsStoreHandle>::new_own(rep.rep());
+        let _ = self.table.delete(vfs_handle);
         Ok(())
     }
 }
@@ -223,19 +232,31 @@ impl kvstore::Host for ComponentState {
         &mut self,
         name: String,
     ) -> std::result::Result<wasmtime::component::Resource<kvstore::Store>, String> {
-        // Map the KVStoreResource to kvstore::Store resource
-        match self.kvstore_host.open_store(&mut self.table, &name) {
-            Ok(resource) => {
-                // Convert KVStoreResource to kvstore::Store
-                let store_resource =
-                    wasmtime::component::Resource::<kvstore::Store>::new_own(resource.rep());
-                Ok(store_resource)
-            }
-            Err(e) => Err(e),
+        let vfs = self
+            .vfs
+            .as_ref()
+            .ok_or_else(|| "VFS not available".to_string())?;
+
+        // Validate that the namespace exists in VFS
+        if !vfs.has_namespace(&name) {
+            return Err(format!("Store '{name}' not found"));
         }
+
+        // Create a VfsStoreHandle and push to resource table
+        let handle = VfsStoreHandle {
+            namespace: name.clone(),
+        };
+        let resource = self
+            .table
+            .push(handle)
+            .map_err(|e| format!("Failed to create store resource:: {e}"))?;
+
+        // Convert VfsStoreHandle resource to kvstore::Store resource
+        Ok(wasmtime::component::Resource::<kvstore::Store>::new_own(
+            resource.rep(),
+        ))
     }
 }
-*/
 
 /// WASI Component Host
 pub struct ComponentHost {
@@ -247,26 +268,24 @@ pub struct ComponentHost {
     component_info: Arc<Mutex<HashMap<String, ComponentInfo>>>,
     /// Default gas limit
     default_gas_limit: u64,
-    /// KVStore manager (legacy)
-    kvstore_manager: SimpleKVStoreManager,
-    // KVStore resource host for prefix-based access
-    // TODO: Remove kvstore interface (temporary implementation)
-    // kvstore_host: KVStoreResourceHost,
+    /// VFS reference for state access bridging.
+    /// When set, WASI components can access JMT-backed state through
+    /// the kvstore WIT interface via VFS namespace stores.
+    vfs: Option<Arc<VirtualFilesystem>>,
 }
 
 impl ComponentHost {
-    /// Create a new component host with default configuration and a base store
-    pub fn new(base_store: Arc<Mutex<dyn gridway_store::KVStore>>) -> Result<Self> {
+    /// Create a new component host with default configuration
+    pub fn new() -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true);
         config.async_support(false);
-        Self::with_config_and_store(config, base_store)
+        Self::with_config(config)
     }
 
-    /// Create a new component host with custom configuration and a base store
-    pub fn with_config_and_store(
+    /// Create a new component host with custom configuration
+    pub fn with_config(
         mut config: Config,
-        _base_store: Arc<Mutex<dyn gridway_store::KVStore>>,
     ) -> Result<Self> {
         // Ensure component model is enabled
         config.wasm_component_model(true);
@@ -282,32 +301,23 @@ impl ComponentHost {
 
         info!("Component host initialized with secure configuration");
 
-        // TODO: Remove kvstore interface (temporary implementation)
-        // let kvstore_host = KVStoreResourceHost::new(base_store);
-        //
-        // // Register default component prefixes
-        // // These can be overridden by calling register_component_prefix
-        // kvstore_host
-        //     .register_component_prefix("ante-handler".to_string(), "/ante/".to_string())
-        //     .map_err(ComponentHostError::ResourceError)?;
-        // kvstore_host
-        //     .register_component_prefix("begin-blocker".to_string(), "/begin/".to_string())
-        //     .map_err(ComponentHostError::ResourceError)?;
-        // kvstore_host
-        //     .register_component_prefix("end-blocker".to_string(), "/end/".to_string())
-        //     .map_err(ComponentHostError::ResourceError)?;
-        // kvstore_host
-        //     .register_component_prefix("tx-decoder".to_string(), "/decoder/".to_string())
-        //     .map_err(ComponentHostError::ResourceError)?;
-
         Ok(Self {
             engine,
             components: Arc::new(Mutex::new(HashMap::new())),
             component_info: Arc::new(Mutex::new(HashMap::new())),
             default_gas_limit: 10_000_000, // 10 million units
-            kvstore_manager: SimpleKVStoreManager::new(),
-            // kvstore_host,
+            vfs: None,
         })
+    }
+
+    /// Set the VFS reference for state access bridging between WASI modules and the store
+    pub fn set_vfs(&mut self, vfs: Arc<VirtualFilesystem>) {
+        self.vfs = Some(vfs);
+    }
+
+    /// Get the VFS reference
+    pub fn vfs(&self) -> Option<&Arc<VirtualFilesystem>> {
+        self.vfs.as_ref()
     }
 
     /// Load a component from bytes
@@ -369,8 +379,7 @@ impl ComponentHost {
             table: wasmtime_wasi::ResourceTable::new(),
             wasi,
             component_name: component_name.to_string(),
-            kvstore_manager: SimpleKVStoreManager::new(),
-            // kvstore_host: self.kvstore_host.clone(),
+            vfs: self.vfs.clone(),
         };
 
         let mut store = Store::new(&self.engine, state);
@@ -393,11 +402,9 @@ impl ComponentHost {
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
-        // Add module-state interface
-
-        // Add kvstore interface
-        // TODO: Remove kvstore interface (temporary implementation)
-        // self.add_kvstore_to_linker(&mut linker)?;
+        // Add VFS-backed kvstore interface
+        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
 
         // Instantiate the component with bindings
         let bindings = AnteHandlerWorld::instantiate(&mut store, &component, &linker)
@@ -498,8 +505,7 @@ impl ComponentHost {
             table: wasmtime_wasi::ResourceTable::new(),
             wasi,
             component_name: component_name.to_string(),
-            kvstore_manager: SimpleKVStoreManager::new(),
-            // kvstore_host: self.kvstore_host.clone(),
+            vfs: self.vfs.clone(),
         };
 
         let mut store = Store::new(&self.engine, state);
@@ -522,11 +528,9 @@ impl ComponentHost {
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
-        // Add module-state interface
-
-        // Add kvstore interface
-        // TODO: Remove kvstore interface (temporary implementation)
-        // self.add_kvstore_to_linker(&mut linker)?;
+        // Add VFS-backed kvstore interface
+        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
 
         // Instantiate the component with bindings
         let bindings = TxDecoderWorld::instantiate(&mut store, &component, &linker)
@@ -594,8 +598,7 @@ impl ComponentHost {
                 table: wasmtime_wasi::ResourceTable::new(),
                 wasi: WasiCtxBuilder::new().inherit_stdio().build(),
                 component_name: "begin-blocker".to_string(),
-                kvstore_manager: self.kvstore_manager.clone(),
-                // kvstore_host: self.kvstore_host.clone(),
+                vfs: self.vfs.clone(),
             },
         );
 
@@ -609,11 +612,9 @@ impl ComponentHost {
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
-        // Add module-state interface
-
-        // Add kvstore interface
-        // TODO: Remove kvstore interface (temporary implementation)
-        // self.add_kvstore_to_linker(&mut linker)?;
+        // Add VFS-backed kvstore interface
+        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
 
         // Instantiate the component with bindings
         let bindings = crate::component_bindings::begin_blocker::BeginBlockerWorld::instantiate(
@@ -717,8 +718,7 @@ impl ComponentHost {
                 table: wasmtime_wasi::ResourceTable::new(),
                 wasi: WasiCtxBuilder::new().inherit_stdio().build(),
                 component_name: "end-blocker".to_string(),
-                kvstore_manager: self.kvstore_manager.clone(),
-                // kvstore_host: self.kvstore_host.clone(),
+                vfs: self.vfs.clone(),
             },
         );
 
@@ -732,11 +732,9 @@ impl ComponentHost {
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
 
-        // Add module-state interface
-
-        // Add kvstore interface
-        // TODO: Remove kvstore interface (temporary implementation)
-        // self.add_kvstore_to_linker(&mut linker)?;
+        // Add VFS-backed kvstore interface
+        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
 
         // Instantiate the component with bindings
         let bindings = crate::component_bindings::end_blocker::EndBlockerWorld::instantiate(
@@ -818,39 +816,127 @@ impl ComponentHost {
         })
     }
 
-    /// Mount a KVStore for component access (legacy)
-    pub fn mount_kvstore(
+    /// Execute a module component (e.g., bank, staking)
+    pub fn execute_module(
         &self,
-        name: String,
-        store: Arc<Mutex<dyn gridway_store::KVStore>>,
-    ) -> Result<()> {
-        self.kvstore_manager
-            .mount_store(name, store)
-            .map_err(ComponentHostError::ResourceError)
-    }
+        module_name: &str,
+        block_height: u64,
+        block_time: u64,
+        chain_id: &str,
+        msg_type_url: &str,
+        msg_data: &str,
+        msg_sender: &str,
+        gas_limit: u64,
+    ) -> Result<ComponentResult> {
+        debug!("Executing module component: {}", module_name);
 
-    /* TODO: Remove kvstore interface (temporary implementation)
-    /// Register a component with its allowed KVStore prefix
-    pub fn register_component_prefix(&self, component_name: &str, prefix: &str) -> Result<()> {
-        self.kvstore_host
-            .register_component_prefix(component_name.to_string(), prefix.to_string())
-            .map_err(ComponentHostError::ResourceError)
-    }
-    */
+        // Get the component by module name
+        let component = {
+            let components = self.components.lock().map_err(|e| {
+                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
+            })?;
+            components
+                .get(module_name)
+                .ok_or_else(|| ComponentHostError::ComponentNotFound(module_name.to_string()))?
+                .clone()
+        };
 
-    /* TODO: Remove kvstore interface (temporary implementation)
-    /// Add kvstore interface to the component linker
-    fn add_kvstore_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
-        // Use the generated kvstore bindings
-        kvstore::add_to_linker(linker, |state| state).map_err(|e| {
-            ComponentHostError::ComponentInstantiation(format!(
-                "Failed to add kvstore interface: {e}"
-            ))
+        // Create store
+        let mut store = Store::new(
+            &self.engine,
+            ComponentState {
+                table: wasmtime_wasi::ResourceTable::new(),
+                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+                component_name: module_name.to_string(),
+                vfs: self.vfs.clone(),
+            },
+        );
+
+        // Set fuel for gas limiting
+        store.set_fuel(gas_limit).map_err(|e| {
+            ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}"))
         })?;
-        info!("KVStore interface added to linker");
-        Ok(())
+
+        // Create linker and add WASI
+        let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
+            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
+
+        // Add VFS-backed kvstore interface
+        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(&mut linker, |state| state)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}")))?;
+
+        // Instantiate the component with module-world bindings
+        let bindings = crate::component_bindings::module::ModuleWorld::instantiate(
+            &mut store, &component, &linker,
+        )
+        .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
+
+        // Create module context and message
+        let context = crate::component_bindings::module::exports::gridway::framework::module::ModuleContext {
+            block_height,
+            block_time,
+            chain_id: chain_id.to_string(),
+            simulate: false,
+        };
+
+        let message = crate::component_bindings::module::exports::gridway::framework::module::Message {
+            type_url: msg_type_url.to_string(),
+            data: msg_data.to_string(),
+            sender: msg_sender.to_string(),
+        };
+
+        // Execute the component
+        let response = bindings
+            .gridway_framework_module()
+            .call_handle(&mut store, &context, &message)
+            .map_err(|e| {
+                ComponentHostError::ComponentExecution(format!("Module execution failed: {e}"))
+            })?;
+
+        // Get remaining fuel for gas tracking
+        let gas_used = gas_limit - store.get_fuel().unwrap_or(0);
+        // Use the module-reported gas if available, otherwise use fuel-based measurement
+        let final_gas_used = if response.gas_used > 0 { response.gas_used } else { gas_used };
+
+        // Convert events to JSON for data field
+        let events_data: Vec<serde_json::Value> = response
+            .events
+            .iter()
+            .map(|event| {
+                let attributes: Vec<serde_json::Value> = event
+                    .attributes
+                    .iter()
+                    .map(|attr| {
+                        serde_json::json!({
+                            "key": attr.key,
+                            "value": attr.value
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "event_type": event.event_type,
+                    "attributes": attributes
+                })
+            })
+            .collect();
+
+        let error_stderr = if let Some(ref error) = response.error {
+            error.as_bytes().to_vec()
+        } else {
+            Vec::new()
+        };
+
+        Ok(ComponentResult {
+            success: response.success,
+            exit_code: if response.success { 0 } else { 1 },
+            data: Some(serde_json::json!({"events": events_data})),
+            error: response.error,
+            stdout: serde_json::to_string(&events_data).unwrap_or_default().as_bytes().to_vec(),
+            stderr: error_stderr,
+            gas_used: final_gas_used,
+        })
     }
-    */
 
     /// Get the gas consumed from the last execution
     pub fn get_gas_consumed(&self, store: &mut Store<ComponentState>) -> u64 {
@@ -867,8 +953,206 @@ mod tests {
 
     #[test]
     fn test_component_host_creation() {
-        let base_store = Arc::new(Mutex::new(gridway_store::MemStore::new()));
-        let host = ComponentHost::new(base_store).unwrap();
+        let host = ComponentHost::new().unwrap();
         assert!(host.components.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_component_host_with_vfs() {
+        let mut host = ComponentHost::new().unwrap();
+
+        let vfs = Arc::new(crate::vfs::VirtualFilesystem::new());
+        host.set_vfs(vfs.clone());
+
+        assert!(host.vfs().is_some());
+    }
+
+    #[test]
+    fn test_kvstore_host_via_vfs() {
+        use crate::vfs::{Capability, VirtualFilesystem};
+        use std::path::PathBuf;
+
+        // Set up VFS with a mounted MemStore
+        let vfs = Arc::new(VirtualFilesystem::new());
+        let bank_store: Arc<Mutex<dyn gridway_store::KVStore>> =
+            Arc::new(Mutex::new(gridway_store::MemStore::new()));
+        vfs.mount_store("bank".to_string(), bank_store).unwrap();
+        vfs.add_capability(Capability::Read(PathBuf::from("/bank")))
+            .unwrap();
+        vfs.add_capability(Capability::Write(PathBuf::from("/bank")))
+            .unwrap();
+
+        // Create ComponentState with VFS
+        let wasi = WasiCtxBuilder::new().build();
+        let mut state = ComponentState {
+            table: wasmtime_wasi::ResourceTable::new(),
+            wasi,
+            component_name: "test".to_string(),
+            vfs: Some(vfs),
+        };
+
+        // Test open_store
+        let store_resource =
+            kvstore::Host::open_store(&mut state, "bank".to_string()).unwrap();
+        let rep = store_resource.rep();
+
+        // Test set
+        kvstore::HostStore::set(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+            b"1000".to_vec(),
+        );
+
+        // Test get
+        let value = kvstore::HostStore::get(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+        );
+        assert_eq!(value, Some(b"1000".to_vec()));
+
+        // Test has
+        let exists = kvstore::HostStore::has(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+        );
+        assert!(exists);
+
+        // Test get nonexistent key
+        let value = kvstore::HostStore::get(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"nonexistent".to_vec(),
+        );
+        assert_eq!(value, None);
+
+        // Test has nonexistent key
+        let exists = kvstore::HostStore::has(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"nonexistent".to_vec(),
+        );
+        assert!(!exists);
+
+        // Test delete
+        kvstore::HostStore::delete(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+        );
+        let value = kvstore::HostStore::get(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+        );
+        assert_eq!(value, None);
+
+        // Test drop (cleanup)
+        kvstore::HostStore::drop(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_kvstore_host_range_query() {
+        use crate::vfs::{Capability, VirtualFilesystem};
+        use std::path::PathBuf;
+
+        let vfs = Arc::new(VirtualFilesystem::new());
+        let bank_store: Arc<Mutex<dyn gridway_store::KVStore>> =
+            Arc::new(Mutex::new(gridway_store::MemStore::new()));
+        vfs.mount_store("bank".to_string(), bank_store).unwrap();
+        vfs.add_capability(Capability::Read(PathBuf::from("/bank")))
+            .unwrap();
+        vfs.add_capability(Capability::Write(PathBuf::from("/bank")))
+            .unwrap();
+
+        let wasi = WasiCtxBuilder::new().build();
+        let mut state = ComponentState {
+            table: wasmtime_wasi::ResourceTable::new(),
+            wasi,
+            component_name: "test".to_string(),
+            vfs: Some(vfs),
+        };
+
+        let store_resource =
+            kvstore::Host::open_store(&mut state, "bank".to_string()).unwrap();
+        let rep = store_resource.rep();
+
+        // Write multiple keys
+        for (key, val) in [
+            ("balance_alice", "1000"),
+            ("balance_bob", "2000"),
+            ("balance_carol", "3000"),
+            ("supply_ugridway", "6000"),
+        ] {
+            kvstore::HostStore::set(
+                &mut state,
+                wasmtime::component::Resource::new_own(rep),
+                key.as_bytes().to_vec(),
+                val.as_bytes().to_vec(),
+            );
+        }
+
+        // Range query with prefix
+        let results = kvstore::HostStore::range(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            Some(b"balance_".to_vec()),
+            None,
+            10,
+        );
+        assert_eq!(results.len(), 3, "expected 3 balance_ entries");
+
+        // Range query with limit
+        let results = kvstore::HostStore::range(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            Some(b"balance_".to_vec()),
+            None,
+            2,
+        );
+        assert_eq!(results.len(), 2, "expected 2 entries with limit=2");
+    }
+
+    #[test]
+    fn test_kvstore_host_open_nonexistent_store() {
+        use crate::vfs::VirtualFilesystem;
+
+        let vfs = Arc::new(VirtualFilesystem::new());
+        // No stores mounted
+
+        let wasi = WasiCtxBuilder::new().build();
+        let mut state = ComponentState {
+            table: wasmtime_wasi::ResourceTable::new(),
+            wasi,
+            component_name: "test".to_string(),
+            vfs: Some(vfs),
+        };
+
+        // Opening a nonexistent store should fail
+        let result = kvstore::Host::open_store(&mut state, "nonexistent".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_kvstore_host_no_vfs() {
+        let wasi = WasiCtxBuilder::new().build();
+        let mut state = ComponentState {
+            table: wasmtime_wasi::ResourceTable::new(),
+            wasi,
+            component_name: "test".to_string(),
+            vfs: None, // No VFS
+        };
+
+        // Opening a store without VFS should fail
+        let result = kvstore::Host::open_store(&mut state, "bank".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("VFS not available"));
     }
 }

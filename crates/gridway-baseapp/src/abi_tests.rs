@@ -11,18 +11,43 @@ mod tests {
     use crate::capabilities::{CapabilityManager, CapabilityType};
     use crate::vfs::VirtualFilesystem;
     use gridway_store::MemStore;
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
-    /// Create a test WASM module with basic memory exports
+    /// Create a test WASM module that imports host functions and exports wrappers.
+    /// Host functions must be called FROM WASM (not directly from Rust) so that
+    /// `caller.get_export("memory")` can find the instance's memory.
     fn create_test_module() -> Vec<u8> {
-        // Simple WASM module that exports memory
         wat::parse_str(
             r#"
             (module
+                ;; Import host functions
+                (import "env" "host_state_get" (func $host_state_get (param i32 i32 i32 i32) (result i32)))
+                (import "env" "host_state_set" (func $host_state_set (param i32 i32 i32 i32) (result i32)))
+                (import "env" "host_capability_check" (func $host_capability_check (param i32 i32) (result i32)))
+                (import "env" "host_ipc_send" (func $host_ipc_send (param i32 i32 i32 i32) (result i32)))
+
                 (memory (export "memory") 1)
+
+                ;; Passthrough wrappers — call host functions from within WASM context
+                (func (export "call_state_set") (param i32 i32 i32 i32) (result i32)
+                    local.get 0 local.get 1 local.get 2 local.get 3
+                    call $host_state_set)
+
+                (func (export "call_state_get") (param i32 i32 i32 i32) (result i32)
+                    local.get 0 local.get 1 local.get 2 local.get 3
+                    call $host_state_get)
+
+                (func (export "call_capability_check") (param i32 i32) (result i32)
+                    local.get 0 local.get 1
+                    call $host_capability_check)
+
+                (func (export "call_ipc_send") (param i32 i32 i32 i32) (result i32)
+                    local.get 0 local.get 1 local.get 2 local.get 3
+                    call $host_ipc_send)
+
                 (func (export "test") (result i32)
-                    i32.const 42
-                )
+                    i32.const 42)
             )
             "#,
         )
@@ -41,11 +66,11 @@ mod tests {
 
         // Add VFS capabilities
         vfs.add_capability(crate::vfs::Capability::Read(
-            "test_module".to_string().into(),
+            PathBuf::from("/test_module"),
         ))
         .unwrap();
         vfs.add_capability(crate::vfs::Capability::Write(
-            "test_module".to_string().into(),
+            PathBuf::from("/test_module"),
         ))
         .unwrap();
 
@@ -79,7 +104,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TODO: Fix VFS passing through WASM Store context"]
     fn test_host_state_get_set() {
         let (context, _vfs, _cap_manager) = setup_test_context();
 
@@ -113,46 +137,33 @@ mod tests {
         let len_bytes = (value.len() as u32).to_le_bytes();
         memory.write(&mut store, 300, &len_bytes).unwrap();
 
-        // Get host functions through the linker
-        let host_state_set = linker.get(&mut store, "env", "host_state_set").unwrap();
-        let host_state_set_func = host_state_set.into_func().unwrap();
+        // Call host functions through WASM wrappers (not directly) so that
+        // caller.get_export("memory") works inside the host function.
+        let call_state_set = instance
+            .get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "call_state_set")
+            .unwrap();
 
-        // Call host_state_set
-        let params = vec![
-            Val::I32(100),                // key_ptr
-            Val::I32(key.len() as i32),   // key_len
-            Val::I32(200),                // value_ptr
-            Val::I32(value.len() as i32), // value_len
-        ];
-        let mut results = vec![Val::I32(0)];
-        host_state_set_func
-            .call(&mut store, &params, &mut results)
+        // Call host_state_set via WASM wrapper
+        let result = call_state_set
+            .call(
+                &mut store,
+                (100, key.len() as i32, 200, value.len() as i32),
+            )
+            .unwrap();
+        // Check result
+        assert_eq!(result, AbiResultCode::Success as i32);
+
+        // Now test host_state_get via WASM wrapper
+        let call_state_get = instance
+            .get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "call_state_get")
+            .unwrap();
+
+        let get_result = call_state_get
+            .call(&mut store, (100, key.len() as i32, 400, 300))
             .unwrap();
 
         // Check result
-        assert_eq!(results[0].unwrap_i32(), AbiResultCode::Success as i32);
-
-        // Now test host_state_get
-        let host_state_get = linker.get(&mut store, "env", "host_state_get").unwrap();
-        let host_state_get_func = host_state_get.into_func().unwrap();
-
-        // Allocate buffer for reading value
-        let _buffer_size = 1024;
-
-        // Call host_state_get
-        let params = vec![
-            Val::I32(100),              // key_ptr
-            Val::I32(key.len() as i32), // key_len
-            Val::I32(400),              // value_ptr (where to write result)
-            Val::I32(300),              // value_len_ptr (where to write length)
-        ];
-        let mut results = vec![Val::I32(0)];
-        host_state_get_func
-            .call(&mut store, &params, &mut results)
-            .unwrap();
-
-        // Check result
-        assert_eq!(results[0].unwrap_i32(), AbiResultCode::Success as i32);
+        assert_eq!(get_result, AbiResultCode::Success as i32);
 
         // Read the length from memory
         let mut len_buffer = vec![0u8; 4];
@@ -171,7 +182,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TODO: Fix capability manager passing through WASM Store context"]
     fn test_host_capability_check() {
         let (context, _vfs, cap_manager) = setup_test_context();
 
@@ -217,42 +227,25 @@ mod tests {
         memory.write(&mut store, 100, valid_cap).unwrap();
         memory.write(&mut store, 200, invalid_cap).unwrap();
 
-        // Get host function
-        let host_capability_check = linker
-            .get(&mut store, "env", "host_capability_check")
+        // Call through WASM wrapper
+        let call_capability_check = instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "call_capability_check")
             .unwrap();
-        let host_capability_check_func = host_capability_check.into_func().unwrap();
 
         // Check valid capability
-        let params = vec![
-            Val::I32(100),                    // cap_ptr
-            Val::I32(valid_cap.len() as i32), // cap_len
-        ];
-        let mut results = vec![Val::I32(0)];
-        host_capability_check_func
-            .call(&mut store, &params, &mut results)
+        let result = call_capability_check
+            .call(&mut store, (100, valid_cap.len() as i32))
             .unwrap();
-
-        assert_eq!(results[0].unwrap_i32(), AbiResultCode::Success as i32);
+        assert_eq!(result, AbiResultCode::Success as i32);
 
         // Check invalid capability
-        let params = vec![
-            Val::I32(200),                      // cap_ptr
-            Val::I32(invalid_cap.len() as i32), // cap_len
-        ];
-        let mut results = vec![Val::I32(0)];
-        host_capability_check_func
-            .call(&mut store, &params, &mut results)
+        let result = call_capability_check
+            .call(&mut store, (200, invalid_cap.len() as i32))
             .unwrap();
-
-        assert_eq!(
-            results[0].unwrap_i32(),
-            AbiResultCode::PermissionDenied as i32
-        );
+        assert_eq!(result, AbiResultCode::PermissionDenied as i32);
     }
 
     #[test]
-    #[ignore = "TODO: Fix capability manager passing through WASM Store context"]
     fn test_host_ipc_send() {
         let (context, _vfs, cap_manager) = setup_test_context();
 
@@ -292,22 +285,17 @@ mod tests {
         memory.write(&mut store, 100, target_module).unwrap();
         memory.write(&mut store, 200, message).unwrap();
 
-        // Get host function
-        let host_ipc_send = linker.get(&mut store, "env", "host_ipc_send").unwrap();
-        let host_ipc_send_func = host_ipc_send.into_func().unwrap();
-
-        // Call host_ipc_send
-        let params = vec![
-            Val::I32(100),                        // module_ptr
-            Val::I32(target_module.len() as i32), // module_len
-            Val::I32(200),                        // msg_ptr
-            Val::I32(message.len() as i32),       // msg_len
-        ];
-        let mut results = vec![Val::I32(0)];
-        host_ipc_send_func
-            .call(&mut store, &params, &mut results)
+        // Call through WASM wrapper
+        let call_ipc_send = instance
+            .get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "call_ipc_send")
             .unwrap();
 
-        assert_eq!(results[0].unwrap_i32(), AbiResultCode::Success as i32);
+        let result = call_ipc_send
+            .call(
+                &mut store,
+                (100, target_module.len() as i32, 200, message.len() as i32),
+            )
+            .unwrap();
+        assert_eq!(result, AbiResultCode::Success as i32);
     }
 }

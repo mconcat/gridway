@@ -577,41 +577,21 @@ impl HostFunctions {
                         }
                     };
 
-                    // Convert key to path format: /state/{module_id}/{key}
-                    let key_str = String::from_utf8_lossy(&key_bytes);
-                    let path = format!("/state/{module_id}/{key_str}");
-
-                    // Get VFS reference and perform read
+                    // Use module_id as VFS namespace, key_bytes as key
                     let vfs = caller.data().vfs.as_ref().unwrap().clone();
 
-                    // Open file for reading through VFS
-                    let fd = match vfs.open(std::path::Path::new(&path), false) {
-                        Ok(fd) => fd,
-                        Err(e) => {
-                            debug!("VFS file not found for key '{}': {}", key_str, e);
+                    let buffer = match vfs.read_key(&module_id, &key_bytes) {
+                        Ok(Some(data)) => data,
+                        Ok(None) => {
+                            let key_str = String::from_utf8_lossy(&key_bytes);
+                            debug!("Key '{}' not found in namespace '{}'", key_str, module_id);
                             return AbiResultCode::NotFound as i32;
                         }
-                    };
-
-                    // Read file content
-                    let mut buffer = Vec::new();
-                    let mut chunk = vec![0u8; 4096];
-                    loop {
-                        match vfs.read(fd, &mut chunk) {
-                            Ok(0) => break, // EOF
-                            Ok(n) => buffer.extend_from_slice(&chunk[..n]),
-                            Err(e) => {
-                                error!("Failed to read from VFS:: {}", e);
-                                let _ = vfs.close(fd);
-                                return AbiResultCode::StoreError as i32;
-                            }
+                        Err(e) => {
+                            error!("Failed to read from VFS namespace '{}': {}", module_id, e);
+                            return AbiResultCode::StoreError as i32;
                         }
-                    }
-
-                    // Close the file
-                    if let Err(e) = vfs.close(fd) {
-                        error!("Failed to close VFS file:: {}", e);
-                    }
+                    };
 
                     // Write result to WASM memory
                     let value_region = MemoryRegion::new(value_ptr, buffer.len() as u32);
@@ -647,7 +627,7 @@ impl HostFunctions {
                     debug!(
                         "WASM module {} successfully read state key '{}' ({} bytes)",
                         module_id,
-                        key_str,
+                        String::from_utf8_lossy(&key_bytes),
                         buffer.len()
                     );
 
@@ -706,61 +686,19 @@ impl HostFunctions {
                         }
                     };
 
-                    // Convert key to path format: /state/{module_id}/{key}
-                    let key_str = String::from_utf8_lossy(&key_bytes);
-                    let path = format!("/state/{module_id}/{key_str}");
-
-                    // Get VFS reference
+                    // Use module_id as VFS namespace, write key directly
                     let vfs = caller.data().vfs.as_ref().unwrap().clone();
 
-                    // Open file for writing through VFS (create if not exists)
-                    let fd = match vfs.open(std::path::Path::new(&path), true) {
-                        Ok(fd) => fd,
-                        Err(_) => {
-                            // Try to create the file
-                            match vfs.create(std::path::Path::new(&path)) {
-                                Ok(fd) => fd,
-                                Err(e) => {
-                                    error!(
-                                        "Failed to create VFS file for key '{}': {}",
-                                        key_str, e
-                                    );
-                                    return AbiResultCode::StoreError as i32;
-                                }
-                            }
-                        }
-                    };
-
-                    // Write value to file
-                    match vfs.write(fd, &value_bytes) {
-                        Ok(written) => {
-                            if written != value_bytes.len() {
-                                error!(
-                                    "Partial write: expected {} bytes, wrote {}",
-                                    value_bytes.len(),
-                                    written
-                                );
-                                let _ = vfs.close(fd);
-                                return AbiResultCode::StoreError as i32;
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to write to VFS:: {}", e);
-                            let _ = vfs.close(fd);
-                            return AbiResultCode::StoreError as i32;
-                        }
-                    }
-
-                    // Close the file (commits the write)
-                    if let Err(e) = vfs.close(fd) {
-                        error!("Failed to close VFS file:: {}", e);
+                    if let Err(e) = vfs.write_key(&module_id, &key_bytes, &value_bytes) {
+                        let key_str = String::from_utf8_lossy(&key_bytes);
+                        error!("Failed to write key '{}' to VFS namespace '{}': {}", key_str, module_id, e);
                         return AbiResultCode::StoreError as i32;
                     }
 
                     debug!(
                         "WASM module {} successfully wrote state key '{}' ({} bytes)",
                         module_id,
-                        key_str,
+                        String::from_utf8_lossy(&key_bytes),
                         value_bytes.len()
                     );
 

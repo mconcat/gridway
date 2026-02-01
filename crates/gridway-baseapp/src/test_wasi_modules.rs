@@ -3,8 +3,7 @@ use crate::component_host::{ComponentHost, ComponentInfo, ComponentType};
 
 #[test]
 fn test_our_minimal_component() {
-    let base_store = std::sync::Arc::new(std::sync::Mutex::new(gridway_store::MemStore::new()));
-    let host = ComponentHost::new(base_store).unwrap();
+    let host = ComponentHost::new().unwrap();
 
     // Load our minimal component module
     let module_path = std::env::current_dir()

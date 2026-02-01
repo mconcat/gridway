@@ -8,15 +8,13 @@ mod tests {
 
     #[test]
     fn test_component_host_creation() {
-        let base_store = Arc::new(Mutex::new(gridway_store::MemStore::new()));
-        let _host = ComponentHost::new(base_store).unwrap();
+        let _host = ComponentHost::new().unwrap();
         // Basic test that host can be created
     }
 
     #[test]
     fn test_tx_decoder_component() {
-        let base_store = Arc::new(Mutex::new(gridway_store::MemStore::new()));
-        let host = ComponentHost::new(base_store).unwrap();
+        let host = ComponentHost::new().unwrap();
 
         // Load the tx-decoder component if it exists
         let component_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -123,8 +123,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("gRPC address:: {}", grpc);
             }
 
-            // Create BaseApp
-            let app = BaseApp::new(config.chain_id.clone())?;
+            // Create BaseApp with persistent data directory
+            let data_dir = cli.home.join("data");
+            std::fs::create_dir_all(&data_dir)?;
+            let app = BaseApp::with_data_dir(
+                config.chain_id.clone(),
+                Some(data_dir),
+            )?;
             let app_arc = std::sync::Arc::new(tokio::sync::RwLock::new(app));
 
             // Create health state

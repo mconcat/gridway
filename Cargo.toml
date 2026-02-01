@@ -18,6 +18,7 @@ members = [
     "crates/wasi-modules/end-blocker",
     "crates/wasi-modules/tx-decoder",
     "crates/wasi-modules/test-minimal",
+    "crates/wasi-modules/bank",
 ]
 
 [workspace.package]

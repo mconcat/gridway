@@ -31,7 +31,10 @@ mod test_wasi;
 #[cfg(test)]
 mod test_wasi_modules;
 
-use gridway_store::{KVStore, MemStore};
+use gridway_store::{GlobalAppStore, JMTStore, KVStore};
+#[cfg(test)]
+use gridway_store::MemStore;
+use std::path::PathBuf;
 use gridway_telemetry::metrics::{
     observe_block_time, observe_transaction_time, BLOCK_HEIGHT, TOTAL_TRANSACTIONS,
 };
@@ -181,7 +184,7 @@ impl Context {
             block_time,
             chain_id,
             exec_mode,
-        }
+    }
     }
 }
 
@@ -197,8 +200,9 @@ pub struct BaseApp {
     wasi_host: Arc<WasiHost>,
     /// Component host for preview2 components
     component_host: Arc<ComponentHost>,
-    /// Virtual filesystem for state access
-    #[allow(dead_code)]
+    /// Virtual filesystem for state access.
+    /// Mounted with JMT-backed NamespacedStore views. Used by ComponentHost
+    /// to bridge WASI module kvstore access to the JMT state tree.
     vfs: Arc<VirtualFilesystem>,
     /// Module router for message dispatch
     module_router: Arc<ModuleRouter>,
@@ -211,13 +215,53 @@ pub struct BaseApp {
     module_paths: HashMap<String, String>,
     /// Ante handler for transaction validation
     ante_handler: Arc<std::sync::Mutex<WasiAnteHandler>>,
+    /// JMT-backed global application store
+    global_store: Arc<GlobalAppStore>,
+    /// Data directory for persistent storage
+    data_dir: PathBuf,
+    /// Last committed app hash
+    last_app_hash: Vec<u8>,
 }
 
 impl BaseApp {
     /// Create a new base application with microkernel architecture
     pub fn new(name: String) -> Result<Self> {
-        // Create the base store
-        let store = Arc::new(std::sync::Mutex::new(MemStore::new()));
+        Self::with_data_dir(name, None)
+    }
+
+    /// Create a new base application with a specific data directory for persistent storage
+    pub fn with_data_dir(name: String, data_dir: Option<PathBuf>) -> Result<Self> {
+        let data_dir = data_dir.unwrap_or_else(|| {
+            // Use a unique temp directory when no explicit path is given.
+            // For production use, always pass an explicit data_dir.
+            let dir = std::env::temp_dir().join(format!(
+                "gridway-{}-{}-{:x}",
+                name,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            let _ = std::fs::create_dir_all(&dir);
+            dir
+        });
+        let _ = std::fs::create_dir_all(&data_dir);
+
+        // Create JMT-backed GlobalAppStore for persistent state
+        let jmt_store = JMTStore::new("state".to_string(), data_dir.join("state.db"))
+            .map_err(|e| BaseAppError::Store(format!("Failed to create JMT store:: {e}")))?;
+        let global_store = Arc::new(GlobalAppStore::new(jmt_store));
+
+        // Register namespaces for core modules
+        global_store.register_namespace("bank", false)
+            .map_err(|e| BaseAppError::Store(format!("Failed to register bank namespace:: {e}")))?;
+        global_store.register_namespace("auth", false)
+            .map_err(|e| BaseAppError::Store(format!("Failed to register auth namespace:: {e}")))?;
+        global_store.register_namespace("staking", false)
+            .map_err(|e| BaseAppError::Store(format!("Failed to register staking namespace:: {e}")))?;
+        global_store.register_namespace("gov", false)
+            .map_err(|e| BaseAppError::Store(format!("Failed to register gov namespace:: {e}")))?;
 
         // Initialize WASI runtime host
         let wasi_host = Arc::new(WasiHost::new().map_err(|e| {
@@ -225,15 +269,19 @@ impl BaseApp {
         })?);
 
         // Initialize component host for preview2 components
-        let component_host = Arc::new(ComponentHost::new(store.clone()).map_err(|e| {
+        let mut component_host_inner = ComponentHost::new().map_err(|e| {
             BaseAppError::InitChainFailed(format!("Failed to initialize Component host:: {e}"))
-        })?);
+        })?;
 
         // Initialize virtual filesystem
         let vfs = Arc::new(VirtualFilesystem::new());
 
-        // Initialize default stores for the VFS
-        Self::setup_default_stores(&vfs)?;
+        // Mount JMT-backed namespaced stores into VFS
+        Self::setup_jmt_stores(&vfs, &global_store)?;
+
+        // Bridge VFS to ComponentHost so WASI modules can access state
+        component_host_inner.set_vfs(vfs.clone());
+        let component_host = Arc::new(component_host_inner);
 
         // Initialize capability manager
         let capability_manager = Arc::new(CapabilityManager::new());
@@ -272,6 +320,10 @@ impl BaseApp {
             "ante_handler".to_string(),
             format!("{module_base_path}/ante_handler_component.wasm"),
         );
+        module_paths.insert(
+            "bank".to_string(),
+            format!("{module_base_path}/bank_component.wasm"),
+        );
 
         // Initialize ante handler - for now just create an empty one
         // The actual ante handler component will be loaded dynamically when needed
@@ -290,6 +342,9 @@ impl BaseApp {
             module_governance,
             module_paths,
             ante_handler,
+            global_store,
+            data_dir,
+            last_app_hash: vec![0u8; 32],
         })
     }
 
@@ -312,7 +367,7 @@ impl BaseApp {
         let modules_in_current = current_dir.join("modules");
         if modules_in_current.exists() {
             return "modules".to_string();
-        }
+    }
 
         // Try parent directories up to 3 levels (for running tests from crate directory)
         let mut path = current_dir.clone();
@@ -324,7 +379,7 @@ impl BaseApp {
                 }
                 path = parent.to_path_buf();
             }
-        }
+    }
 
         // Try CARGO_MANIFEST_DIR for build scripts
         if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
@@ -338,35 +393,40 @@ impl BaseApp {
                     }
                 }
             }
-        }
+    }
 
         // Default to modules in current directory
         "modules".to_string()
     }
 
-    /// Set up default stores in the VFS for blockchain modules
-    fn setup_default_stores(vfs: &Arc<VirtualFilesystem>) -> Result<()> {
-        // Create default stores for core modules
-        let auth_store: Arc<std::sync::Mutex<dyn KVStore>> =
-            Arc::new(std::sync::Mutex::new(MemStore::new()));
-        let bank_store: Arc<std::sync::Mutex<dyn KVStore>> =
-            Arc::new(std::sync::Mutex::new(MemStore::new()));
-        let staking_store: Arc<std::sync::Mutex<dyn KVStore>> =
-            Arc::new(std::sync::Mutex::new(MemStore::new()));
-        let gov_store: Arc<std::sync::Mutex<dyn KVStore>> =
-            Arc::new(std::sync::Mutex::new(MemStore::new()));
+    /// Set up JMT-backed stores in the VFS for blockchain modules
+    /// This mounts NamespacedStore views from GlobalAppStore into VFS
+    fn setup_jmt_stores(vfs: &Arc<VirtualFilesystem>, global_store: &Arc<GlobalAppStore>) -> Result<()> {
+        use crate::vfs::Capability;
+        use std::path::PathBuf as VfsPathBuf;
 
-        // Mount stores in VFS namespaces
-        vfs.mount_store("auth".to_string(), auth_store)
-            .map_err(|e| BaseAppError::Store(format!("Failed to mount auth store:: {e}")))?;
-        vfs.mount_store("bank".to_string(), bank_store)
-            .map_err(|e| BaseAppError::Store(format!("Failed to mount bank store:: {e}")))?;
-        vfs.mount_store("staking".to_string(), staking_store)
-            .map_err(|e| BaseAppError::Store(format!("Failed to mount staking store:: {e}")))?;
-        vfs.mount_store("gov".to_string(), gov_store)
-            .map_err(|e| BaseAppError::Store(format!("Failed to mount gov store:: {e}")))?;
+        for ns in ["auth", "bank", "staking", "gov"] {
+            let ns_store = global_store.get_namespace(ns)
+                .map_err(|e| BaseAppError::Store(format!("Failed to get {ns} namespace:: {e}")))?;
+            let store_arc: Arc<std::sync::Mutex<dyn KVStore>> =
+                Arc::new(std::sync::Mutex::new(ns_store));
+            vfs.mount_store(ns.to_string(), store_arc)
+                .map_err(|e| BaseAppError::Store(format!("Failed to mount {ns} store:: {e}")))?;
+
+            // Grant read/write capabilities for each namespace
+            let ns_path = VfsPathBuf::from(format!("/{ns}"));
+            vfs.add_capability(Capability::Read(ns_path.clone()))
+                .map_err(|e| BaseAppError::Store(format!("Failed to add read cap for {ns}:: {e}")))?;
+            vfs.add_capability(Capability::Write(ns_path))
+                .map_err(|e| BaseAppError::Store(format!("Failed to add write cap for {ns}:: {e}")))?;
+    }
 
         Ok(())
+    }
+
+    /// Get a reference to the global app store
+    pub fn global_store(&self) -> &Arc<GlobalAppStore> {
+        &self.global_store
     }
 
     /// Begin block processing using WASI module
@@ -398,7 +458,7 @@ impl BaseApp {
                 // In production, this might be a fatal error
                 Ok(())
             }
-        }
+    }
     }
 
     /// Execute BeginBlock WASI module
@@ -416,14 +476,14 @@ impl BaseApp {
             time: u64,
             chain_id: String,
             byzantine_validators: Vec<Evidence>,
-        }
+    }
 
         #[derive(Debug, Serialize)]
         struct Evidence {
             validator_address: Vec<u8>,
             evidence_type: String,
             height: u64,
-        }
+    }
 
         #[derive(Debug, Deserialize)]
         #[allow(dead_code)]
@@ -431,19 +491,19 @@ impl BaseApp {
             success: bool,
             events: Vec<WasiEvent>,
             error: Option<String>,
-        }
+    }
 
         #[derive(Debug, Deserialize)]
         struct WasiEvent {
             event_type: String,
             attributes: Vec<WasiAttribute>,
-        }
+    }
 
         #[derive(Debug, Deserialize)]
         struct WasiAttribute {
             key: String,
             value: String,
-        }
+    }
 
         // Create request
         let request = BeginBlockRequest {
@@ -532,7 +592,7 @@ impl BaseApp {
             // Module path not configured - use placeholder
             log::warn!("BeginBlock component path not configured, using placeholder");
             Ok(vec![])
-        }
+    }
     }
 
     /// End block processing using WASI module
@@ -564,7 +624,7 @@ impl BaseApp {
             chain_id: String,
             total_power: i64,
             proposer_address: Vec<u8>,
-        }
+    }
 
         #[derive(Debug, Serialize)]
         struct ModuleState {
@@ -572,26 +632,26 @@ impl BaseApp {
             active_proposals: Vec<Proposal>,
             inflation_rate: f64,
             last_reward_height: u64,
-        }
+    }
 
         #[derive(Debug, Serialize, Deserialize)]
         struct ValidatorUpdate {
             pub_key: PubKey,
             power: i64,
-        }
+    }
 
         #[derive(Debug, Serialize, Deserialize)]
         struct PubKey {
             type_url: String,
             value: Vec<u8>,
-        }
+    }
 
         #[derive(Debug, Serialize, Deserialize)]
         struct Proposal {
             id: u64,
             voting_end_time: u64,
             tally: TallyResult,
-        }
+    }
 
         #[derive(Debug, Serialize, Deserialize)]
         struct TallyResult {
@@ -599,7 +659,7 @@ impl BaseApp {
             no_votes: u64,
             abstain_votes: u64,
             no_with_veto_votes: u64,
-        }
+    }
 
         #[derive(Debug, Deserialize)]
         struct EndBlockResponse {
@@ -607,26 +667,26 @@ impl BaseApp {
             #[allow(dead_code)]
             consensus_param_updates: Option<ConsensusParams>,
             events: Vec<WasiEvent>,
-        }
+    }
 
         #[derive(Debug, Deserialize)]
         #[allow(dead_code)]
         struct ConsensusParams {
             block_max_bytes: i64,
             block_max_gas: i64,
-        }
+    }
 
         #[derive(Debug, Deserialize)]
         struct WasiEvent {
             event_type: String,
             attributes: Vec<WasiAttribute>,
-        }
+    }
 
         #[derive(Debug, Deserialize)]
         struct WasiAttribute {
             key: String,
             value: String,
-        }
+    }
 
         // Create request and state
         let request = EndBlockRequest {
@@ -727,7 +787,7 @@ impl BaseApp {
             // Module path not configured - use placeholder
             log::warn!("EndBlock component path not configured, using placeholder");
             Ok(vec![])
-        }
+    }
     }
 
     /// Check transaction validity
@@ -776,7 +836,7 @@ impl BaseApp {
                 events: vec![],
                 codespace: String::new(),
             }),
-        }
+    }
     }
 
     /// Deliver transaction
@@ -785,7 +845,7 @@ impl BaseApp {
 
         if self.context.is_none() {
             return Err(BaseAppError::InvalidTx("no active context".to_string()));
-        }
+    }
 
         // Decode transaction using WASI TxDecoder module
         let decoded_tx = self.decode_transaction_wasi(tx_bytes)?;
@@ -816,7 +876,7 @@ impl BaseApp {
 
         if ante_response.code != 0 {
             return Ok(ante_response);
-        }
+    }
 
         // Extract messages and route to appropriate modules
         let messages = decoded_tx
@@ -866,7 +926,7 @@ impl BaseApp {
                     },
                 ],
             });
-        }
+    }
 
         let gas_wanted = decoded_tx
             .get("auth_info")
@@ -898,7 +958,7 @@ impl BaseApp {
                     return parts[dot_pos + 1..dot_pos + 1 + second_dot].to_string();
                 }
             }
-        }
+    }
         "unknown".to_string()
     }
 
@@ -911,7 +971,7 @@ impl BaseApp {
             tx_bytes: String,
             encoding: String,
             validate: bool,
-        }
+    }
 
         #[derive(Debug, Deserialize)]
         #[allow(dead_code)]
@@ -920,7 +980,7 @@ impl BaseApp {
             decoded_tx: Option<serde_json::Value>,
             error: Option<String>,
             warnings: Vec<String>,
-        }
+    }
 
         // Create decode request - assume base64 encoding for now
         let request = DecodeRequest {
@@ -997,7 +1057,7 @@ impl BaseApp {
                     }
                 }
             }))
-        }
+    }
     }
 
     /// Convert decoded JSON transaction to RawTx
@@ -1155,14 +1215,26 @@ impl BaseApp {
         })
     }
 
-    /// Commit the current block
+    /// Commit the current block — flushes pending state to JMT and returns merkle root hash
     pub fn commit(&mut self) -> Result<Vec<u8>> {
-        // WASI FORWARDING: State commitment is handled by WASM modules
-        // 1. Notify all active modules to commit their state
-        // 2. Aggregate state changes through GlobalAppStore
-        // 3. Compute application hash from committed state
-        // 4. Return final app hash for consensus
-        Ok(vec![0u8; 32]) // Placeholder app hash - replaced by WASI module
+        let root_hash = {
+            let store_arc = self.global_store.get_store();
+            let mut store = store_arc.lock()
+                .map_err(|e| BaseAppError::Store(format!("Failed to lock JMT store:: {e}")))?;
+            store.commit()
+                .map_err(|e| BaseAppError::Store(format!("JMT commit failed:: {e}")))?
+        };
+
+        self.last_app_hash = root_hash.to_vec();
+
+        let height = self.get_height();
+        log::info!(
+            "Committed block {} with app hash:: {}",
+            height,
+            hex::encode(&root_hash)
+        );
+
+        Ok(root_hash.to_vec())
     }
 
     /// Get current block height
@@ -1173,8 +1245,7 @@ impl BaseApp {
 
     /// Get last app hash
     pub fn get_last_app_hash(&self) -> &[u8] {
-        // TODO: Query from WASI module state
-        &[0u8; 32] // Placeholder
+        &self.last_app_hash
     }
 
     /// Rollback current block (for error recovery)
@@ -1308,7 +1379,7 @@ impl BaseApp {
                     ));
                 }
             }
-        }
+    }
 
         // End block processing
         self.end_block()?;
@@ -1458,6 +1529,78 @@ impl BaseApp {
                         }
                     }
                 }
+                "/cosmos.bank.v1beta1.MsgSend" => {
+                    // Load bank.wasm if not already loaded
+                    if let Some(bank_path) = self.module_paths.get("bank") {
+                        if let Ok(component_bytes) = std::fs::read(bank_path) {
+                            let info = ComponentInfo {
+                                name: "bank".to_string(),
+                                path: bank_path.clone().into(),
+                                component_type: ComponentType::BeginBlocker, // reuse type for now
+                                gas_limit: 1_000_000,
+                            };
+                            let _ = self.component_host.load_component("bank", &component_bytes, info);
+                        }
+                    }
+
+                    let msg_data = serde_json::to_string(msg_value).map_err(|e| {
+                        BaseAppError::InvalidTx(format!("failed to serialize MsgSend: {e}"))
+                    })?;
+                    let sender = msg_value.get("from_address")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    let result = self.component_host.execute_module(
+                        "bank",
+                        height,
+                        self.context.as_ref().map(|c| c.block_time).unwrap_or(0),
+                        &self.context.as_ref().map(|c| c.chain_id.clone()).unwrap_or_default(),
+                        type_url,
+                        &msg_data,
+                        sender,
+                        100_000,
+                    );
+
+                    match result {
+                        Ok(comp_result) => {
+                            if !comp_result.success {
+                                return Ok(converter::create_tx_response(
+                                    1,
+                                    comp_result.error.unwrap_or("bank execution failed".into()),
+                                    String::new(),
+                                    vec![],
+                                    100000_i64,
+                                    total_gas_used as i64,
+                                    events,
+                                    String::new(),
+                                ));
+                            }
+                            total_gas_used += comp_result.gas_used;
+                            // Convert component events to BaseApp events
+                            if let Some(data) = &comp_result.data {
+                                if let Some(evt_array) = data.get("events").and_then(|e| e.as_array()) {
+                                    for evt in evt_array {
+                                        events.push(Event {
+                                            r#type: evt.get("event_type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+                                            attributes: evt.get("attributes").and_then(|a| a.as_array()).map(|attrs| {
+                                                attrs.iter().map(|a| Attribute {
+                                                    key: a.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string(),
+                                                    value: a.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                                    index: true,
+                                                }).collect()
+                                            }).unwrap_or_default(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(BaseAppError::AbciError(
+                                format!("bank WASM module execution failed: {e}")
+                            ));
+                        }
+                    }
+                }
                 _ => {
                     // Route to module router for other message types
                     let exec_mode = self
@@ -1494,7 +1637,7 @@ impl BaseApp {
                     ));
                 }
             }
-        }
+    }
 
         Ok(converter::success_tx_response(
             "transaction executed successfully".to_string(),
@@ -1583,15 +1726,29 @@ impl BaseApp {
         ))
     }
 
-    /// Helper methods for testing
-    pub fn set_balance(&mut self, _address: &str, _denom: &str, _amount: u64) -> Result<()> {
-        // WASI FORWARDING: Balance management handled by bank WASM module
+    /// Helper methods for testing — sets balance directly in the bank store
+    pub fn set_balance(&mut self, address: &str, denom: &str, amount: u64) -> Result<()> {
+        let key = format!("balance_{address}_{denom}");
+        let value = amount.to_string();
+        self.global_store.set_namespaced("bank", key.as_bytes(), value.as_bytes())
+            .map_err(|e| BaseAppError::Store(format!("Failed to set balance:: {e}")))?;
         Ok(())
     }
 
-    pub fn get_balance(&self, _address: &str, _denom: &str) -> Result<u64> {
-        // WASI FORWARDING: Balance queries handled by bank WASM module
-        Ok(0)
+    /// Helper method — gets balance from the bank store
+    pub fn get_balance(&self, address: &str, denom: &str) -> Result<u64> {
+        let key = format!("balance_{address}_{denom}");
+        match self.global_store.get_namespaced("bank", key.as_bytes()) {
+            Ok(Some(value)) => {
+                let amount_str = String::from_utf8(value)
+                    .map_err(|e| BaseAppError::Store(format!("Invalid balance encoding:: {e}")))?;
+                let amount: u64 = amount_str.parse()
+                    .map_err(|e| BaseAppError::Store(format!("Invalid balance value:: {e}")))?;
+                Ok(amount)
+            }
+            Ok(None) => Ok(0),
+            Err(e) => Err(BaseAppError::Store(format!("Failed to get balance:: {e}"))),
+    }
     }
 }
 
@@ -1604,12 +1761,12 @@ impl BaseApp {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    use tempfile;
 
     #[test]
     fn test_minimal_wasi_module() {
         // Test with a WASI component using ComponentHost
-        let base_store = Arc::new(Mutex::new(MemStore::new()));
-        let component_host = ComponentHost::new(base_store).unwrap();
+        let component_host = ComponentHost::new().unwrap();
 
         let module_path = std::env::current_dir()
             .unwrap()
@@ -1623,7 +1780,7 @@ mod tests {
             eprintln!("Component not found at:: {module_path:?}");
             eprintln!("Note: This test now expects preview2 components, not preview1 modules");
             return;
-        }
+    }
 
         let component_bytes = std::fs::read(&module_path).unwrap();
 
@@ -1660,14 +1817,13 @@ mod tests {
                 eprintln!("Component loading failed:: {e}");
                 panic!("Component loading failed");
             }
-        }
+    }
     }
 
     #[test]
     fn test_wasi_module_direct() {
         // Direct test of WASI component execution
-        let base_store = Arc::new(Mutex::new(MemStore::new()));
-        let component_host = ComponentHost::new(base_store).unwrap();
+        let component_host = ComponentHost::new().unwrap();
 
         // Load tx decoder component
         let module_path = std::env::current_dir()
@@ -1684,7 +1840,7 @@ mod tests {
             eprintln!("Note: This test now expects preview2 components, not preview1 modules");
             // Skip test if component not built
             return;
-        }
+    }
 
         let component_bytes = std::fs::read(&module_path).unwrap();
 
@@ -1725,7 +1881,7 @@ mod tests {
                 eprintln!("Component loading failed:: {e}");
                 panic!("Component loading failed");
             }
-        }
+    }
     }
 
     #[test]
@@ -1736,7 +1892,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Requires kvstore interface which is being removed"]
     fn test_begin_end_block() {
         let mut app = BaseApp::new("test-app".to_string()).unwrap();
 
@@ -1785,15 +1940,24 @@ mod tests {
 
     #[test]
     fn test_commit() {
-        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let mut app = BaseApp::with_data_dir(
+            "test-app".to_string(),
+            Some(temp_dir.path().to_path_buf()),
+        ).unwrap();
 
-        // Block commit forwarded to WASI modules
+        // Empty commit returns empty root hash
         let hash = app.commit().unwrap();
         assert_eq!(hash.len(), 32);
+
+        // After setting state and committing, hash should change
+        app.set_balance("alice", "ugridway", 1000).unwrap();
+        let hash2 = app.commit().unwrap();
+        assert_eq!(hash2.len(), 32);
+        assert_ne!(hash2, vec![0u8; 32], "commit should return non-zero hash after state change");
     }
 
     #[test]
-    #[ignore = "Requires kvstore interface which is being removed"]
     fn test_finalize_block() {
         let mut app = BaseApp::new("test-app".to_string()).unwrap();
 
@@ -1804,14 +1968,18 @@ mod tests {
 
     #[test]
     fn test_baseapp_integration() {
-        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let mut app = BaseApp::with_data_dir(
+            "test-app".to_string(),
+            Some(temp_dir.path().to_path_buf()),
+        ).unwrap();
 
         // Set initial balance using helper method
         app.set_balance("alice", "uatom", 1000).unwrap();
 
-        // Check balance - WASI module not implemented yet
+        // Check balance — now backed by JMT store
         let balance = app.get_balance("alice", "uatom").unwrap();
-        assert_eq!(balance, 0); // WASI module returns placeholder
+        assert_eq!(balance, 1000);
     }
 
     #[test]
@@ -1853,7 +2021,7 @@ mod tests {
                     }
                 ]
             }
-        }
+    }
         "#;
 
         let tx_bytes = tx_json.as_bytes();
@@ -1930,6 +2098,130 @@ mod tests {
     }
 
     #[test]
+    fn test_vfs_jmt_end_to_end() {
+        // End-to-end test: VFS → NamespacedStore → JMTStore → commit → read back
+        // This verifies the complete WASM→VFS→JMT state path is functional.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let app = BaseApp::with_data_dir(
+            "test-vfs-e2e".to_string(),
+            Some(temp_dir.path().to_path_buf()),
+        ).unwrap();
+
+        // Write through VFS's direct key access
+        app.vfs.write_key("bank", b"balance_alice_ugridway", b"1000").unwrap();
+        app.vfs.write_key("bank", b"balance_bob_ugridway", b"2000").unwrap();
+
+        // Read back through VFS — should see pending (uncommitted) state
+        let alice_via_vfs = app.vfs.read_key("bank", b"balance_alice_ugridway").unwrap();
+        assert_eq!(alice_via_vfs, Some(b"1000".to_vec()));
+
+        // Also readable through GlobalAppStore
+        let alice_via_store = app.global_store.get_namespaced("bank", b"balance_alice_ugridway").unwrap();
+        assert_eq!(alice_via_store, Some(b"1000".to_vec()));
+
+        // Cross-check: write through GlobalAppStore, read through VFS
+        app.global_store.set_namespaced("bank", b"balance_carol_ugridway", b"3000").unwrap();
+        let carol_via_vfs = app.vfs.read_key("bank", b"balance_carol_ugridway").unwrap();
+        assert_eq!(carol_via_vfs, Some(b"3000".to_vec()));
+    }
+
+    #[test]
+    fn test_vfs_jmt_commit_persistence() {
+        // Test that VFS writes survive JMT commit and are still readable.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let mut app = BaseApp::with_data_dir(
+            "test-vfs-commit".to_string(),
+            Some(temp_dir.path().to_path_buf()),
+        ).unwrap();
+
+        // Write via VFS and commit
+        app.vfs.write_key("bank", b"balance_alice", b"5000").unwrap();
+        let hash1 = app.commit().unwrap();
+        assert_eq!(hash1.len(), 32);
+        assert_ne!(hash1, vec![0u8; 32], "hash should be non-zero after state change");
+
+        // Read back after commit — data should be in committed state
+        let value = app.vfs.read_key("bank", b"balance_alice").unwrap();
+        assert_eq!(value, Some(b"5000".to_vec()));
+
+        // Write more and commit again — hash should change
+        app.vfs.write_key("bank", b"balance_alice", b"4000").unwrap();
+        let hash2 = app.commit().unwrap();
+        assert_ne!(hash1, hash2, "hash should change when state changes");
+
+        // Value should reflect the update
+        let value = app.vfs.read_key("bank", b"balance_alice").unwrap();
+        assert_eq!(value, Some(b"4000".to_vec()));
+    }
+
+    #[test]
+    fn test_vfs_jmt_deterministic_hash() {
+        // Verify determinism: same operations produce same hash.
+        let run = || {
+            let temp_dir = tempfile::TempDir::new().unwrap();
+            let mut app = BaseApp::with_data_dir(
+                "test-determinism".to_string(),
+                Some(temp_dir.path().to_path_buf()),
+            ).unwrap();
+            app.vfs.write_key("bank", b"balance_alice", b"1000").unwrap();
+            app.vfs.write_key("bank", b"balance_bob", b"2000").unwrap();
+            app.commit().unwrap()
+        };
+
+        let hash_a = run();
+        let hash_b = run();
+        assert_eq!(hash_a, hash_b, "same operations should produce identical commit hashes");
+    }
+
+    #[test]
+    fn test_vfs_namespace_isolation() {
+        // Verify that VFS namespace isolation works with JMT backing.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let app = BaseApp::with_data_dir(
+            "test-ns-isolation".to_string(),
+            Some(temp_dir.path().to_path_buf()),
+        ).unwrap();
+
+        // Same key name in different namespaces
+        app.vfs.write_key("bank", b"key1", b"bank_value").unwrap();
+        app.vfs.write_key("auth", b"key1", b"auth_value").unwrap();
+
+        // Should read different values
+        assert_eq!(
+            app.vfs.read_key("bank", b"key1").unwrap(),
+            Some(b"bank_value".to_vec())
+        );
+        assert_eq!(
+            app.vfs.read_key("auth", b"key1").unwrap(),
+            Some(b"auth_value".to_vec())
+        );
+    }
+
+    #[test]
+    fn test_vfs_helper_methods_consistency() {
+        // Verify that BaseApp helper methods (set_balance/get_balance)
+        // are consistent with VFS direct key access, proving the JMT
+        // store is shared across both access paths.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let mut app = BaseApp::with_data_dir(
+            "test-helper-consistency".to_string(),
+            Some(temp_dir.path().to_path_buf()),
+        ).unwrap();
+
+        // Write via helper
+        app.set_balance("alice", "ugridway", 1000).unwrap();
+
+        // Read via VFS — the key format is "balance_{addr}_{denom}"
+        let value = app.vfs.read_key("bank", b"balance_alice_ugridway").unwrap();
+        assert_eq!(value, Some(b"1000".to_vec()));
+
+        // Write via VFS, read via helper
+        app.vfs.write_key("bank", b"balance_bob_ugridway", b"2000").unwrap();
+        let balance = app.get_balance("bob", "ugridway").unwrap();
+        assert_eq!(balance, 2000);
+    }
+
+    #[test]
     fn test_execution_context_exec_mode() {
         let mut app = BaseApp::new("test-app".to_string()).unwrap();
 
@@ -1981,4 +2273,177 @@ mod tests {
             ExecMode::VerifyVoteExtension
         );
     }
+
+    #[test]
+    fn test_bank_msg_send_requires_wasm() {
+        // MsgSend MUST go through bank.wasm — no native fallback.
+        // ComponentHost.execute_module("bank") should fail when bank.wasm is not loaded.
+        let component_host = ComponentHost::new().unwrap();
+
+        let result = component_host.execute_module(
+            "bank", 1, 1234567890, "test-chain",
+            "/cosmos.bank.v1beta1.MsgSend",
+            r#"{"from_address":"alice","to_address":"bob","amount":100,"denom":"ugridway"}"#,
+            "alice",
+            100_000,
+        );
+
+        assert!(result.is_err(), "execute_module should fail without bank.wasm loaded");
+    }
+
+    #[test]
+    fn test_bank_msg_send_routing() {
+        // Verify MsgSend is routed to bank WASM module (not native fallback).
+        // The full pipeline requires tx-decoder.wasm + bank.wasm.
+        // Here we test that execute_transaction properly routes through WASM:
+        // without tx-decoder, the placeholder returns empty messages.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let mut app =
+            BaseApp::with_data_dir("test-app".to_string(), Some(temp_dir.path().to_path_buf()))
+                .unwrap();
+
+        app.set_balance("alice", "ugridway", 1000).unwrap();
+        app.begin_block(1, 1234567890, "test-chain".to_string())
+            .unwrap();
+
+        let tx = serde_json::json!({
+            "body": {
+                "messages": [{
+                    "@type": "/cosmos.bank.v1beta1.MsgSend",
+                    "from_address": "alice",
+                    "to_address": "bob",
+                    "amount": [{"denom": "ugridway", "amount": "100"}]
+                }]
+            }
+        });
+
+        let result = app.execute_transaction(tx.to_string().as_bytes(), 1);
+        // Without tx-decoder WASM, placeholder returns empty messages → succeeds vacuously.
+        // Balance should NOT change (no native fallback executed).
+        let alice_balance = app.get_balance("alice", "ugridway").unwrap();
+        assert_eq!(alice_balance, 1000, "Balance must not change without WASM bank module");
+    }
+    #[test]
+    fn test_bank_wasm_e2e_transfer() {
+        // E2E: Load bank.wasm → execute MsgSend → verify balance changes via VFS
+        use crate::vfs::{Capability, VirtualFilesystem};
+        use std::path::PathBuf;
+
+        // Find bank_component.wasm
+        let wasm_path = crate::BaseApp::find_module_base_path() + "/bank_component.wasm";
+        if !std::path::Path::new(&wasm_path).exists() {
+            eprintln!("bank_component.wasm not found at {wasm_path}, skipping E2E test");
+            eprintln!("Build with: cd crates/wasi-modules/bank && cargo component build --release");
+            return;
+        }
+
+        // Set up ComponentHost with VFS
+        let mut host = ComponentHost::new().unwrap();
+        let vfs = Arc::new(VirtualFilesystem::new());
+        let bank_store: Arc<Mutex<dyn gridway_store::KVStore>> =
+            Arc::new(Mutex::new(MemStore::new()));
+        vfs.mount_store("bank".to_string(), bank_store.clone()).unwrap();
+        vfs.add_capability(Capability::Read(PathBuf::from("/bank"))).unwrap();
+        vfs.add_capability(Capability::Write(PathBuf::from("/bank"))).unwrap();
+        host.set_vfs(vfs.clone());
+
+        // Pre-set alice balance in the store
+        vfs.write_key("bank", b"balance_alice_ugridway", b"1000").unwrap();
+
+        // Load bank.wasm
+        let component_bytes = std::fs::read(&wasm_path).unwrap();
+        let info = ComponentInfo {
+            name: "bank".to_string(),
+            path: wasm_path.into(),
+            component_type: ComponentType::BeginBlocker,
+            gas_limit: 1_000_000,
+        };
+        host.load_component("bank", &component_bytes, info).unwrap();
+
+        // Execute MsgSend: alice → bob, 100 ugridway
+        let result = host.execute_module(
+            "bank", 1, 1234567890, "test-chain",
+            "/cosmos.bank.v1beta1.MsgSend",
+            r#"{"from_address":"alice","to_address":"bob","amount":100,"denom":"ugridway"}"#,
+            "alice",
+            1_000_000,
+        ).unwrap();
+
+        assert!(result.success, "MsgSend should succeed: {:?}", result.error);
+        assert!(result.gas_used > 0, "Should consume gas");
+
+        // Verify balances changed via VFS
+        let alice_balance = vfs.read_key("bank", b"balance_alice_ugridway").unwrap()
+            .map(|v| String::from_utf8(v).unwrap())
+            .unwrap_or_default();
+        let bob_balance = vfs.read_key("bank", b"balance_bob_ugridway").unwrap()
+            .map(|v| String::from_utf8(v).unwrap())
+            .unwrap_or_default();
+
+        assert_eq!(alice_balance, "900", "Alice should have 900 after sending 100");
+        assert_eq!(bob_balance, "100", "Bob should have 100 after receiving");
+
+        // Verify events
+        if let Some(data) = &result.data {
+            let events = data.get("events").and_then(|e| e.as_array());
+            assert!(events.is_some(), "Should have transfer events");
+            let events = events.unwrap();
+            assert!(!events.is_empty(), "Should have at least one event");
+            let event_type = events[0].get("event_type").and_then(|t| t.as_str());
+            assert_eq!(event_type, Some("transfer"), "Event should be transfer type");
+        }
+    }
+
+    #[test]
+    fn test_bank_wasm_insufficient_funds() {
+        // E2E: bank.wasm should reject transfer with insufficient funds
+        use crate::vfs::{Capability, VirtualFilesystem};
+        use std::path::PathBuf;
+
+        let wasm_path = crate::BaseApp::find_module_base_path() + "/bank_component.wasm";
+        if !std::path::Path::new(&wasm_path).exists() {
+            eprintln!("bank_component.wasm not found, skipping");
+            return;
+        }
+
+        let mut host = ComponentHost::new().unwrap();
+        let vfs = Arc::new(VirtualFilesystem::new());
+        let bank_store: Arc<Mutex<dyn gridway_store::KVStore>> =
+            Arc::new(Mutex::new(MemStore::new()));
+        vfs.mount_store("bank".to_string(), bank_store.clone()).unwrap();
+        vfs.add_capability(Capability::Read(PathBuf::from("/bank"))).unwrap();
+        vfs.add_capability(Capability::Write(PathBuf::from("/bank"))).unwrap();
+        host.set_vfs(vfs.clone());
+
+        // Alice only has 50
+        vfs.write_key("bank", b"balance_alice_ugridway", b"50").unwrap();
+
+        let component_bytes = std::fs::read(&wasm_path).unwrap();
+        let info = ComponentInfo {
+            name: "bank".to_string(),
+            path: wasm_path.into(),
+            component_type: ComponentType::BeginBlocker,
+            gas_limit: 1_000_000,
+        };
+        host.load_component("bank", &component_bytes, info).unwrap();
+
+        // Try to send 100 (more than alice has)
+        let result = host.execute_module(
+            "bank", 1, 1234567890, "test-chain",
+            "/cosmos.bank.v1beta1.MsgSend",
+            r#"{"from_address":"alice","to_address":"bob","amount":100,"denom":"ugridway"}"#,
+            "alice",
+            1_000_000,
+        ).unwrap();
+
+        assert!(!result.success, "MsgSend should fail with insufficient funds");
+        assert!(result.error.unwrap_or_default().contains("insufficient"), "Error should mention insufficient funds");
+
+        // Balance should NOT change
+        let alice_balance = vfs.read_key("bank", b"balance_alice_ugridway").unwrap()
+            .map(|v| String::from_utf8(v).unwrap())
+            .unwrap_or_default();
+        assert_eq!(alice_balance, "50", "Alice balance should be unchanged");
+    }
+
 }

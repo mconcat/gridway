@@ -745,6 +745,153 @@ impl VirtualFilesystem {
             .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
         Ok(fds.keys().cloned().collect())
     }
+
+    // ─── Direct key access methods ───────────────────────────────────────
+    // These provide efficient key-value operations that go through VFS
+    // capability checking but access the underlying store directly,
+    // avoiding the overhead of file descriptor management.
+    // Used by the WASI kvstore host interface to bridge WASM modules to JMT state.
+
+    /// Check if a namespace exists in the mounted stores
+    pub fn has_namespace(&self, namespace: &str) -> bool {
+        self.stores
+            .lock()
+            .map(|s| s.contains_key(namespace))
+            .unwrap_or(false)
+    }
+
+    /// Read a value directly from a namespace store.
+    /// Checks VFS capabilities before accessing the underlying store.
+    pub fn read_key(&self, namespace: &str, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        let ns_path = PathBuf::from(format!("/{namespace}"));
+        self.check_access(&ns_path, "read")?;
+
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+        let store = stores
+            .get(namespace)
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found:: {namespace}")))?
+            .clone();
+        drop(stores);
+
+        let store = store
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+        Ok(store.get(key)?)
+    }
+
+    /// Write a value directly to a namespace store.
+    /// Checks VFS capabilities before accessing the underlying store.
+    pub fn write_key(&self, namespace: &str, key: &[u8], value: &[u8]) -> Result<()> {
+        let ns_path = PathBuf::from(format!("/{namespace}"));
+        self.check_access(&ns_path, "write")?;
+
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+        let store = stores
+            .get(namespace)
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found:: {namespace}")))?
+            .clone();
+        drop(stores);
+
+        let mut store = store
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+        Ok(store.set(key, value)?)
+    }
+
+    /// Delete a key from a namespace store.
+    /// Checks VFS capabilities before accessing the underlying store.
+    pub fn delete_key(&self, namespace: &str, key: &[u8]) -> Result<()> {
+        let ns_path = PathBuf::from(format!("/{namespace}"));
+        self.check_access(&ns_path, "write")?;
+
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+        let store = stores
+            .get(namespace)
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found:: {namespace}")))?
+            .clone();
+        drop(stores);
+
+        let mut store = store
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+        Ok(store.delete(key)?)
+    }
+
+    /// Check if a key exists in a namespace store.
+    /// Checks VFS capabilities before accessing the underlying store.
+    pub fn has_key(&self, namespace: &str, key: &[u8]) -> Result<bool> {
+        let ns_path = PathBuf::from(format!("/{namespace}"));
+        self.check_access(&ns_path, "read")?;
+
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+        let store = stores
+            .get(namespace)
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found:: {namespace}")))?
+            .clone();
+        drop(stores);
+
+        let store = store
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+        Ok(store.has(key)?)
+    }
+
+    /// Range query on a namespace store.
+    /// Returns key-value pairs where keys start with `start` prefix,
+    /// are less than `end` (if provided), up to `limit` entries.
+    /// Checks VFS capabilities before accessing the underlying store.
+    pub fn range_keys(
+        &self,
+        namespace: &str,
+        start: Option<&[u8]>,
+        end: Option<&[u8]>,
+        limit: u32,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let ns_path = PathBuf::from(format!("/{namespace}"));
+        self.check_access(&ns_path, "read")?;
+
+        let stores = self
+            .stores
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Lock poisoned:: {e}")))?;
+        let store = stores
+            .get(namespace)
+            .ok_or_else(|| VfsError::PathNotFound(format!("Namespace not found:: {namespace}")))?
+            .clone();
+        drop(stores);
+
+        let store = store
+            .lock()
+            .map_err(|e| VfsError::IoError(format!("Store lock poisoned:: {e}")))?;
+
+        let prefix = start.unwrap_or(&[]);
+        let iter = store.prefix_iterator(prefix);
+
+        let results: Vec<(Vec<u8>, Vec<u8>)> = iter
+            .filter(|(k, _)| {
+                if let Some(end_key) = end {
+                    k.as_slice() < end_key
+                } else {
+                    true
+                }
+            })
+            .take(limit as usize)
+            .collect();
+
+        Ok(results)
+    }
 }
 
 impl Default for VirtualFilesystem {
@@ -926,6 +1073,82 @@ mod tests {
             .unwrap();
         let dir_info = vfs.stat(&dir_path).unwrap();
         assert_eq!(dir_info.file_type, FileType::Directory);
+    }
+
+    #[test]
+    fn test_direct_key_operations() {
+        let vfs = setup_test_vfs();
+
+        // Write key
+        vfs.write_key("bank", b"balance_alice", b"1000").unwrap();
+
+        // Read key
+        let value = vfs.read_key("bank", b"balance_alice").unwrap();
+        assert_eq!(value, Some(b"1000".to_vec()));
+
+        // Has key
+        assert!(vfs.has_key("bank", b"balance_alice").unwrap());
+        assert!(!vfs.has_key("bank", b"nonexistent").unwrap());
+
+        // Has namespace
+        assert!(vfs.has_namespace("bank"));
+        assert!(!vfs.has_namespace("nonexistent"));
+
+        // Read nonexistent key
+        let value = vfs.read_key("bank", b"nonexistent").unwrap();
+        assert_eq!(value, None);
+
+        // Delete key
+        vfs.delete_key("bank", b"balance_alice").unwrap();
+        assert!(!vfs.has_key("bank", b"balance_alice").unwrap());
+        assert_eq!(vfs.read_key("bank", b"balance_alice").unwrap(), None);
+    }
+
+    #[test]
+    fn test_range_keys() {
+        let vfs = setup_test_vfs();
+
+        // Write several keys
+        vfs.write_key("bank", b"balance_alice", b"1000").unwrap();
+        vfs.write_key("bank", b"balance_bob", b"2000").unwrap();
+        vfs.write_key("bank", b"balance_carol", b"3000").unwrap();
+        vfs.write_key("bank", b"supply_ugridway", b"6000").unwrap();
+
+        // Range with prefix "balance_"
+        let results = vfs.range_keys("bank", Some(b"balance_"), None, 10).unwrap();
+        assert_eq!(results.len(), 3);
+
+        // Range with limit
+        let results = vfs.range_keys("bank", Some(b"balance_"), None, 2).unwrap();
+        assert_eq!(results.len(), 2);
+
+        // Range with no prefix (all keys)
+        let results = vfs.range_keys("bank", None, None, 100).unwrap();
+        assert_eq!(results.len(), 4);
+    }
+
+    #[test]
+    fn test_direct_key_access_denied() {
+        let vfs = VirtualFilesystem::new();
+        let store = Arc::new(Mutex::new(MemStore::new()));
+        vfs.mount_store("bank".to_string(), store).unwrap();
+        // No capabilities added
+
+        // Should fail — no read capability
+        assert!(vfs.read_key("bank", b"key").is_err());
+        // Should fail — no write capability
+        assert!(vfs.write_key("bank", b"key", b"value").is_err());
+    }
+
+    #[test]
+    fn test_direct_key_ops_namespace_not_found() {
+        let vfs = setup_test_vfs();
+
+        // Nonexistent namespace
+        assert!(vfs.read_key("nonexistent", b"key").is_err());
+        assert!(vfs.write_key("nonexistent", b"key", b"val").is_err());
+        assert!(vfs.has_key("nonexistent", b"key").is_err());
+        assert!(vfs.delete_key("nonexistent", b"key").is_err());
     }
 
     #[test]
