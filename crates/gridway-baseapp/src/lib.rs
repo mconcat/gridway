@@ -3,11 +3,16 @@
 //! Acts as a WASM microkernel host — all blockchain logic runs inside
 //! WASM modules that interact with state through the Virtual Filesystem (VFS).
 //!
-//! This version has been adapted for the Commonware Library migration:
-//! - Commonware native: single execute_block() entry point, no ABCI lifecycle
-//! - Simplified to `execute_block(txs) -> StateRoot` for consensus integration
-//! - VFS, ComponentHost, WASI bridge preserved intact
-//! - Ed25519 TX authentication via commonware-cryptography
+//! Pipeline architecture (WIT-aligned):
+//!   1. hook.pre_execute(block_ctx)             — block lifecycle hook
+//!   2. for each tx:
+//!      a. validator.validate(tx_ctx, raw_bytes) — decode + auth + extract messages
+//!      b. for each msg: module.handle(ctx, msg)  — dispatch to domain modules
+//!   3. hook.post_execute(block_ctx, stats)      — block lifecycle hook
+//!   4. commit → state_root
+//!
+//! Validator and hook logic is currently built-in (Rust native) but structured
+//! for future replacement by WASM components when they are compiled.
 
 pub mod capabilities;
 pub mod component_bindings;
@@ -20,8 +25,6 @@ pub mod wasi_host;
 use commonware_codec::DecodeExt;
 
 use gridway_store::{GlobalAppStore, MerkleStore, KVStore};
-#[cfg(test)]
-use gridway_store::MemStore;
 use gridway_types::{Event, EventAttribute, TxResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -42,6 +45,40 @@ pub use module_governance::{
     CodeMetadata, ModuleInstallConfig, MsgInstallModule, MsgStoreCode, MsgUpgradeModule,
 };
 
+// ─── WIT-aligned types ───────────────────────────────────────────────────────
+
+/// A validated and decoded transaction, ready for message dispatch.
+/// Matches the `validated-tx` record in `validator.wit`.
+///
+/// Produced by the validator pipeline (currently built-in, future WASM).
+/// Contains the authenticated sender and extracted messages.
+#[derive(Debug, Clone)]
+pub struct ValidatedTx {
+    /// Authenticated sender address (derived from signature verification)
+    pub sender: String,
+    /// Messages to be dispatched to modules
+    pub messages: Vec<TxMessage>,
+    /// Sequence number (for replay protection tracking)
+    pub sequence: u64,
+    /// Gas limit declared by the transaction
+    pub gas_limit: u64,
+}
+
+/// A message extracted from a validated transaction.
+/// Matches the `message` record in `validator.wit`.
+///
+/// Dispatched to the appropriate module's `handle()` function
+/// based on the `type_url` prefix (e.g., "bank.MsgSend" → bank module).
+#[derive(Debug, Clone)]
+pub struct TxMessage {
+    /// Message type identifier (e.g., "bank.MsgSend", "governance.MsgStoreCode")
+    pub type_url: String,
+    /// Message payload as JSON string
+    pub data: String,
+}
+
+// ─── Account model ───────────────────────────────────────────────────────────
+
 /// Account model for TX authentication.
 ///
 /// Stored in the "auth" namespace as JSON under key `account_{address}`.
@@ -52,6 +89,8 @@ pub struct Account {
     /// Sequence number (nonce) for replay protection
     pub sequence: u64,
 }
+
+// ─── Error types ─────────────────────────────────────────────────────────────
 
 /// BaseApp errors
 #[derive(Error, Debug)]
@@ -92,13 +131,15 @@ pub struct BlockContext {
     pub chain_id: String,
 }
 
+// ─── BaseApp ─────────────────────────────────────────────────────────────────
+
 /// Base application — acts as microkernel host for WASM modules.
 ///
-/// Simplified for Commonware integration:
-/// - No ABCI lifecycle — single execute_block() entry point for consensus
-/// - Single `execute_block()` entry point for consensus
-/// - State committed via `commit()` returning Merkle root
-/// - Ed25519 TX auth with sequence numbers
+/// WIT-aligned pipeline:
+/// - `execute_block()` orchestrates the full block lifecycle
+/// - Hooks (pre/post) for block-level logic (no-op if WASM not loaded)
+/// - Built-in validator for tx decode + auth (future: WASM validator)
+/// - Dynamic message dispatch to WASM domain modules
 pub struct BaseApp {
     /// Application name
     name: String,
@@ -118,7 +159,7 @@ pub struct BaseApp {
     capability_manager: Arc<CapabilityManager>,
     /// Module governance for WASM module lifecycle
     module_governance: Arc<ModuleGovernance>,
-    /// Module paths for WASI modules
+    /// Module paths for WASI modules (name → wasm file path)
     module_paths: HashMap<String, String>,
     /// Global application store (MerkleStore backend)
     global_store: Arc<GlobalAppStore>,
@@ -312,14 +353,29 @@ impl BaseApp {
     }
 
     // =========================================================================
-    // TX Authentication
+    // Transaction validation (built-in validator)
     // =========================================================================
 
-    /// Authenticate a transaction: verify signature, sequence, and sender authorization.
+    /// Validate and decode a raw transaction.
     ///
-    /// Returns (signer_address, parsed body as serde_json::Value) on success.
-    fn authenticate_tx(&self, decoded_tx: &serde_json::Value) -> Result<(String, serde_json::Value)> {
-        // Extract public_key and signature
+    /// Built-in implementation of the `validator.wit` interface.
+    /// Performs: JSON decode → ed25519 signature verification → sequence check
+    /// → message extraction → ValidatedTx.
+    ///
+    /// When a WASM validator module is compiled, this will be replaced by
+    /// `component_host.execute_validator()`.
+    fn validate_tx(
+        &self,
+        tx_bytes: &[u8],
+        _height: u64,
+        _timestamp: u64,
+        _chain_id: &str,
+    ) -> Result<ValidatedTx> {
+        // 1. Decode JSON envelope
+        let decoded_tx: serde_json::Value = serde_json::from_slice(tx_bytes)
+            .map_err(|e| BaseAppError::InvalidTx(format!("invalid JSON: {e}")))?;
+
+        // 2. Extract envelope fields
         let public_key_hex = decoded_tx.get("public_key")
             .and_then(|v| v.as_str())
             .ok_or_else(|| BaseAppError::AuthError("missing public_key field".into()))?;
@@ -331,13 +387,12 @@ impl BaseApp {
         let body = decoded_tx.get("body")
             .ok_or_else(|| BaseAppError::InvalidTx("missing body field".into()))?;
 
-        // Decode hex public key → ed25519 PublicKey
+        // 3. Verify ed25519 signature
         let pk_bytes = hex::decode(public_key_hex)
             .map_err(|e| BaseAppError::AuthError(format!("invalid public_key hex: {e}")))?;
         let pk = commonware_cryptography::ed25519::PublicKey::decode(pk_bytes.as_ref())
             .map_err(|e| BaseAppError::AuthError(format!("invalid ed25519 public key: {e}")))?;
 
-        // Decode hex signature → ed25519 Signature
         let sig_bytes = hex::decode(signature_hex)
             .map_err(|e| BaseAppError::AuthError(format!("invalid signature hex: {e}")))?;
         let sig = commonware_cryptography::ed25519::Signature::decode(sig_bytes.as_ref())
@@ -355,7 +410,7 @@ impl BaseApp {
             return Err(BaseAppError::AuthError("signature verification failed".into()));
         }
 
-        // Check sequence number
+        // 4. Check sequence number
         let tx_sequence = body.get("sequence")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
@@ -370,26 +425,366 @@ impl BaseApp {
             )));
         }
 
-        // Verify sender authorization: check that the public key matches the stored account
+        // Verify public key matches stored account
         if account.public_key != public_key_hex {
             return Err(BaseAppError::AuthError(format!(
                 "public key mismatch for address {signer_address}"
             )));
         }
 
-        Ok((signer_address, body.clone()))
+        // 5. Extract messages into TxMessage format
+        let messages_array = body.get("messages")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| BaseAppError::InvalidTx("no messages in transaction".into()))?;
+
+        let mut messages = Vec::with_capacity(messages_array.len());
+        for (idx, msg_value) in messages_array.iter().enumerate() {
+            let type_url = msg_value.get("@type")
+                .and_then(|t| t.as_str())
+                .ok_or_else(|| BaseAppError::InvalidTx(format!("message {idx} missing @type")))?
+                .to_string();
+
+            // Verify from_address matches signer (if present)
+            if let Some(from_addr) = msg_value.get("from_address").and_then(|v| v.as_str()) {
+                if from_addr != signer_address {
+                    return Err(BaseAppError::AuthError(format!(
+                        "message {idx}: from_address '{from_addr}' does not match signer '{signer_address}'"
+                    )));
+                }
+            }
+
+            let data = serde_json::to_string(msg_value)
+                .map_err(|e| BaseAppError::InvalidTx(
+                    format!("failed to serialize message {idx}: {e}")
+                ))?;
+
+            messages.push(TxMessage { type_url, data });
+        }
+
+        Ok(ValidatedTx {
+            sender: signer_address,
+            messages,
+            sequence: tx_sequence,
+            gas_limit: 200_000,
+        })
     }
 
     // =========================================================================
-    // Consensus interface — simplified for Commonware integration
+    // Module resolution and message dispatch
     // =========================================================================
 
-    /// Execute a block of transactions and return the state root.
+    /// Resolve a module name from a message type_url.
     ///
-    /// This is the primary entry point for consensus:
-    /// 1. Set block context
-    /// 2. Execute each transaction through WASM modules
-    /// 3. Return (state_root, tx_responses)
+    /// Format: `"module_name.MsgName"` → `"module_name"`
+    ///
+    /// Examples:
+    /// - `"bank.MsgSend"` → `"bank"`
+    /// - `"governance.MsgStoreCode"` → `"governance"`
+    fn resolve_module(&self, type_url: &str) -> Result<String> {
+        if let Some(dot_pos) = type_url.find('.') {
+            let module_name = &type_url[..dot_pos];
+            if !module_name.is_empty() {
+                return Ok(module_name.to_string());
+            }
+        }
+        Err(BaseAppError::ExecutionError(
+            format!("cannot resolve module from type_url: {type_url}")
+        ))
+    }
+
+    /// Dispatch a message to the appropriate module.
+    ///
+    /// Routing order:
+    /// 1. If a WASM module exists for the resolved module name → WASM dispatch
+    /// 2. Otherwise → built-in handler (governance, etc.)
+    ///
+    /// Returns (gas_used, events) on success.
+    fn dispatch_message(
+        &self,
+        sender: &str,
+        msg: &TxMessage,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+    ) -> Result<(u64, Vec<Event>)> {
+        let module_name = self.resolve_module(&msg.type_url)?;
+
+        // Try WASM module dispatch first
+        if let Some(wasm_path) = self.module_paths.get(&module_name) {
+            if std::path::Path::new(wasm_path).exists() {
+                return self.dispatch_to_wasm(
+                    &module_name, sender, msg, height, timestamp, chain_id,
+                );
+            }
+        }
+
+        // Fall back to built-in handlers
+        self.dispatch_builtin(&module_name, msg)
+    }
+
+    /// Dispatch a message to a WASM module via ComponentHost.
+    fn dispatch_to_wasm(
+        &self,
+        module_name: &str,
+        sender: &str,
+        msg: &TxMessage,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+    ) -> Result<(u64, Vec<Event>)> {
+        let wasm_path = self.module_paths.get(module_name)
+            .ok_or_else(|| BaseAppError::ExecutionError(
+                format!("{module_name} module path not configured")
+            ))?;
+
+        let component_bytes = std::fs::read(wasm_path)
+            .map_err(|e| BaseAppError::ExecutionError(
+                format!("failed to read {module_name}.wasm at {wasm_path}: {e}")
+            ))?;
+
+        let info = ComponentInfo {
+            name: module_name.to_string(),
+            path: wasm_path.clone().into(),
+            component_type: ComponentType::Module,
+            gas_limit: 1_000_000,
+        };
+        let _ = self.component_host.load_component(module_name, &component_bytes, info);
+
+        let result = self.component_host.execute_module(
+            module_name, height, timestamp, chain_id,
+            &msg.type_url, &msg.data, sender, 100_000,
+        );
+
+        log::info!(
+            "{module_name} WASM execute_module result: {:?}",
+            result.as_ref().map(|r| (r.success, &r.error, r.gas_used))
+        );
+
+        match result {
+            Ok(comp_result) if comp_result.success => {
+                let events = Self::parse_component_events(&comp_result.data);
+                Ok((comp_result.gas_used, events))
+            }
+            Ok(comp_result) => {
+                Err(BaseAppError::TxFailed(
+                    comp_result.error.unwrap_or_else(|| format!("{module_name} WASM execution failed"))
+                ))
+            }
+            Err(e) => {
+                Err(BaseAppError::ExecutionError(
+                    format!("{module_name} WASM module error: {e}")
+                ))
+            }
+        }
+    }
+
+    /// Dispatch a message to a built-in handler.
+    fn dispatch_builtin(
+        &self,
+        module_name: &str,
+        msg: &TxMessage,
+    ) -> Result<(u64, Vec<Event>)> {
+        match module_name {
+            "governance" => self.handle_governance_msg(msg),
+            _ => Err(BaseAppError::ExecutionError(
+                format!("no handler for module '{module_name}' (type_url: {})", msg.type_url)
+            ))
+        }
+    }
+
+    /// Handle governance messages (built-in module).
+    ///
+    /// Handles: MsgStoreCode, MsgInstallModule, MsgUpgradeModule
+    fn handle_governance_msg(&self, msg: &TxMessage) -> Result<(u64, Vec<Event>)> {
+        let msg_value: serde_json::Value = serde_json::from_str(&msg.data)
+            .map_err(|e| BaseAppError::InvalidTx(
+                format!("invalid governance message data: {e}")
+            ))?;
+
+        // Extract message name from type_url: "governance.MsgStoreCode" → "MsgStoreCode"
+        let msg_name = msg.type_url.split('.').nth(1).unwrap_or("");
+
+        match msg_name {
+            "MsgStoreCode" => {
+                let store_msg: MsgStoreCode = serde_json::from_value(msg_value)
+                    .map_err(|e| BaseAppError::InvalidTx(format!("decode MsgStoreCode: {e}")))?;
+                match self.module_governance.handle_store_code(store_msg) {
+                    Ok(code_id) => Ok((50_000, vec![
+                        Event::new("store_code", vec![
+                            EventAttribute::new("code_id", code_id.to_string()),
+                        ])
+                    ])),
+                    Err(e) => Err(BaseAppError::TxFailed(format!("store_code failed: {e}"))),
+                }
+            }
+            "MsgInstallModule" => {
+                let install_msg: MsgInstallModule = serde_json::from_value(msg_value)
+                    .map_err(|e| BaseAppError::InvalidTx(format!("decode MsgInstallModule: {e}")))?;
+                let name = install_msg.config.name.clone();
+                let code_id = install_msg.code_id;
+                match self.module_governance.handle_install_module(install_msg) {
+                    Ok(_) => Ok((100_000, vec![
+                        Event::new("install_module", vec![
+                            EventAttribute::new("module_name", &name),
+                            EventAttribute::new("code_id", code_id.to_string()),
+                        ])
+                    ])),
+                    Err(e) => Err(BaseAppError::TxFailed(format!("install_module failed: {e}"))),
+                }
+            }
+            "MsgUpgradeModule" => {
+                let upgrade_msg: MsgUpgradeModule = serde_json::from_value(msg_value)
+                    .map_err(|e| BaseAppError::InvalidTx(format!("decode MsgUpgradeModule: {e}")))?;
+                let module_name = upgrade_msg.module_name.clone();
+                let new_code_id = upgrade_msg.new_code_id;
+                match self.module_governance.handle_upgrade_module(upgrade_msg) {
+                    Ok(_) => Ok((150_000, vec![
+                        Event::new("upgrade_module", vec![
+                            EventAttribute::new("module_name", &module_name),
+                            EventAttribute::new("new_code_id", new_code_id.to_string()),
+                        ])
+                    ])),
+                    Err(e) => Err(BaseAppError::TxFailed(format!("upgrade_module failed: {e}"))),
+                }
+            }
+            _ => Err(BaseAppError::ExecutionError(
+                format!("unknown governance message: {}", msg.type_url)
+            ))
+        }
+    }
+
+    // =========================================================================
+    // Hook execution (pre/post block lifecycle)
+    // =========================================================================
+
+    /// Run pre-execute hook. No-op if hook WASM module is not loaded.
+    ///
+    /// Called before any transaction processing in a block.
+    /// Use for: inflation minting, epoch transitions, parameter updates, etc.
+    fn run_hook_pre(&self, height: u64, timestamp: u64, chain_id: &str) -> Result<Vec<Event>> {
+        if let Some(hook_path) = self.module_paths.get("hook") {
+            if std::path::Path::new(hook_path).exists() {
+                let component_bytes = std::fs::read(hook_path)
+                    .map_err(|e| BaseAppError::ExecutionError(
+                        format!("failed to read hook.wasm: {e}")
+                    ))?;
+                let info = ComponentInfo {
+                    name: "hook".to_string(),
+                    path: hook_path.clone().into(),
+                    component_type: ComponentType::Hook,
+                    gas_limit: 1_000_000,
+                };
+                let _ = self.component_host.load_component("hook", &component_bytes, info);
+
+                let result = self.component_host.execute_hook_pre(
+                    "hook", height, timestamp, chain_id, None,
+                ).map_err(|e| BaseAppError::ExecutionError(
+                    format!("hook pre-execute failed: {e}")
+                ))?;
+
+                if !result.success {
+                    return Err(BaseAppError::ExecutionError(
+                        result.error.unwrap_or_else(|| "hook pre-execute failed".into())
+                    ));
+                }
+
+                return Ok(Self::parse_component_events(&result.data));
+            }
+        }
+        // No hook module loaded — no-op
+        Ok(vec![])
+    }
+
+    /// Run post-execute hook. No-op if hook WASM module is not loaded.
+    ///
+    /// Called after all transactions in a block have been processed.
+    /// Use for: reward distribution, settlement, validator set updates, etc.
+    fn run_hook_post(
+        &self,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+        tx_count: u32,
+        total_gas: u64,
+    ) -> Result<Vec<Event>> {
+        if let Some(hook_path) = self.module_paths.get("hook") {
+            if std::path::Path::new(hook_path).exists() {
+                let component_bytes = std::fs::read(hook_path)
+                    .map_err(|e| BaseAppError::ExecutionError(
+                        format!("failed to read hook.wasm: {e}")
+                    ))?;
+                let info = ComponentInfo {
+                    name: "hook".to_string(),
+                    path: hook_path.clone().into(),
+                    component_type: ComponentType::Hook,
+                    gas_limit: 1_000_000,
+                };
+                let _ = self.component_host.load_component("hook", &component_bytes, info);
+
+                let result = self.component_host.execute_hook_post(
+                    "hook", height, timestamp, chain_id, None, tx_count, total_gas,
+                ).map_err(|e| BaseAppError::ExecutionError(
+                    format!("hook post-execute failed: {e}")
+                ))?;
+
+                if !result.success {
+                    return Err(BaseAppError::ExecutionError(
+                        result.error.unwrap_or_else(|| "hook post-execute failed".into())
+                    ));
+                }
+
+                return Ok(Self::parse_component_events(&result.data));
+            }
+        }
+        // No hook module loaded — no-op
+        Ok(vec![])
+    }
+
+    // =========================================================================
+    // Helper: parse events from ComponentResult
+    // =========================================================================
+
+    /// Extract Event list from a ComponentResult's data field.
+    fn parse_component_events(data: &Option<serde_json::Value>) -> Vec<Event> {
+        let mut events = Vec::new();
+        if let Some(data) = data {
+            if let Some(evt_array) = data.get("events").and_then(|e| e.as_array()) {
+                for evt in evt_array {
+                    events.push(Event {
+                        r#type: evt.get("event_type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        attributes: evt.get("attributes")
+                            .and_then(|a| a.as_array())
+                            .map(|attrs| {
+                                attrs.iter().map(|a| EventAttribute {
+                                    key: a.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string(),
+                                    value: a.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    index: true,
+                                }).collect()
+                            })
+                            .unwrap_or_default(),
+                    });
+                }
+            }
+        }
+        events
+    }
+
+    // =========================================================================
+    // Consensus interface — WIT-aligned pipeline
+    // =========================================================================
+
+    /// Execute a block of transactions using the WIT-aligned pipeline.
+    ///
+    /// Pipeline:
+    /// 1. Pre-execute hook (no-op if hook WASM not loaded)
+    /// 2. For each tx: validate → dispatch messages → increment sequence
+    /// 3. Post-execute hook (no-op if hook WASM not loaded)
+    /// 4. Compute state root
+    ///
+    /// Returns (state_root, tx_responses).
     pub fn execute_block(
         &mut self,
         height: u64,
@@ -416,11 +811,19 @@ impl BaseApp {
             chain_id: chain_id.to_string(),
         });
 
-        let mut responses = Vec::with_capacity(txs.len());
+        // 1. Pre-execute hook
+        let _pre_events = self.run_hook_pre(height, timestamp, chain_id)?;
 
+        let mut responses = Vec::with_capacity(txs.len());
+        let mut block_gas_used = 0u64;
+
+        // 2. Process transactions
         for (i, tx_bytes) in txs.iter().enumerate() {
-            match self.execute_transaction(tx_bytes, height) {
-                Ok(response) => responses.push(response),
+            match self.process_transaction(tx_bytes, height, timestamp, chain_id) {
+                Ok(response) => {
+                    block_gas_used += response.gas_used as u64;
+                    responses.push(response);
+                }
                 Err(e) => {
                     responses.push(TxResponse::failure(
                         1,
@@ -432,7 +835,12 @@ impl BaseApp {
             }
         }
 
-        // Compute state root (without committing)
+        // 3. Post-execute hook
+        let _post_events = self.run_hook_post(
+            height, timestamp, chain_id, txs.len() as u32, block_gas_used,
+        )?;
+
+        // 4. Compute state root (without committing)
         let state_root = {
             let store_arc = self.global_store.get_store();
             let store = store_arc.lock()
@@ -443,6 +851,45 @@ impl BaseApp {
         self.executed_heights.insert(height);
         self.context = None;
         Ok((state_root, responses))
+    }
+
+    /// Process a single transaction through the validate → dispatch pipeline.
+    ///
+    /// Steps:
+    /// 1. Validate: decode + signature verify + sequence check + extract messages
+    /// 2. Dispatch: route each message to the appropriate module
+    /// 3. Increment sequence on success
+    fn process_transaction(
+        &mut self,
+        tx_bytes: &[u8],
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+    ) -> Result<TxResponse> {
+        // 2a. Validate (decode + auth + extract messages)
+        let validated = self.validate_tx(tx_bytes, height, timestamp, chain_id)?;
+
+        let mut total_gas_used = 0u64;
+        let mut events = Vec::new();
+
+        // 2b. Execute each message through module dispatch
+        for msg in &validated.messages {
+            let (gas, msg_events) = self.dispatch_message(
+                &validated.sender, msg, height, timestamp, chain_id,
+            )?;
+            total_gas_used += gas;
+            events.extend(msg_events);
+        }
+
+        // 2c. Increment sequence after successful execution
+        self.increment_sequence(&validated.sender)?;
+
+        Ok(TxResponse::success(
+            "transaction executed successfully".to_string(),
+            (total_gas_used + 10000) as i64,
+            total_gas_used as i64,
+            events,
+        ))
     }
 
     /// Commit the current state — finalize pending writes and return state root.
@@ -488,198 +935,6 @@ impl BaseApp {
         store.from_snapshot(snapshot).map_err(|e| BaseAppError::Store(format!("import: {e}")))?;
         self.last_state_root = store.root_hash();
         Ok(())
-    }
-
-    /// Execute a single transaction with ed25519 signature verification.
-    pub fn execute_transaction(&mut self, tx_bytes: &[u8], height: u64) -> Result<TxResponse> {
-        // Try to decode as JSON transaction
-        let decoded_tx: serde_json::Value = match serde_json::from_slice(tx_bytes) {
-            Ok(v) => v,
-            Err(_) => {
-                // Try WASM tx decoder if JSON fails
-                return self.execute_transaction_via_wasm(tx_bytes, height);
-            }
-        };
-
-        // === TX Authentication ===
-        // Authenticate: verify signature, sequence, and sender
-        let (signer_address, body) = self.authenticate_tx(&decoded_tx)?;
-
-        let messages = body
-            .get("messages")
-            .and_then(|m| m.as_array())
-            .ok_or_else(|| BaseAppError::InvalidTx("no messages in transaction".to_string()))?;
-
-        let mut total_gas_used = 0u64;
-        let mut events = Vec::new();
-
-        for (idx, msg_value) in messages.iter().enumerate() {
-            let type_url = msg_value
-                .get("@type")
-                .and_then(|t| t.as_str())
-                .ok_or_else(|| BaseAppError::InvalidTx(format!("message {idx} missing @type")))?;
-
-            // Verify from_address matches signer for messages that have one
-            if let Some(from_addr) = msg_value.get("from_address").and_then(|v| v.as_str()) {
-                if from_addr != signer_address {
-                    return Err(BaseAppError::AuthError(format!(
-                        "message {idx}: from_address '{from_addr}' does not match signer '{signer_address}'"
-                    )));
-                }
-            }
-
-            match type_url {
-                "/cosmos.bank.v1beta1.MsgSend" | "/gridway.bank.v1.MsgSend" => {
-                    // Route to bank WASM module
-                    self.execute_bank_msg(msg_value, height, &mut total_gas_used, &mut events)?;
-                }
-                "/gridway.baseapp.v1.MsgStoreCode" => {
-                    let msg: MsgStoreCode = serde_json::from_value(msg_value.clone())
-                        .map_err(|e| BaseAppError::InvalidTx(format!("decode MsgStoreCode: {e}")))?;
-                    match self.module_governance.handle_store_code(msg) {
-                        Ok(code_id) => {
-                            events.push(Event::new("store_code", vec![
-                                EventAttribute::new("code_id", code_id.to_string()),
-                            ]));
-                            total_gas_used += 50000;
-                        }
-                        Err(e) => {
-                            return Ok(TxResponse::failure(1, format!("store_code failed: {e}"), 0, total_gas_used as i64));
-                        }
-                    }
-                }
-                "/gridway.baseapp.v1.MsgInstallModule" => {
-                    let msg: MsgInstallModule = serde_json::from_value(msg_value.clone())
-                        .map_err(|e| BaseAppError::InvalidTx(format!("decode MsgInstallModule: {e}")))?;
-                    match self.module_governance.handle_install_module(msg.clone()) {
-                        Ok(_) => {
-                            events.push(Event::new("install_module", vec![
-                                EventAttribute::new("module_name", &msg.config.name),
-                                EventAttribute::new("code_id", msg.code_id.to_string()),
-                            ]));
-                            total_gas_used += 100000;
-                        }
-                        Err(e) => {
-                            return Ok(TxResponse::failure(1, format!("install_module failed: {e}"), 0, total_gas_used as i64));
-                        }
-                    }
-                }
-                "/gridway.baseapp.v1.MsgUpgradeModule" => {
-                    let msg: MsgUpgradeModule = serde_json::from_value(msg_value.clone())
-                        .map_err(|e| BaseAppError::InvalidTx(format!("decode MsgUpgradeModule: {e}")))?;
-                    match self.module_governance.handle_upgrade_module(msg.clone()) {
-                        Ok(_) => {
-                            events.push(Event::new("upgrade_module", vec![
-                                EventAttribute::new("module_name", &msg.module_name),
-                                EventAttribute::new("new_code_id", msg.new_code_id.to_string()),
-                            ]));
-                            total_gas_used += 150000;
-                        }
-                        Err(e) => {
-                            return Ok(TxResponse::failure(1, format!("upgrade_module failed: {e}"), 0, total_gas_used as i64));
-                        }
-                    }
-                }
-                _ => {
-                    return Ok(TxResponse::failure(
-                        1,
-                        format!("unhandled message type: {type_url}"),
-                        0,
-                        total_gas_used as i64,
-                    ));
-                }
-            }
-        }
-
-        // === Increment sequence after successful execution ===
-        self.increment_sequence(&signer_address)?;
-
-        Ok(TxResponse::success(
-            "transaction executed successfully".to_string(),
-            (total_gas_used + 10000) as i64,
-            total_gas_used as i64,
-            events,
-        ))
-    }
-
-    /// Execute a bank message via WASM module. No native fallback — bank.wasm must be loaded.
-    fn execute_bank_msg(
-        &self,
-        msg_value: &serde_json::Value,
-        height: u64,
-        total_gas_used: &mut u64,
-        events: &mut Vec<Event>,
-    ) -> Result<()> {
-        let bank_path = self.module_paths.get("bank")
-            .ok_or_else(|| BaseAppError::ExecutionError("bank module path not configured".into()))?;
-
-        let component_bytes = std::fs::read(bank_path)
-            .map_err(|e| BaseAppError::ExecutionError(format!("failed to read bank.wasm at {bank_path}: {e}")))?;
-
-        let info = ComponentInfo {
-            name: "bank".to_string(),
-            path: bank_path.clone().into(),
-            component_type: ComponentType::Module,
-            gas_limit: 1_000_000,
-        };
-        let _ = self.component_host.load_component("bank", &component_bytes, info);
-
-        let type_url = msg_value.get("@type").and_then(|t| t.as_str()).unwrap_or("");
-        let msg_data = serde_json::to_string(msg_value)
-            .map_err(|e| BaseAppError::InvalidTx(format!("serialize MsgSend: {e}")))?;
-        let sender = msg_value.get("from_address")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        let timestamp = self.context.as_ref().map(|c| c.timestamp).unwrap_or(0);
-        let chain_id = self.context.as_ref().map(|c| c.chain_id.as_str()).unwrap_or("gridway-1");
-
-        let result = self.component_host.execute_module(
-            "bank", height, timestamp, chain_id,
-            type_url, &msg_data, sender, 100_000,
-        );
-
-        log::info!("bank WASM execute_module result: {:?}", result.as_ref().map(|r| (r.success, &r.error, r.gas_used)));
-
-        match result {
-            Ok(comp_result) if comp_result.success => {
-                *total_gas_used += comp_result.gas_used;
-                if let Some(data) = &comp_result.data {
-                    if let Some(evt_array) = data.get("events").and_then(|e| e.as_array()) {
-                        for evt in evt_array {
-                            events.push(Event {
-                                r#type: evt.get("event_type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                                attributes: evt.get("attributes").and_then(|a| a.as_array()).map(|attrs| {
-                                    attrs.iter().map(|a| EventAttribute {
-                                        key: a.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string(),
-                                        value: a.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                                        index: true,
-                                    }).collect()
-                                }).unwrap_or_default(),
-                            });
-                        }
-                    }
-                }
-                Ok(())
-            }
-            Ok(comp_result) => {
-                Err(BaseAppError::TxFailed(
-                    comp_result.error.unwrap_or("bank WASM execution failed".into())
-                ))
-            }
-            Err(e) => {
-                Err(BaseAppError::ExecutionError(format!("bank WASM module error: {e}")))
-            }
-        }
-    }
-
-    /// Fallback: execute transaction via WASM tx decoder
-    fn execute_transaction_via_wasm(&mut self, _tx_bytes: &[u8], _height: u64) -> Result<TxResponse> {
-        // If tx-decoder WASM is not available, return placeholder
-        Ok(TxResponse::success(
-            "placeholder: tx decoder not loaded".to_string(),
-            200000, 0, vec![],
-        ))
     }
 
     // =========================================================================
@@ -835,6 +1090,139 @@ mod tests {
         let governance = app.module_governance();
         let modules = governance.list_modules().unwrap();
         assert_eq!(modules.len(), 0);
+    }
+
+    // ─── New pipeline tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_module() {
+        let app = BaseApp::new("test-app".to_string()).unwrap();
+
+        // Standard format
+        assert_eq!(app.resolve_module("bank.MsgSend").unwrap(), "bank");
+        assert_eq!(app.resolve_module("governance.MsgStoreCode").unwrap(), "governance");
+        assert_eq!(app.resolve_module("staking.MsgDelegate").unwrap(), "staking");
+
+        // Invalid formats
+        assert!(app.resolve_module("NoModule").is_err());
+        assert!(app.resolve_module("").is_err());
+        assert!(app.resolve_module(".MsgSend").is_err());
+    }
+
+    #[test]
+    fn test_validate_tx_rejects_invalid_json() {
+        let app = BaseApp::new("test-app".to_string()).unwrap();
+        let result = app.validate_tx(b"not json", 1, 1000, "test");
+        assert!(result.is_err());
+        assert!(matches!(result, Err(BaseAppError::InvalidTx(_))));
+    }
+
+    #[test]
+    fn test_validate_tx_rejects_missing_fields() {
+        let app = BaseApp::new("test-app".to_string()).unwrap();
+
+        // Missing public_key
+        let tx = serde_json::json!({"signature": "aa", "body": {}});
+        let result = app.validate_tx(
+            serde_json::to_vec(&tx).unwrap().as_slice(), 1, 1000, "test",
+        );
+        assert!(matches!(result, Err(BaseAppError::AuthError(_))));
+
+        // Missing signature
+        let tx = serde_json::json!({"public_key": "aa", "body": {}});
+        let result = app.validate_tx(
+            serde_json::to_vec(&tx).unwrap().as_slice(), 1, 1000, "test",
+        );
+        assert!(matches!(result, Err(BaseAppError::AuthError(_))));
+
+        // Missing body
+        let tx = serde_json::json!({"public_key": "aa", "signature": "bb"});
+        let result = app.validate_tx(
+            serde_json::to_vec(&tx).unwrap().as_slice(), 1, 1000, "test",
+        );
+        assert!(matches!(result, Err(BaseAppError::InvalidTx(_))));
+    }
+
+    #[test]
+    fn test_dispatch_unknown_module() {
+        let app = BaseApp::new("test-app".to_string()).unwrap();
+        let msg = TxMessage {
+            type_url: "unknown.MsgFoo".to_string(),
+            data: "{}".to_string(),
+        };
+        let result = app.dispatch_message("sender", &msg, 1, 1000, "test");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hook_noop_without_wasm() {
+        let app = BaseApp::new("test-app".to_string()).unwrap();
+
+        // Hooks should be no-op when WASM files don't exist
+        let pre_events = app.run_hook_pre(1, 1000, "test").unwrap();
+        assert!(pre_events.is_empty());
+
+        let post_events = app.run_hook_post(1, 1000, "test", 0, 0).unwrap();
+        assert!(post_events.is_empty());
+    }
+
+    #[test]
+    fn test_execute_block_with_hooks() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+
+        // Execute empty block — hooks are no-op, should succeed
+        let (root, responses) = app.execute_block(1, 1000, "test-chain", &[]).unwrap();
+        assert_eq!(responses.len(), 0);
+
+        // Second block
+        let (root2, _) = app.execute_block(2, 2000, "test-chain", &[]).unwrap();
+        // Same root since no state changed
+        assert_eq!(root, root2);
+    }
+
+    #[test]
+    fn test_parse_component_events() {
+        // No data
+        let events = BaseApp::parse_component_events(&None);
+        assert!(events.is_empty());
+
+        // Empty events
+        let data = serde_json::json!({"events": []});
+        let events = BaseApp::parse_component_events(&Some(data));
+        assert!(events.is_empty());
+
+        // With events
+        let data = serde_json::json!({
+            "events": [{
+                "event_type": "transfer",
+                "attributes": [
+                    {"key": "sender", "value": "alice"},
+                    {"key": "recipient", "value": "bob"}
+                ]
+            }]
+        });
+        let events = BaseApp::parse_component_events(&Some(data));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].r#type, "transfer");
+        assert_eq!(events[0].attributes.len(), 2);
+    }
+
+    #[test]
+    fn test_validated_tx_struct() {
+        let tx = ValidatedTx {
+            sender: "alice".to_string(),
+            messages: vec![
+                TxMessage {
+                    type_url: "bank.MsgSend".to_string(),
+                    data: r#"{"to_address":"bob","amount":"100"}"#.to_string(),
+                },
+            ],
+            sequence: 0,
+            gas_limit: 200_000,
+        };
+        assert_eq!(tx.sender, "alice");
+        assert_eq!(tx.messages.len(), 1);
+        assert_eq!(tx.messages[0].type_url, "bank.MsgSend");
     }
 }
 
