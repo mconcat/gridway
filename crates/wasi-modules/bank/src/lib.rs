@@ -9,7 +9,7 @@ struct BankModule;
 impl Guest for BankModule {
     fn handle(context: ModuleContext, msg: Message) -> ModuleResponse {
         match msg.type_url.as_str() {
-            "/cosmos.bank.v1beta1.MsgSend" | "/gridway.bank.v1.MsgSend" => {
+            "/cosmos.bank.v1beta1.MsgSend" | "/gridway.bank.v1.MsgSend" | "bank.MsgSend" => {
                 handle_msg_send(&context, &msg)
             }
             _ => ModuleResponse {

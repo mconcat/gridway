@@ -424,17 +424,16 @@ impl ComponentHost {
     }
 
     /// Get fuel-based gas consumption from a store
-    fn fuel_gas_used(&self, store: &mut Store<ComponentState>) -> u64 {
+    fn fuel_gas_used(&self, store: &mut Store<ComponentState>, component_name: &str) -> u64 {
         let gas_limit = {
             let info = self.component_info.lock().ok();
             info.and_then(|i| {
-                i.values()
-                    .next()
+                i.get(component_name)
                     .map(|v| v.gas_limit)
             })
             .unwrap_or(self.default_gas_limit)
         };
-        gas_limit - store.get_fuel().unwrap_or(0)
+        gas_limit.saturating_sub(store.get_fuel().unwrap_or(0))
     }
 
     /// Convert component events to JSON
@@ -494,7 +493,7 @@ impl ComponentHost {
                 ComponentHostError::ComponentExecution(format!("Hook pre-execute failed: {e}"))
             })?;
 
-        let gas_used = self.fuel_gas_used(&mut store);
+        let gas_used = self.fuel_gas_used(&mut store, component_name);
 
         let events: Vec<(String, Vec<(String, String)>)> = response
             .events
@@ -553,7 +552,7 @@ impl ComponentHost {
                 ComponentHostError::ComponentExecution(format!("Hook post-execute failed: {e}"))
             })?;
 
-        let gas_used = self.fuel_gas_used(&mut store);
+        let gas_used = self.fuel_gas_used(&mut store, component_name);
 
         let events: Vec<(String, Vec<(String, String)>)> = response
             .events
@@ -613,7 +612,7 @@ impl ComponentHost {
                 ComponentHostError::ComponentExecution(format!("Validator execution failed: {e}"))
             })?;
 
-        let gas_used = self.fuel_gas_used(&mut store);
+        let gas_used = self.fuel_gas_used(&mut store, component_name);
 
         // Convert validated TX to JSON data
         let tx_data = response.tx.as_ref().map(|tx| {
