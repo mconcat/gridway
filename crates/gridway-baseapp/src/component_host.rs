@@ -225,33 +225,24 @@ impl kvstore::HostStore for ComponentState {
         key: Vec<u8>,
         value: Vec<u8>,
     ) {
-        tracing::info!(
-            key = String::from_utf8_lossy(&key).as_ref(),
-            value = String::from_utf8_lossy(&value).as_ref(),
-            rep = store_handle.rep(),
-            "kvstore::set called from WASM"
-        );
         if let Some(vfs) = self.vfs.as_ref() {
             let vfs_handle =
                 wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
             match self.table.get(&vfs_handle) {
                 Ok(handle) => {
                     let namespace = handle.namespace.clone();
-                    tracing::info!(namespace = %namespace, "kvstore::set writing to VFS");
                     if let Err(e) = vfs.write_key(&namespace, &key, &value) {
-                        tracing::error!("kvstore set failed for {namespace}:: {e}");
-                    } else {
-                        tracing::info!(namespace = %namespace, "kvstore::set SUCCESS");
+                        error!("kvstore::set failed for {namespace}: {e}");
                     }
                 }
                 Err(e) => {
-                    tracing::error!(rep = store_handle.rep(), "kvstore::set table lookup failed: {e}");
+                    error!(rep = store_handle.rep(), "kvstore::set table lookup failed: {e}");
                 }
             }
             // Prevent drop from removing the resource
             std::mem::forget(vfs_handle);
         } else {
-            tracing::error!("kvstore::set — VFS not available!");
+            error!("kvstore::set — VFS not available!");
         }
     }
 
@@ -347,7 +338,7 @@ impl kvstore::Host for ComponentState {
             .map_err(|e| format!("Failed to create store resource:: {e}"))?;
 
         // Convert VfsStoreHandle resource to kvstore::Store resource
-        tracing::info!(namespace = %name, rep = resource.rep(), "kvstore::open_store created handle");
+        debug!(namespace = %name, rep = resource.rep(), "kvstore::open_store created handle");
         Ok(wasmtime::component::Resource::<kvstore::Store>::new_own(
             resource.rep(),
         ))
@@ -788,7 +779,7 @@ impl ComponentHost {
         let component = self.get_component(module_name)?;
 
         // Create store with specific gas limit and resource limits
-        let wasi = WasiCtxBuilder::new().inherit_stdio().build();
+        let wasi = WasiCtxBuilder::new().build();
         let state = ComponentState {
             table: wasmtime_wasi::ResourceTable::new(),
             wasi,

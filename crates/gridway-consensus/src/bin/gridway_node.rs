@@ -647,29 +647,13 @@ fn main() {
             }
         };
 
+        // Log genesis summary (no individual keys/addresses for security)
         info!(
             state_root = hex::encode(genesis_root),
             accounts = genesis.accounts.len(),
             chain_id = %genesis.chain_id,
-            "committed genesis state"
+            "genesis state committed"
         );
-
-        // Print genesis account info
-        println!("=== GENESIS ACCOUNTS ===");
-        for account in &genesis.accounts {
-            let balance_str: Vec<String> = account
-                .balances
-                .iter()
-                .map(|b| format!("{} {}", b.amount, b.denom))
-                .collect();
-            println!(
-                "  ADDRESS={} PUBKEY={} BALANCES=[{}]",
-                account.address,
-                account.public_key_hex,
-                balance_str.join(", ")
-            );
-        }
-        println!("========================");
 
         // If a snapshot was provided, import it (overrides genesis state)
         let skip_replay = if let Some(ref snap_path) = snapshot_path {

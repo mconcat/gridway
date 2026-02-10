@@ -182,36 +182,42 @@ where
         let txs = self.drain_pending(1000); // Max 1000 txs per block
 
         // Execute through BaseApp to get state root
-        let state_root = {
-            let mut app = match self.baseapp.lock() {
-                Ok(app) => app,
-                Err(e) => {
-                    tracing::error!("baseapp lock poisoned in propose: {e}");
-                    return None;
-                }
-            };
-            match app.execute_block(
-                new_height.get(),
-                current,
-                &self.chain_id,
-                &txs,
-            ) {
-                Ok((root, _responses)) => root,
-                Err(e) => {
-                    tracing::error!("Block execution failed: {}", e);
-                    // On error, propose empty block with current state
-                    *app.last_state_root()
-                }
+        let mut app = match self.baseapp.lock() {
+            Ok(app) => app,
+            Err(e) => {
+                tracing::error!("baseapp lock poisoned in propose: {e}");
+                return None;
             }
         };
-
-        Some(GridwayBlock::new(
-            parent.digest(),
-            new_height,
+        match app.execute_block(
+            new_height.get(),
             current,
-            state_root,
-            txs,
-        ))
+            &self.chain_id,
+            &txs,
+        ) {
+            Ok((state_root, _responses)) => {
+                Some(GridwayBlock::new(
+                    parent.digest(),
+                    new_height,
+                    current,
+                    state_root,
+                    txs,
+                ))
+            }
+            Err(e) => {
+                tracing::error!(height = new_height.get(), "block execution failed: {e}");
+                // On failure, propose an empty block with the current (unchanged) state root.
+                // Do NOT include the failed transactions — their state root is undefined.
+                let stale_root = *app.last_state_root();
+                Some(GridwayBlock::new(
+                    parent.digest(),
+                    new_height,
+                    current,
+                    stale_root,
+                    Vec::new(), // empty — no txs since execution failed
+                ))
+            }
+        }
     }
 }
 
@@ -277,43 +283,60 @@ impl Reporter for GridwayApp {
     /// Called when a block is finalized by consensus.
     ///
     /// Commits the state to the MerkleStore, making it permanent.
+    /// Only acknowledges finalization if the commit succeeds — refusing to
+    /// ack on failure prevents the consensus engine from advancing past a
+    /// block whose state was not durably persisted.
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
             info!(height = %block.height(), txs = block.transactions.len(), "finalized block");
 
-            // Commit state on finalization
-            {
-                match self.baseapp.lock() {
-                    Ok(mut app) => {
-                        // Re-execute to ensure state is applied (idempotent if already executed)
-                        let _ = app.execute_block(
-                            block.height().get(),
-                            block.timestamp,
-                            &self.chain_id,
-                            &block.transactions,
-                        );
+            let committed = match self.baseapp.lock() {
+                Ok(mut app) => {
+                    // Re-execute to ensure state is applied (idempotent if already executed)
+                    let _ = app.execute_block(
+                        block.height().get(),
+                        block.timestamp,
+                        &self.chain_id,
+                        &block.transactions,
+                    );
 
-                        // Commit to persistent store
-                        match app.commit() {
-                            Ok(root) => {
-                                info!(
-                                    height = %block.height(),
-                                    state_root = hex::encode(root),
-                                    "committed state"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::error!("State commit failed: {}", e);
-                            }
+                    // Commit to persistent store
+                    match app.commit() {
+                        Ok(root) => {
+                            info!(
+                                height = %block.height(),
+                                state_root = hex::encode(root),
+                                "committed state"
+                            );
+                            true
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                height = %block.height(),
+                                error = %e,
+                                "CRITICAL: state commit failed — NOT acknowledging finalization"
+                            );
+                            false
                         }
                     }
-                    Err(e) => {
-                        tracing::error!("baseapp lock poisoned in report: {e}");
-                    }
                 }
-            }
+                Err(e) => {
+                    tracing::error!(
+                        height = %block.height(),
+                        "CRITICAL: baseapp lock poisoned in report — NOT acknowledging: {e}"
+                    );
+                    false
+                }
+            };
 
-            ack_rx.acknowledge();
+            if committed {
+                ack_rx.acknowledge();
+            } else {
+                tracing::error!(
+                    height = %block.height(),
+                    "finalization NOT acknowledged — node may stall until restart"
+                );
+            }
         }
     }
 }
