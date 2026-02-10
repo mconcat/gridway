@@ -457,6 +457,20 @@ async fn cmd_tx_send(matches: &clap::ArgMatches) {
         }
     };
 
+    // Auto-fetch account sequence from node
+    let client = GridwayClient::new(node_url);
+    let sender_address = builder.sender_address();
+    let builder = match client.get_account(&sender_address).await {
+        Ok(account) => {
+            eprintln!("Auto-fetched sequence: {}", account.sequence);
+            builder.sequence(account.sequence)
+        }
+        Err(e) => {
+            eprintln!("Warning: could not fetch account sequence ({}), using 0", e);
+            builder
+        }
+    };
+
     let mut builder = builder.bank_send(to_address, vec![Coin::new(denom, amount)]);
     if !memo.is_empty() {
         builder = builder.memo(memo);
@@ -479,9 +493,6 @@ async fn cmd_tx_send(matches: &clap::ArgMatches) {
         );
         return;
     }
-
-    // Submit
-    let client = GridwayClient::new(node_url);
     match client.submit_tx(&signed_tx).await {
         Ok(resp) => {
             let output = serde_json::json!({

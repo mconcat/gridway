@@ -390,7 +390,13 @@ impl BaseApp {
     }
 
     /// Load a WASM component by name. Tries VFS first, falls back to filesystem.
+    /// Skips loading if the component is already compiled and cached in ComponentHost.
     fn load_wasm_module(&self, name: &str, component_type: ComponentType) -> Result<()> {
+        // Skip if already loaded — avoids redundant VFS reads and recompilation
+        if self.component_host.has_component(name) {
+            return Ok(());
+        }
+
         // Try loading from VFS first (cached / previously stored)
         let component_bytes = if let Some(bytes) = self.load_wasm_from_vfs(name) {
             bytes

@@ -509,6 +509,14 @@ impl ComponentHost {
         Ok(linker)
     }
 
+    /// Check whether a component with the given name is already loaded.
+    pub fn has_component(&self, name: &str) -> bool {
+        self.components
+            .lock()
+            .map(|c| c.contains_key(name))
+            .unwrap_or(false)
+    }
+
     /// Get a loaded component by name
     fn get_component(&self, name: &str) -> Result<Component> {
         let components = self.components.lock().map_err(|e| {
