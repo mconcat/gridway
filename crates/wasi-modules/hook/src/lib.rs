@@ -1,12 +1,14 @@
-//! WASI Hook Component
+//! WASI Hook Component — block lifecycle hooks via WASM/VFS
 //!
-//! Implements block lifecycle hooks for the Gridway blockchain.
-//! Replaces the Cosmos ABCI BeginBlocker/EndBlocker pattern.
-//!
-//! - pre_execute:  Called before TX processing (inflation, epoch transitions)
-//! - post_execute: Called after TX processing (reward distribution, settlement)
+//! Implements pre_execute / post_execute hooks for Gridway block processing.
+//! All state access goes through the kvstore WIT interface (VFS-backed).
 
-mod bindings;
+mod bindings {
+    wit_bindgen::generate!({
+        world: "hook-world",
+        path: "../../../wit",
+    });
+}
 
 use bindings::exports::gridway::framework::hook::{
     BlockContext, Event, EventAttribute, Guest, HookResult,
@@ -16,10 +18,11 @@ use bindings::gridway::framework::kvstore;
 struct HookComponent;
 
 impl Guest for HookComponent {
+    /// Called before TX processing in a block.
     fn pre_execute(ctx: BlockContext) -> HookResult {
         let mut events = Vec::new();
 
-        // Emit block start event
+        // Emit block_start event
         events.push(Event {
             event_type: "block_start".to_string(),
             attributes: vec![
@@ -38,7 +41,7 @@ impl Guest for HookComponent {
             ],
         });
 
-        // Check for epoch transitions
+        // Daily epoch transition check
         if ctx.height > 0 && ctx.height % 86400 == 0 {
             events.push(Event {
                 event_type: "epoch_transition".to_string(),
@@ -62,11 +65,9 @@ impl Guest for HookComponent {
         }
     }
 
+    /// Called after all TXs in a block have been processed.
     fn post_execute(ctx: BlockContext, tx_count: u32, total_gas: u64) -> HookResult {
-        let mut events = Vec::new();
-
-        // Emit block completion event
-        events.push(Event {
+        let events = vec![Event {
             event_type: "block_completed".to_string(),
             attributes: vec![
                 EventAttribute {
@@ -82,7 +83,7 @@ impl Guest for HookComponent {
                     value: total_gas.to_string(),
                 },
             ],
-        });
+        }];
 
         HookResult {
             success: true,

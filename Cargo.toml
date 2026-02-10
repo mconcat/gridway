@@ -15,6 +15,8 @@ members = [
     "crates/wasi-modules/tx-decoder",
     "crates/wasi-modules/test-minimal",
     "crates/wasi-modules/bank",
+    "crates/wasi-modules/hook",
+    "crates/wasi-modules/validator",
 ]
 
 [workspace.package]
