@@ -17,6 +17,8 @@ members = [
     "crates/wasi-modules/bank",
     "crates/wasi-modules/hook",
     "crates/wasi-modules/validator",
+    "crates/gridway-client",
+    "crates/gridway-simapp",
 ]
 
 [workspace.package]
@@ -36,6 +38,7 @@ gridway-store = { path = "crates/gridway-store" }
 gridway-baseapp = { path = "crates/gridway-baseapp" }
 gridway-consensus = { path = "crates/gridway-consensus" }
 gridway-telemetry = { path = "crates/gridway-telemetry" }
+gridway-client = { path = "crates/gridway-client" }
 
 # Commonware Library dependencies
 commonware-broadcast = "0.0.65"

@@ -1,0 +1,23 @@
+[package]
+name = "gridway-simapp"
+version = "0.1.0"
+edition = "2021"
+authors = ["mconcat"]
+license = "AGPL-3.0"
+description = "Simulation and property-based testing framework for gridway"
+repository = "https://github.com/mconcat/gridway"
+
+[dependencies]
+gridway-baseapp = { path = "../gridway-baseapp" }
+gridway-consensus = { path = "../gridway-consensus" }
+gridway-client = { path = "../gridway-client" }
+gridway-crypto = { path = "../gridway-crypto" }
+gridway-store = { path = "../gridway-store" }
+gridway-types = { path = "../gridway-types" }
+commonware-cryptography = { version = "0.0.65", features = ["mocks"] }
+serde_json = "1.0"
+hex = "0.4"
+
+[dev-dependencies]
+proptest = "1.5"
+rand = "0.8"

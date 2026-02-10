@@ -13,10 +13,12 @@
 pub mod application;
 pub mod config;
 pub mod engine;
+pub mod mempool;
 pub mod types;
 
 pub use application::GridwayApp;
-pub use config::{NodeConfig, Peers};
+pub use config::{GenesisAccount, GenesisBalance, GenesisConfig, NodeConfig, Peers};
+pub use mempool::{Mempool, MempoolConfig, MempoolError};
 pub use types::{
     Activity, Finalization, GridwayScheme, Notarization, Seedable,
 };

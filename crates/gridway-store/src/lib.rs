@@ -8,6 +8,7 @@
 
 pub mod global;
 pub mod merkle;
+pub mod persistent;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};

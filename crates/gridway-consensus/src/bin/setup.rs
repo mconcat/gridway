@@ -1,10 +1,10 @@
 //! Gridway Setup — generates validator configuration files for local testing.
 //!
-//! Generates Ed25519 keypairs, BLS12-381 threshold shares, and YAML config
-//! files for a set of validators to run locally.
+//! Generates Ed25519 keypairs, BLS12-381 threshold shares, YAML config
+//! files, and a genesis.yaml for a set of validators to run locally.
 
 use gridway_consensus::{
-    config::{NodeConfig, Peers},
+    config::{GenesisAccount, GenesisBalance, GenesisConfig, NodeConfig, Peers},
     types::NAMESPACE,
 };
 
@@ -26,6 +26,8 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 use tracing::info;
+
+/// Default initial balance for each validator in ugridway.
 
 fn main() {
     // Initialize logger
@@ -53,6 +55,20 @@ fn main() {
                 .default_value("4545")
                 .value_parser(value_parser!(u16))
                 .help("Starting port number (each validator uses 3 ports: p2p, metrics, tx)"),
+        )
+        .arg(
+            Arg::new("chain_id")
+                .long("chain-id")
+                .default_value("gridway-1")
+                .value_parser(value_parser!(String))
+                .help("Chain identifier for genesis"),
+        )
+        .arg(
+            Arg::new("genesis_balance")
+                .long("genesis-balance")
+                .default_value("1000000")
+                .value_parser(value_parser!(u64))
+                .help("Initial ugridway balance for each validator"),
         )
         .arg(
             Arg::new("worker_threads")
@@ -102,6 +118,8 @@ fn main() {
     let n_peers = *matches.get_one::<usize>("peers").unwrap();
     let n_bootstrappers = *matches.get_one::<usize>("bootstrappers").unwrap();
     let start_port = *matches.get_one::<u16>("start_port").unwrap();
+    let chain_id = matches.get_one::<String>("chain_id").unwrap().clone();
+    let genesis_balance = *matches.get_one::<u64>("genesis_balance").unwrap();
     let worker_threads = *matches.get_one::<usize>("worker_threads").unwrap();
     let log_level = matches.get_one::<String>("log_level").unwrap().clone();
     let message_backlog = *matches.get_one::<usize>("message_backlog").unwrap();
@@ -116,8 +134,20 @@ fn main() {
     );
 
     // Construct output paths
-    let raw_current_dir = std::env::current_dir().unwrap();
-    let current_dir = raw_current_dir.to_str().unwrap();
+    let raw_current_dir = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Could not determine current directory: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let current_dir = match raw_current_dir.to_str() {
+        Some(s) => s,
+        None => {
+            eprintln!("Current directory path contains invalid UTF-8");
+            std::process::exit(1);
+        }
+    };
     let output = format!("{current_dir}/{output}");
     let storage_output = format!("{output}/storage");
 
@@ -152,6 +182,26 @@ fn main() {
     let identity = schemes[0].polynomial().public();
     info!(%identity, "generated network key");
 
+    // Build genesis accounts from validator public keys
+    let mut genesis_accounts = Vec::with_capacity(n_peers);
+    for signer in &peer_signers {
+        let pk = signer.public_key();
+        let address = gridway_crypto::Address::from_public_key(&pk);
+        genesis_accounts.push(GenesisAccount {
+            address: address.to_hex(),
+            public_key_hex: ::hex::encode(pk.as_ref()),
+            balances: vec![GenesisBalance {
+                denom: "ugridway".to_string(),
+                amount: genesis_balance,
+            }],
+        });
+    }
+
+    let genesis = GenesisConfig {
+        chain_id: chain_id.clone(),
+        accounts: genesis_accounts,
+    };
+
     // Generate configs
     let mut port = start_port;
     let mut addresses = HashMap::new();
@@ -165,7 +215,13 @@ fn main() {
         let peer_config_file = format!("{name}.yaml");
         let directory = format!("{storage_output}/{name}");
 
-        let share_bytes = scheme.share().unwrap().encode();
+        let share_bytes = match scheme.share() {
+            Some(s) => s.encode(),
+            None => {
+                eprintln!("Failed to get share for peer");
+                std::process::exit(1);
+            }
+        };
         let poly_bytes = scheme.polynomial().encode();
         let signer_bytes = signer.encode();
 
@@ -195,19 +251,58 @@ fn main() {
     }
 
     // Write output
-    fs::create_dir_all(&output).unwrap();
-    fs::create_dir_all(&storage_output).unwrap();
+    if let Err(e) = fs::create_dir_all(&output) {
+        eprintln!("Failed to create output directory '{}': {}", output, e);
+        std::process::exit(1);
+    }
+    if let Err(e) = fs::create_dir_all(&storage_output) {
+        eprintln!("Failed to create storage directory '{}': {}", storage_output, e);
+        std::process::exit(1);
+    }
 
     // Write peers file
     let peers_path = format!("{output}/peers.yaml");
-    let file = fs::File::create(&peers_path).unwrap();
-    serde_yaml::to_writer(file, &Peers { addresses }).unwrap();
+    let file = match fs::File::create(&peers_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Failed to create peers file '{}': {}", peers_path, e);
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = serde_yaml::to_writer(file, &Peers { addresses }) {
+        eprintln!("Failed to write peers file: {}", e);
+        std::process::exit(1);
+    }
+
+    // Write genesis file
+    let genesis_path = format!("{output}/genesis.yaml");
+    let file = match fs::File::create(&genesis_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Failed to create genesis file '{}': {}", genesis_path, e);
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = serde_yaml::to_writer(file, &genesis) {
+        eprintln!("Failed to write genesis file: {}", e);
+        std::process::exit(1);
+    }
+    info!(path = %genesis_path, accounts = genesis.accounts.len(), "wrote genesis configuration");
 
     // Write config files
     for (name, peer_config_file, peer_config) in &configurations {
         let path = format!("{output}/{peer_config_file}");
-        let file = fs::File::create(&path).unwrap();
-        serde_yaml::to_writer(file, peer_config).unwrap();
+        let file = match fs::File::create(&path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to create config file '{}': {}", path, e);
+                std::process::exit(1);
+            }
+        };
+        if let Err(e) = serde_yaml::to_writer(file, peer_config) {
+            eprintln!("Failed to write config file '{}': {}", path, e);
+            std::process::exit(1);
+        }
         info!(path = peer_config_file, name, "wrote peer configuration");
     }
 
@@ -217,7 +312,7 @@ fn main() {
     for (name, peer_config_file, _) in &configurations {
         let path = format!("{output}/{peer_config_file}");
         let command = format!(
-            "cargo run --bin gridway-node -- --peers={peers_path} --config={path}"
+            "cargo run --bin gridway-node -- --peers={peers_path} --config={path} --genesis={genesis_path}"
         );
         println!("  {name}: {command}");
     }
@@ -232,9 +327,17 @@ fn main() {
     for (name, _, peer_config) in &configurations {
         if peer_config.tx_port > 0 {
             println!(
-                "  {name}: curl http://localhost:{}/balance/alice/ugridway",
+                "  {name}: curl http://localhost:{}/balance/<address>/ugridway",
                 peer_config.tx_port
             );
         }
+    }
+    println!("\nGenesis accounts:");
+    for account in &genesis.accounts {
+        println!(
+            "  {} — {} ugridway",
+            account.address,
+            account.balances.first().map_or(0, |b| b.amount)
+        );
     }
 }

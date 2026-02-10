@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
+use crate::component_host::DEFAULT_MAX_WASM_BINARY_SIZE;
 use crate::module_router::{ModuleConfig, ModuleRouter, RouterError};
 use crate::vfs::VirtualFilesystem;
 
@@ -54,6 +55,10 @@ pub enum GovernanceError {
     /// Version compatibility error
     #[error("version incompatible:: {0}")]
     IncompatibleVersion(String),
+
+    /// Resource limit exceeded
+    #[error("resource limit exceeded:: {0}")]
+    ResourceLimitExceeded(String),
 }
 
 pub type Result<T> = std::result::Result<T, GovernanceError>;
@@ -222,6 +227,16 @@ impl ModuleGovernance {
             return Err(GovernanceError::Unauthorized(format!(
                 "only governance authority can store code, got:: {}",
                 msg.authority
+            )));
+        }
+
+        // Enforce WASM binary size limit
+        if msg.wasm_code.len() > DEFAULT_MAX_WASM_BINARY_SIZE {
+            return Err(GovernanceError::ResourceLimitExceeded(format!(
+                "WASM binary size {} bytes exceeds maximum allowed {} bytes ({}MB)",
+                msg.wasm_code.len(),
+                DEFAULT_MAX_WASM_BINARY_SIZE,
+                DEFAULT_MAX_WASM_BINARY_SIZE / (1024 * 1024),
             )));
         }
 
@@ -728,6 +743,41 @@ mod tests {
 
         let result = governance.handle_store_code(msg);
         assert!(matches!(result, Err(GovernanceError::Unauthorized(_))));
+    }
+
+    #[test]
+    fn test_store_code_rejects_oversized_binary() {
+        let (governance, _temp_dir) = create_test_governance();
+
+        // Create a WASM binary exceeding the size limit
+        let mut oversized = vec![0x00, 0x61, 0x73, 0x6d]; // WASM magic number
+        oversized.extend_from_slice(&1u32.to_le_bytes()); // WASM version 1
+        oversized.resize(DEFAULT_MAX_WASM_BINARY_SIZE + 1, 0); // Exceed limit
+
+        let checksum = governance.calculate_checksum(&oversized);
+
+        let msg = MsgStoreCode {
+            authority: "governance_authority".to_string(),
+            wasm_code: oversized,
+            metadata: CodeMetadata {
+                name: "oversized_module".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Oversized module".to_string(),
+                repository: None,
+                license: None,
+                api_version: "1.0".to_string(),
+                checksum,
+            },
+        };
+
+        let result = governance.handle_store_code(msg);
+        assert!(result.is_err());
+        match result {
+            Err(GovernanceError::ResourceLimitExceeded(msg)) => {
+                assert!(msg.contains("exceeds maximum"), "Error: {msg}");
+            }
+            other => panic!("Expected ResourceLimitExceeded, got: {other:?}"),
+        }
     }
 
     #[test]

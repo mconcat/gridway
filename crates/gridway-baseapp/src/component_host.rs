@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::{debug, error, info};
 use wasmtime::component::*;
-use wasmtime::{Config, Engine, Store};
+use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::p2::{WasiCtx, WasiCtxBuilder, WasiView};
 
 /// Component Host errors
@@ -51,6 +51,76 @@ pub enum ComponentHostError {
 }
 
 type Result<T> = std::result::Result<T, ComponentHostError>;
+
+// ─── Resource Limits Configuration ───────────────────────────────────────────
+
+/// Maximum allowed WASM binary size (default: 10 MB)
+pub const DEFAULT_MAX_WASM_BINARY_SIZE: usize = 10 * 1024 * 1024;
+
+/// Default maximum memory size per linear memory (256 MB)
+pub const DEFAULT_MAX_MEMORY_SIZE: usize = 256 * 1024 * 1024;
+
+/// Default maximum table elements per table
+pub const DEFAULT_MAX_TABLE_ELEMENTS: usize = 10_000;
+
+/// Default maximum instances per store
+pub const DEFAULT_MAX_INSTANCES: usize = 10;
+
+/// Default maximum tables per store
+pub const DEFAULT_MAX_TABLES: usize = 10;
+
+/// Default maximum memories per store
+pub const DEFAULT_MAX_MEMORIES: usize = 10;
+
+/// Resource limits configuration for WASM component execution.
+///
+/// Controls memory, table, instance, and binary size limits.
+/// All values have production-safe defaults.
+#[derive(Debug, Clone)]
+pub struct ResourceConfig {
+    /// Maximum memory size per linear memory (bytes)
+    pub max_memory_size: usize,
+    /// Maximum number of table elements per table
+    pub max_table_elements: usize,
+    /// Maximum number of instances per store
+    pub max_instances: usize,
+    /// Maximum number of tables per store
+    pub max_tables: usize,
+    /// Maximum number of memories per store
+    pub max_memories: usize,
+    /// Maximum WASM binary size in bytes
+    pub max_wasm_binary_size: usize,
+    /// Whether to trap (instead of returning -1) on memory/table grow failure
+    pub trap_on_grow_failure: bool,
+}
+
+impl Default for ResourceConfig {
+    fn default() -> Self {
+        Self {
+            max_memory_size: DEFAULT_MAX_MEMORY_SIZE,
+            max_table_elements: DEFAULT_MAX_TABLE_ELEMENTS,
+            max_instances: DEFAULT_MAX_INSTANCES,
+            max_tables: DEFAULT_MAX_TABLES,
+            max_memories: DEFAULT_MAX_MEMORIES,
+            max_wasm_binary_size: DEFAULT_MAX_WASM_BINARY_SIZE,
+            trap_on_grow_failure: true,
+        }
+    }
+}
+
+impl ResourceConfig {
+    /// Build wasmtime StoreLimits from this configuration
+    fn to_store_limits(&self) -> StoreLimits {
+        StoreLimitsBuilder::new()
+            .memory_size(self.max_memory_size)
+            .table_elements(self.max_table_elements)
+            .instances(self.max_instances)
+            .tables(self.max_tables)
+            .memories(self.max_memories)
+            .trap_on_grow_failure(self.trap_on_grow_failure)
+            .build()
+    }
+}
 
 /// Component metadata
 #[derive(Clone, Debug)]
@@ -106,6 +176,8 @@ pub struct ComponentState {
     /// When set, WASI modules can use the kvstore interface to access
     /// JMT-backed state through VFS namespace stores.
     vfs: Option<Arc<VirtualFilesystem>>,
+    /// Resource limits for memory, tables, instances
+    limits: StoreLimits,
 }
 
 impl wasmtime_wasi::p2::IoView for ComponentState {
@@ -292,6 +364,8 @@ pub struct ComponentHost {
     component_info: Arc<Mutex<HashMap<String, ComponentInfo>>>,
     /// Default gas limit
     default_gas_limit: u64,
+    /// Resource limits configuration
+    resource_config: ResourceConfig,
     /// VFS reference for state access bridging.
     /// When set, WASI components can access JMT-backed state through
     /// the kvstore WIT interface via VFS namespace stores.
@@ -301,15 +375,21 @@ pub struct ComponentHost {
 impl ComponentHost {
     /// Create a new component host with default configuration
     pub fn new() -> Result<Self> {
+        Self::with_resource_config(ResourceConfig::default())
+    }
+
+    /// Create a new component host with custom resource configuration
+    pub fn with_resource_config(resource_config: ResourceConfig) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true);
         config.async_support(false);
-        Self::with_config(config)
+        Self::with_config(config, resource_config)
     }
 
-    /// Create a new component host with custom configuration
+    /// Create a new component host with custom wasmtime and resource configuration
     pub fn with_config(
         mut config: Config,
+        resource_config: ResourceConfig,
     ) -> Result<Self> {
         // Ensure component model is enabled
         config.wasm_component_model(true);
@@ -320,18 +400,31 @@ impl ComponentHost {
         config.wasm_memory64(false); // Disable 64-bit memory for security
         config.consume_fuel(true); // Enable fuel metering for gas tracking
 
+        // Stack size limit for WASM execution (1 MB)
+        config.max_wasm_stack(1024 * 1024);
+
         let engine =
             Engine::new(&config).map_err(|e| ComponentHostError::EngineConfig(e.to_string()))?;
 
-        info!("Component host initialized with secure configuration");
+        info!(
+            "Component host initialized with secure configuration              (memory_limit={}MB, max_binary={}MB, fuel=enabled)",
+            resource_config.max_memory_size / (1024 * 1024),
+            resource_config.max_wasm_binary_size / (1024 * 1024),
+        );
 
         Ok(Self {
             engine,
             components: Arc::new(Mutex::new(HashMap::new())),
             component_info: Arc::new(Mutex::new(HashMap::new())),
             default_gas_limit: 10_000_000, // 10 million units
+            resource_config,
             vfs: None,
         })
+    }
+
+    /// Get the current resource configuration
+    pub fn resource_config(&self) -> &ResourceConfig {
+        &self.resource_config
     }
 
     /// Set the VFS reference for state access bridging between WASI modules and the store
@@ -346,7 +439,16 @@ impl ComponentHost {
 
     /// Load a component from bytes
     pub fn load_component(&self, name: &str, bytes: &[u8], info: ComponentInfo) -> Result<()> {
-        debug!("Loading component: {}", name);
+        debug!("Loading component: {} ({} bytes)", name, bytes.len());
+
+        // Enforce WASM binary size limit
+        if bytes.len() > self.resource_config.max_wasm_binary_size {
+            return Err(ComponentHostError::ResourceError(format!(
+                "WASM binary size {} bytes exceeds maximum allowed {} bytes",
+                bytes.len(),
+                self.resource_config.max_wasm_binary_size,
+            )));
+        }
 
         // Compile the component
         let component = Component::new(&self.engine, bytes)
@@ -371,7 +473,7 @@ impl ComponentHost {
         Ok(())
     }
 
-    /// Create a store with WASI context and fuel limit for a component
+    /// Create a store with WASI context, fuel limit, and resource limits for a component
     fn create_store(&self, component_name: &str) -> Result<Store<ComponentState>> {
         let wasi = WasiCtxBuilder::new().build();
         let state = ComponentState {
@@ -379,8 +481,12 @@ impl ComponentHost {
             wasi,
             component_name: component_name.to_string(),
             vfs: self.vfs.clone(),
+            limits: self.resource_config.to_store_limits(),
         };
         let mut store = Store::new(&self.engine, state);
+
+        // Apply resource limiter for memory, tables, instances
+        store.limiter(|state| &mut state.limits);
 
         let gas_limit = {
             let info = self.component_info.lock().map_err(|e| {
@@ -681,15 +787,20 @@ impl ComponentHost {
 
         let component = self.get_component(module_name)?;
 
-        // Create store with specific gas limit
+        // Create store with specific gas limit and resource limits
         let wasi = WasiCtxBuilder::new().inherit_stdio().build();
         let state = ComponentState {
             table: wasmtime_wasi::ResourceTable::new(),
             wasi,
             component_name: module_name.to_string(),
             vfs: self.vfs.clone(),
+            limits: self.resource_config.to_store_limits(),
         };
         let mut store = Store::new(&self.engine, state);
+
+        // Apply resource limiter for memory, tables, instances
+        store.limiter(|state| &mut state.limits);
+
         store
             .set_fuel(gas_limit)
             .map_err(|e| ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}")))?;
@@ -816,6 +927,7 @@ mod tests {
             wasi,
             component_name: "test".to_string(),
             vfs: Some(vfs),
+            limits: StoreLimitsBuilder::new().build(),
         };
 
         // Test open_store
@@ -904,6 +1016,7 @@ mod tests {
             wasi,
             component_name: "test".to_string(),
             vfs: Some(vfs),
+            limits: StoreLimitsBuilder::new().build(),
         };
 
         let store_resource =
@@ -959,6 +1072,7 @@ mod tests {
             wasi,
             component_name: "test".to_string(),
             vfs: Some(vfs),
+            limits: StoreLimitsBuilder::new().build(),
         };
 
         // Opening a nonexistent store should fail
@@ -975,11 +1089,87 @@ mod tests {
             wasi,
             component_name: "test".to_string(),
             vfs: None, // No VFS
+            limits: StoreLimitsBuilder::new().build(),
         };
 
         // Opening a store without VFS should fail
         let result = kvstore::Host::open_store(&mut state, "bank".to_string());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("VFS not available"));
+    }
+
+    // ─── Resource Limit Tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_default_resource_config() {
+        let config = ResourceConfig::default();
+        assert_eq!(config.max_memory_size, DEFAULT_MAX_MEMORY_SIZE);
+        assert_eq!(config.max_wasm_binary_size, DEFAULT_MAX_WASM_BINARY_SIZE);
+        assert_eq!(config.max_instances, DEFAULT_MAX_INSTANCES);
+        assert_eq!(config.max_tables, DEFAULT_MAX_TABLES);
+        assert_eq!(config.max_memories, DEFAULT_MAX_MEMORIES);
+        assert_eq!(config.max_table_elements, DEFAULT_MAX_TABLE_ELEMENTS);
+        assert!(config.trap_on_grow_failure);
+    }
+
+    #[test]
+    fn test_custom_resource_config() {
+        let config = ResourceConfig {
+            max_memory_size: 128 * 1024 * 1024,
+            max_wasm_binary_size: 5 * 1024 * 1024,
+            max_instances: 5,
+            max_tables: 5,
+            max_memories: 5,
+            max_table_elements: 5000,
+            trap_on_grow_failure: false,
+        };
+        let host = ComponentHost::with_resource_config(config.clone()).unwrap();
+        assert_eq!(host.resource_config().max_memory_size, 128 * 1024 * 1024);
+        assert_eq!(host.resource_config().max_wasm_binary_size, 5 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_component_host_rejects_oversized_binary() {
+        let config = ResourceConfig {
+            max_wasm_binary_size: 100, // Very small limit
+            ..ResourceConfig::default()
+        };
+        let host = ComponentHost::with_resource_config(config).unwrap();
+
+        // Create a binary larger than the limit
+        let oversized_bytes = vec![0u8; 200];
+        let info = ComponentInfo {
+            name: "oversized".to_string(),
+            path: std::path::PathBuf::from("/tmp/oversized.wasm"),
+            component_type: ComponentType::Module,
+            gas_limit: 1_000_000,
+        };
+
+        let result = host.load_component("oversized", &oversized_bytes, info);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("exceeds maximum"),
+            "Expected 'exceeds maximum' in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_resource_config_to_store_limits() {
+        // Verify that ResourceConfig properly creates StoreLimits
+        let config = ResourceConfig::default();
+        let _limits = config.to_store_limits();
+        // StoreLimits doesn't expose fields, but construction should succeed
+    }
+
+    #[test]
+    fn test_component_host_with_resource_config() {
+        let config = ResourceConfig {
+            max_memory_size: 64 * 1024 * 1024, // 64MB
+            ..ResourceConfig::default()
+        };
+        let host = ComponentHost::with_resource_config(config).unwrap();
+        assert!(host.components.lock().unwrap().is_empty());
+        assert_eq!(host.resource_config().max_memory_size, 64 * 1024 * 1024);
     }
 }

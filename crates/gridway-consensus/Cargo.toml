@@ -29,6 +29,7 @@ commonware-parallel = "0.0.65"
 commonware-math = "0.0.65"
 
 # External
+axum = { version = "0.8", features = ["json"] }
 bytes = "1.7"
 clap = "4.5"
 futures = "0.3"
@@ -37,10 +38,14 @@ hex = "0.4"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 serde_yaml = "0.9"
 thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+gridway-client = { path = "../gridway-client" }
+tower-http = { version = "0.6", features = ["cors"] }
 
 [[bin]]
 name = "gridway-node"
@@ -53,3 +58,7 @@ path = "src/bin/setup.rs"
 [[bin]]
 name = "gridway-keygen"
 path = "src/bin/gridway_keygen.rs"
+
+[[bin]]
+name = "gridway-cli"
+path = "src/bin/gridway_cli.rs"

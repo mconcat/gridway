@@ -4,6 +4,7 @@
 //! Each module (bank, auth, staking, etc.) gets its own isolated namespace.
 
 use crate::{KVStore, MerkleStore, Result, StoreError};
+use std::path::Path;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -24,6 +25,18 @@ impl GlobalAppStore {
             store: Arc::new(Mutex::new(store)),
             namespaces: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Create a new GlobalAppStore with sled persistence at the given path.
+    ///
+    /// The underlying MerkleStore will automatically flush to sled on commit
+    /// and load from sled on startup.
+    pub fn with_persistence(path: &Path) -> Result<Self> {
+        let store = MerkleStore::with_persistence("state".to_string(), path)?;
+        Ok(Self {
+            store: Arc::new(Mutex::new(store)),
+            namespaces: Mutex::new(HashMap::new()),
+        })
     }
 
     /// Register a namespace

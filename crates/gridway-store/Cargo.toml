@@ -17,6 +17,8 @@ trie-db = "0.31"
 hash-db = "0.16"
 memory-db = "0.34"
 reference-trie = "0.29"
+sled = "0.34"
+log = "0.4"
 
 [dev-dependencies]
 tempfile = "3.14"

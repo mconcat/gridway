@@ -1,148 +1,111 @@
-version: '3.8'
-
-x-cometbft-base: &cometbft-base
-  image: cometbft/cometbft:v0.38.0
-  networks:
-    - gridway-network
-  restart: unless-stopped
-
 x-gridway-base: &gridway-base
+  image: ${GRIDWAY_IMAGE:-gridway:latest}
   build:
     context: .
     dockerfile: Dockerfile
   environment:
-    - RUST_LOG=info
-    - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
+    - RUST_LOG=${RUST_LOG:-info}
+    - WASI_MODULE_PATH=/usr/local/lib/gridway/wasi-modules
   networks:
     - gridway-network
-  healthcheck:
-    test: ["CMD", "nc", "-z", "localhost", "26658"]
-    interval: 5s
-    timeout: 3s
-    retries: 5
-    start_period: 10s
   restart: unless-stopped
 
 services:
-  # Node 0
+  # Node 0 — ports 4545 (P2P), 4546 (metrics), 4547 (HTTP API)
   gridway-0:
     <<: *gridway-base
-    container_name: gridway-app-0
-    environment:
-      - RUST_LOG=info
-      - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
-      - GRIDWAY_HOME=/gridway
-    volumes:
-      - ./testnet/gridway-0:/gridway
+    container_name: gridway-node-0
     ports:
-      - "26658:26658"
-      - "9090:9090"
-      - "1317:1317"
-
-  cometbft-0:
-    <<: *cometbft-base
-    container_name: cometbft-node-0
-    ports:
-      - "26656:26656"
-      - "26657:26657"
-    environment:
-      - CMTHOME=/cometbft
+      - "4545:4545"
+      - "4546:4546"
+      - "4547:4547"
     volumes:
-      - ./testnet/node0:/cometbft
-    command: ["node", "--proxy_app=tcp://gridway-0:26658"]
-    depends_on:
-      gridway-0:
-        condition: service_healthy
+      - ./testnet/validator-0:/gridway/validator
+      - ./testnet/peers.yaml:/gridway/peers.yaml:ro
+      - ./testnet/genesis.yaml:/gridway/genesis.yaml:ro
+    entrypoint: ["gridway-node"]
+    command:
+      - "--peers=/gridway/peers.yaml"
+      - "--config=/gridway/validator/config.yaml"
+      - "--genesis=/gridway/genesis.yaml"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4547/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
-  # Node 1
+  # Node 1 — ports 4548 (P2P), 4549 (metrics), 4550 (HTTP API)
   gridway-1:
     <<: *gridway-base
-    container_name: gridway-app-1
-    environment:
-      - RUST_LOG=info
-      - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
-      - GRIDWAY_HOME=/gridway
-    volumes:
-      - ./testnet/gridway-1:/gridway
+    container_name: gridway-node-1
     ports:
-      - "26668:26658"
-      - "9091:9090"
-      - "1318:1317"
-
-  cometbft-1:
-    <<: *cometbft-base
-    container_name: cometbft-node-1
-    ports:
-      - "26666:26656"
-      - "26667:26657"
-    environment:
-      - CMTHOME=/cometbft
+      - "4548:4548"
+      - "4549:4549"
+      - "4550:4550"
     volumes:
-      - ./testnet/node1:/cometbft
-    command: ["node", "--proxy_app=tcp://gridway-1:26658"]
-    depends_on:
-      gridway-1:
-        condition: service_healthy
+      - ./testnet/validator-1:/gridway/validator
+      - ./testnet/peers.yaml:/gridway/peers.yaml:ro
+      - ./testnet/genesis.yaml:/gridway/genesis.yaml:ro
+    entrypoint: ["gridway-node"]
+    command:
+      - "--peers=/gridway/peers.yaml"
+      - "--config=/gridway/validator/config.yaml"
+      - "--genesis=/gridway/genesis.yaml"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4550/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
-  # Node 2
+  # Node 2 — ports 4551 (P2P), 4552 (metrics), 4553 (HTTP API)
   gridway-2:
     <<: *gridway-base
-    container_name: gridway-app-2
-    environment:
-      - RUST_LOG=info
-      - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
-      - GRIDWAY_HOME=/gridway
-    volumes:
-      - ./testnet/gridway-2:/gridway
+    container_name: gridway-node-2
     ports:
-      - "26678:26658"
-      - "9092:9090"
-      - "1319:1317"
-
-  cometbft-2:
-    <<: *cometbft-base
-    container_name: cometbft-node-2
-    ports:
-      - "26676:26656"
-      - "26677:26657"
-    environment:
-      - CMTHOME=/cometbft
+      - "4551:4551"
+      - "4552:4552"
+      - "4553:4553"
     volumes:
-      - ./testnet/node2:/cometbft
-    command: ["node", "--proxy_app=tcp://gridway-2:26658"]
-    depends_on:
-      gridway-2:
-        condition: service_healthy
+      - ./testnet/validator-2:/gridway/validator
+      - ./testnet/peers.yaml:/gridway/peers.yaml:ro
+      - ./testnet/genesis.yaml:/gridway/genesis.yaml:ro
+    entrypoint: ["gridway-node"]
+    command:
+      - "--peers=/gridway/peers.yaml"
+      - "--config=/gridway/validator/config.yaml"
+      - "--genesis=/gridway/genesis.yaml"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4553/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
-  # Node 3
+  # Node 3 — ports 4554 (P2P), 4555 (metrics), 4556 (HTTP API)
   gridway-3:
     <<: *gridway-base
-    container_name: gridway-app-3
-    environment:
-      - RUST_LOG=info
-      - GRIDWAY_CHAIN_ID=${CHAIN_ID:-gridway-testnet}
-      - GRIDWAY_HOME=/gridway
-    volumes:
-      - ./testnet/gridway-3:/gridway
+    container_name: gridway-node-3
     ports:
-      - "26688:26658"
-      - "9093:9090"
-      - "1320:1317"
-
-  cometbft-3:
-    <<: *cometbft-base
-    container_name: cometbft-node-3
-    ports:
-      - "26686:26656"
-      - "26687:26657"
-    environment:
-      - CMTHOME=/cometbft
+      - "4554:4554"
+      - "4555:4555"
+      - "4556:4556"
     volumes:
-      - ./testnet/node3:/cometbft
-    command: ["node", "--proxy_app=tcp://gridway-3:26658"]
-    depends_on:
-      gridway-3:
-        condition: service_healthy
+      - ./testnet/validator-3:/gridway/validator
+      - ./testnet/peers.yaml:/gridway/peers.yaml:ro
+      - ./testnet/genesis.yaml:/gridway/genesis.yaml:ro
+    entrypoint: ["gridway-node"]
+    command:
+      - "--peers=/gridway/peers.yaml"
+      - "--config=/gridway/validator/config.yaml"
+      - "--genesis=/gridway/genesis.yaml"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4556/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 networks:
   gridway-network:

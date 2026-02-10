@@ -144,7 +144,7 @@ impl<
     > Engine<E, B, S>
 {
     /// Create a new [Engine].
-    pub async fn new(context: E, cfg: Config<B, S>, app: GridwayApp) -> Self {
+    pub async fn new(context: E, cfg: Config<B, S>, app: GridwayApp) -> Result<Self, String> {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -200,7 +200,7 @@ impl<
             },
         )
         .await
-        .expect("failed to initialize finalizations by height archive");
+        .map_err(|e| format!("failed to initialize finalizations by height archive: {e}"))?;
         info!(elapsed = ?start.elapsed(), "restored finalizations by height archive");
 
         // Initialize finalized blocks archive
@@ -237,7 +237,7 @@ impl<
             },
         )
         .await
-        .expect("failed to initialize finalized blocks archive");
+        .map_err(|e| format!("failed to initialize finalized blocks archive: {e}"))?;
         info!(elapsed = ?start.elapsed(), "restored finalized blocks archive");
 
         // === STATE REPLAY ===
@@ -268,7 +268,7 @@ impl<
 
                 if !blocks_to_replay.is_empty() {
                     app.replay_blocks(&blocks_to_replay)
-                        .expect("failed to replay finalized blocks");
+                        .map_err(|e| format!("failed to replay finalized blocks: {e}"))?;
                     info!(
                         blocks = blocks_to_replay.len(),
                         elapsed = ?replay_start.elapsed(),
@@ -282,10 +282,10 @@ impl<
 
         // Create marshal
         let scheme = GridwayScheme::signer(NAMESPACE, cfg.participants, cfg.polynomial, cfg.share)
-            .expect("failed to create scheme");
+            .ok_or_else(|| "failed to create scheme".to_string())?;
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let (marshal, marshal_mailbox, _) = marshal::Actor::init(
+        let (marshal, marshal_mailbox, _): (_, marshal::Mailbox<GridwayScheme, GridwayBlock>, _) = marshal::Actor::init(
             context.with_label("marshal"),
             finalizations_by_height,
             finalized_blocks,
@@ -349,7 +349,7 @@ impl<
             },
         );
 
-        Self {
+        Ok(Self {
             context: ContextCell::new(context),
 
             buffer,
@@ -357,7 +357,7 @@ impl<
             marshal,
             marshaled,
             consensus,
-        }
+        })
     }
 
     /// Start the engine. Returns a handle that resolves when the engine stops.

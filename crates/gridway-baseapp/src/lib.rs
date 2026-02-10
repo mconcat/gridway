@@ -25,7 +25,7 @@ use gridway_store::{GlobalAppStore, MerkleStore, KVStore};
 use gridway_types::{Event, EventAttribute, TxResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -185,6 +185,69 @@ impl BaseApp {
             name, context: None, wasi_host, component_host, vfs,
             module_router, capability_manager, module_governance, module_paths,
             global_store, last_state_root: [0u8; 32], executed_heights: HashSet::new(),
+        })
+    }
+
+    /// Create a new BaseApp with sled-backed state persistence.
+    ///
+    /// The state database will be stored at `db_path`. On startup, if state
+    /// exists on disk it will be loaded automatically. On `commit()`, state
+    /// is automatically flushed to disk.
+    ///
+    /// Keeps full backward compatibility — use `new()` for in-memory only.
+    pub fn with_persistence(name: String, db_path: &Path) -> Result<Self> {
+        let global_store = Arc::new(
+            GlobalAppStore::with_persistence(db_path)
+                .map_err(|e| BaseAppError::Store(format!("Failed to create persistent store: {e}")))?
+        );
+
+        for ns in ["bank", "auth", "staking", "gov"] {
+            global_store.register_namespace(ns, false)
+                .map_err(|e| BaseAppError::Store(format!("Failed to register {ns} namespace: {e}")))?;
+        }
+
+        let wasi_host = Arc::new(WasiHost::new().map_err(|e| {
+            BaseAppError::InitChainFailed(format!("Failed to initialize WASI host: {e}"))
+        })?);
+
+        let mut component_host_inner = ComponentHost::new().map_err(|e| {
+            BaseAppError::InitChainFailed(format!("Failed to initialize Component host: {e}"))
+        })?;
+
+        let vfs = Arc::new(VirtualFilesystem::new());
+        Self::setup_stores(&vfs, &global_store)?;
+
+        component_host_inner.set_vfs(vfs.clone());
+        let component_host = Arc::new(component_host_inner);
+
+        let capability_manager = Arc::new(CapabilityManager::new());
+        let module_router = Arc::new(ModuleRouter::new(wasi_host.clone(), vfs.clone()));
+        let governance_authority = "gridway_governance".to_string();
+        let module_governance = Arc::new(ModuleGovernance::new(
+            module_router.clone(), vfs.clone(), governance_authority,
+        ));
+
+        let module_base_path = Self::find_module_base_path();
+        let mut module_paths = HashMap::new();
+        for name in ["hook", "validator", "bank"] {
+            module_paths.insert(
+                name.to_string(),
+                format!("{module_base_path}/{name}_component.wasm"),
+            );
+        }
+
+        // Recover state root from the loaded persistent store
+        let last_state_root = {
+            let store = global_store.get_store();
+            let store = store.lock()
+                .map_err(|e| BaseAppError::Store(format!("Failed to lock store: {e}")))?;
+            store.root_hash()
+        };
+
+        Ok(Self {
+            name, context: None, wasi_host, component_host, vfs,
+            module_router, capability_manager, module_governance, module_paths,
+            global_store, last_state_root, executed_heights: HashSet::new(),
         })
     }
 

@@ -11,6 +11,7 @@
 use gridway_baseapp::BaseApp;
 use gridway_types::GridwayBlock;
 
+use crate::mempool::{Mempool, MempoolConfig, MempoolError};
 use crate::types::{GridwayScheme, PublicKey};
 
 use commonware_consensus::{
@@ -24,15 +25,11 @@ use commonware_utils::SystemTimeExt;
 use commonware_utils::Acknowledgement;
 use futures::StreamExt;
 use rand::Rng;
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tracing::info;
 
 /// Milliseconds in the future to allow for block timestamps.
 const SYNCHRONY_BOUND: u64 = 500;
-
-/// The chain ID used for block execution.
-const CHAIN_ID: &str = "gridway-1";
 
 /// GridwayApp wraps BaseApp and implements Commonware consensus traits.
 ///
@@ -41,6 +38,9 @@ const CHAIN_ID: &str = "gridway-1";
 /// the WASM microkernel (BaseApp).
 #[derive(Clone)]
 pub struct GridwayApp {
+    /// The chain ID used for block execution.
+    chain_id: Arc<String>,
+
     /// The genesis block (cached)
     genesis: Arc<GridwayBlock>,
 
@@ -48,28 +48,46 @@ pub struct GridwayApp {
     /// The BaseApp manages all WASM module execution and state.
     baseapp: Arc<Mutex<BaseApp>>,
 
-    /// Pending transactions waiting to be included in a block.
-    /// In a full implementation, this would be a mempool.
-    pending_txs: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    /// Production-grade mempool with size limits and duplicate detection.
+    mempool: Arc<Mutex<Mempool>>,
 }
 
 impl GridwayApp {
-    /// Create a new GridwayApp wrapping a BaseApp
-    pub fn new(baseapp: BaseApp) -> Self {
+    /// Create a new GridwayApp wrapping a BaseApp with the given chain ID.
+    /// Uses default mempool configuration.
+    pub fn new(baseapp: BaseApp, chain_id: String) -> Self {
+        Self::with_mempool_config(baseapp, chain_id, MempoolConfig::default())
+    }
+
+    /// Create a new GridwayApp with a custom mempool configuration.
+    pub fn with_mempool_config(baseapp: BaseApp, chain_id: String, mempool_config: MempoolConfig) -> Self {
         let genesis = GridwayBlock::genesis();
         Self {
+            chain_id: Arc::new(chain_id),
             genesis: Arc::new(genesis),
             baseapp: Arc::new(Mutex::new(baseapp)),
-            pending_txs: Arc::new(Mutex::new(VecDeque::new())),
+            mempool: Arc::new(Mutex::new(Mempool::new(mempool_config))),
         }
     }
 
-    /// Submit a transaction to the pending pool
-    pub fn submit_tx(&self, tx: Vec<u8>) {
-        if let Ok(mut pending) = self.pending_txs.lock() {
-            pending.push_back(tx);
-            tracing::info!(pending_count = pending.len(), "TX submitted to pending pool");
+    /// Return the chain ID.
+    pub fn chain_id(&self) -> &str {
+        &self.chain_id
+    }
+
+    /// Submit a transaction to the mempool.
+    ///
+    /// Returns the hex-encoded SHA-256 hash on success, or a `MempoolError` on failure.
+    pub fn submit_tx(&self, tx: Vec<u8>) -> Result<String, MempoolError> {
+        match self.mempool.lock() {
+            Ok(mut pool) => pool.submit(tx),
+            Err(_) => Err(MempoolError::LockPoisoned),
         }
+    }
+
+    /// Return the number of pending transactions.
+    pub fn pending_tx_count(&self) -> usize {
+        self.mempool.lock().map(|pool| pool.len()).unwrap_or(0)
     }
 
     /// Get access to the BaseApp (for queries, etc.)
@@ -79,12 +97,13 @@ impl GridwayApp {
 
     /// Drain pending transactions (up to max_count)
     fn drain_pending(&self, max_count: usize) -> Vec<Vec<u8>> {
-        let mut pending = self.pending_txs.lock().unwrap();
-        let count = pending.len().min(max_count);
-        if count > 0 {
-            tracing::info!(drained = count, remaining = pending.len() - count, "Draining pending txs for proposal");
+        match self.mempool.lock() {
+            Ok(mut pool) => pool.drain(max_count),
+            Err(e) => {
+                tracing::error!("mempool lock poisoned in drain_pending: {e}");
+                Vec::new()
+            }
         }
-        pending.drain(..count).collect()
     }
 
     /// Replay a sequence of finalized blocks to rebuild state.
@@ -101,7 +120,7 @@ impl GridwayApp {
 
         for block in blocks {
             let height = block.height.get();
-            match app.execute_block(height, block.timestamp, CHAIN_ID, &block.transactions) {
+            match app.execute_block(height, block.timestamp, &self.chain_id, &block.transactions) {
                 Ok((state_root, _responses)) => {
                     if state_root != block.state_root {
                         return Err(format!(
@@ -164,11 +183,17 @@ where
 
         // Execute through BaseApp to get state root
         let state_root = {
-            let mut app = self.baseapp.lock().unwrap();
+            let mut app = match self.baseapp.lock() {
+                Ok(app) => app,
+                Err(e) => {
+                    tracing::error!("baseapp lock poisoned in propose: {e}");
+                    return None;
+                }
+            };
             match app.execute_block(
                 new_height.get(),
                 current,
-                CHAIN_ID,
+                &self.chain_id,
                 &txs,
             ) {
                 Ok((root, _responses)) => root,
@@ -221,11 +246,17 @@ where
 
         // Re-execute transactions and verify state root
         let verified = {
-            let mut app = self.baseapp.lock().unwrap();
+            let mut app = match self.baseapp.lock() {
+                Ok(app) => app,
+                Err(e) => {
+                    tracing::error!("baseapp lock poisoned in verify: {e}");
+                    return false;
+                }
+            };
             match app.execute_block(
                 block.height.get(),
                 block.timestamp,
-                CHAIN_ID,
+                &self.chain_id,
                 &block.transactions,
             ) {
                 Ok((computed_root, _)) => computed_root == block.state_root,
@@ -252,27 +283,32 @@ impl Reporter for GridwayApp {
 
             // Commit state on finalization
             {
-                let mut app = self.baseapp.lock().unwrap();
-
-                // Re-execute to ensure state is applied (idempotent if already executed)
-                let _ = app.execute_block(
-                    block.height().get(),
-                    block.timestamp,
-                    CHAIN_ID,
-                    &block.transactions,
-                );
-
-                // Commit to persistent store
-                match app.commit() {
-                    Ok(root) => {
-                        info!(
-                            height = %block.height(),
-                            state_root = hex::encode(root),
-                            "committed state"
+                match self.baseapp.lock() {
+                    Ok(mut app) => {
+                        // Re-execute to ensure state is applied (idempotent if already executed)
+                        let _ = app.execute_block(
+                            block.height().get(),
+                            block.timestamp,
+                            &self.chain_id,
+                            &block.transactions,
                         );
+
+                        // Commit to persistent store
+                        match app.commit() {
+                            Ok(root) => {
+                                info!(
+                                    height = %block.height(),
+                                    state_root = hex::encode(root),
+                                    "committed state"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!("State commit failed: {}", e);
+                            }
+                        }
                     }
                     Err(e) => {
-                        tracing::error!("State commit failed: {}", e);
+                        tracing::error!("baseapp lock poisoned in report: {e}");
                     }
                 }
             }
@@ -285,28 +321,37 @@ impl Reporter for GridwayApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{GenesisAccount, GenesisBalance, GenesisConfig};
+    use crate::mempool::MempoolError;
 
     #[test]
     fn test_gridway_app_creation() {
-        let baseapp = BaseApp::new("test".to_string()).unwrap();
-        let app = GridwayApp::new(baseapp);
+        let baseapp = BaseApp::new("test".to_string()).expect("baseapp creation failed");
+        let app = GridwayApp::new(baseapp, "test-chain".to_string());
 
         // Should be able to submit transactions
-        app.submit_tx(vec![1, 2, 3]);
-        app.submit_tx(vec![4, 5, 6]);
+        let hash1 = app.submit_tx(vec![1, 2, 3]).expect("submit should succeed");
+        let hash2 = app.submit_tx(vec![4, 5, 6]).expect("submit should succeed");
+        assert!(!hash1.is_empty());
+        assert!(!hash2.is_empty());
+        assert_ne!(hash1, hash2);
 
         // Drain should return them
         let txs = app.drain_pending(10);
         assert_eq!(txs.len(), 2);
+
+        // Chain ID should be set
+        assert_eq!(app.chain_id(), "test-chain");
     }
 
     #[test]
     fn test_gridway_app_pending_limit() {
-        let baseapp = BaseApp::new("test".to_string()).unwrap();
-        let app = GridwayApp::new(baseapp);
+        let baseapp = BaseApp::new("test".to_string()).expect("baseapp creation failed");
+        let app = GridwayApp::new(baseapp, "test-chain".to_string());
 
-        for i in 0..100 {
-            app.submit_tx(vec![i as u8]);
+        for i in 0..100u16 {
+            // Use 2 bytes per tx to ensure uniqueness
+            app.submit_tx(i.to_le_bytes().to_vec()).expect("submit should succeed");
         }
 
         // Drain with limit
@@ -316,5 +361,140 @@ mod tests {
         // Remaining
         let txs = app.drain_pending(1000);
         assert_eq!(txs.len(), 90);
+    }
+
+    #[test]
+    fn test_gridway_app_submit_returns_error_on_duplicate() {
+        let baseapp = BaseApp::new("test".to_string()).expect("baseapp creation failed");
+        let app = GridwayApp::new(baseapp, "test-chain".to_string());
+
+        app.submit_tx(vec![1, 2, 3]).expect("first submit");
+        let result = app.submit_tx(vec![1, 2, 3]);
+        assert!(matches!(result, Err(MempoolError::DuplicateTx { .. })));
+    }
+
+    #[test]
+    fn test_gridway_app_submit_tx_too_large() {
+        let config = MempoolConfig {
+            max_txs: 100,
+            max_tx_size: 10,
+            max_total_size: 1000,
+        };
+        let baseapp = BaseApp::new("test".to_string()).expect("baseapp creation failed");
+        let app = GridwayApp::with_mempool_config(baseapp, "test-chain".to_string(), config);
+
+        let result = app.submit_tx(vec![0u8; 11]);
+        assert!(matches!(result, Err(MempoolError::TxTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_gridway_app_mempool_full() {
+        let config = MempoolConfig {
+            max_txs: 3,
+            max_tx_size: 100,
+            max_total_size: 1000,
+        };
+        let baseapp = BaseApp::new("test".to_string()).expect("baseapp creation failed");
+        let app = GridwayApp::with_mempool_config(baseapp, "test-chain".to_string(), config);
+
+        app.submit_tx(vec![1]).expect("submit 1");
+        app.submit_tx(vec![2]).expect("submit 2");
+        app.submit_tx(vec![3]).expect("submit 3");
+
+        let result = app.submit_tx(vec![4]);
+        assert!(matches!(result, Err(MempoolError::MempoolFull { .. })));
+    }
+
+    #[test]
+    fn test_gridway_app_pending_tx_count() {
+        let baseapp = BaseApp::new("test".to_string()).expect("baseapp creation failed");
+        let app = GridwayApp::new(baseapp, "test-chain".to_string());
+
+        assert_eq!(app.pending_tx_count(), 0);
+        app.submit_tx(vec![1]).expect("submit");
+        assert_eq!(app.pending_tx_count(), 1);
+        app.submit_tx(vec![2]).expect("submit");
+        assert_eq!(app.pending_tx_count(), 2);
+        app.drain_pending(1);
+        assert_eq!(app.pending_tx_count(), 1);
+    }
+
+    #[test]
+    fn test_genesis_loading_balance() {
+        let genesis = GenesisConfig {
+            chain_id: "test-genesis".to_string(),
+            accounts: vec![
+                GenesisAccount {
+                    address: "aabbccddee00112233445566778899aabbccddee".to_string(),
+                    public_key_hex: "00".repeat(32),
+                    balances: vec![GenesisBalance {
+                        denom: "ugridway".to_string(),
+                        amount: 1_000_000,
+                    }],
+                },
+            ],
+        };
+
+        let mut baseapp = BaseApp::new("test-genesis".to_string()).expect("baseapp creation failed");
+
+        // Apply genesis
+        for account in &genesis.accounts {
+            baseapp
+                .set_account(
+                    &account.address,
+                    &gridway_baseapp::Account {
+                        public_key: account.public_key_hex.clone(),
+                        sequence: 0,
+                    },
+                )
+                .expect("set_account failed");
+
+            for balance in &account.balances {
+                baseapp
+                    .set_balance(&account.address, &balance.denom, balance.amount)
+                    .expect("set_balance failed");
+            }
+        }
+
+        let root = baseapp.commit().expect("commit failed");
+        // Genesis commit should produce a non-zero hash
+        assert_ne!(root, [0u8; 32], "genesis state root should be non-zero");
+
+        // Verify balance
+        let bal = baseapp
+            .get_balance("aabbccddee00112233445566778899aabbccddee", "ugridway")
+            .expect("get_balance failed");
+        assert_eq!(bal, 1_000_000);
+    }
+
+    #[test]
+    fn test_genesis_config_yaml_roundtrip() {
+        let genesis = GenesisConfig {
+            chain_id: "test-chain-1".to_string(),
+            accounts: vec![
+                GenesisAccount {
+                    address: "aabbccddee00112233445566778899aabbccddee".to_string(),
+                    public_key_hex: "aa".repeat(32),
+                    balances: vec![
+                        GenesisBalance {
+                            denom: "ugridway".to_string(),
+                            amount: 500_000,
+                        },
+                        GenesisBalance {
+                            denom: "uatom".to_string(),
+                            amount: 100,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        let yaml = serde_yaml::to_string(&genesis).expect("serialize failed");
+        let parsed: GenesisConfig = serde_yaml::from_str(&yaml).expect("deserialize failed");
+
+        assert_eq!(parsed.chain_id, "test-chain-1");
+        assert_eq!(parsed.accounts.len(), 1);
+        assert_eq!(parsed.accounts[0].balances.len(), 2);
+        assert_eq!(parsed.accounts[0].balances[0].amount, 500_000);
     }
 }

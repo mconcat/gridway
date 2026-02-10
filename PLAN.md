@@ -1,150 +1,200 @@
-# Gridway: A WASI Microkernel Architecture for Blockchain
+# Gridway: A WASI Microkernel Blockchain
 
-## Project Context and Architectural Vision
+**Last Updated:** 2025-02-10
 
-This document provides a comprehensive technical assessment of the Gridway Rust Cosmos SDK implementation, evaluating its readiness for production and its fidelity to the project's architectural vision. The primary goal of this initiative is to re-architect the Cosmos SDK in Rust as a next-generation **microkernel**. This is not a line-by-line translation of the Go implementation but a fundamental re-evaluation of blockchain architecture, designed to be more performant, more secure, and vastly more flexible.
+## Overview
 
-The architectural vision is centered on four core innovations:
+Gridway is a blockchain built as a WASM microkernel. All application logic — transaction validation, bank transfers, block lifecycle hooks — runs inside sandboxed WebAssembly (WASI) components. The host (BaseApp) provides state access through a Virtual Filesystem (VFS) backed by a Patricia Merkle Trie, and orchestrates execution via the ComponentHost (wasmtime).
 
-1. **A WASI-based Microkernel:** All application logic is packaged as sandboxed WebAssembly (WASI) components. This decouples the core node software from application logic, enabling runtime module upgrades via on-chain governance and creating a true multi-language development ecosystem.
+Consensus is provided by [Commonware Library](https://github.com/commonwarexyz/monorepo) v0.0.65 — specifically the Simplex BFT engine with BLS12-381 threshold signatures and Ed25519 validator identity.
 
-2. **Dynamic Component Loading:** WASI components are stored directly in the merkle tree at well-known paths (e.g., `/sbin/ante-handler`, `/bin/bank`) and loaded dynamically at runtime. This revolutionary approach enables governance to upgrade core system components without hard forks, as programs are determined by their stored file paths rather than static compilation.
+## Architectural Vision
 
-3. **State as a Virtual Filesystem (VFS):** The traditional `MultiStore` is replaced by a single `GlobalAppStore`, with state access mediated through a VFS using Unix-like paths (`/home/{module}/`, `/sys/`, `/tmp/`). This provides a powerful, intuitive, and language-agnostic API for all state interactions.
+The architecture centers on four principles:
 
-4. **A Unified Capability Model:** Security is enforced through an Object-Capability (OCAP) model where modules are granted unforgeable handles (as WASI file descriptors) to the specific resources they are permitted to access, embodying the Principle of Least Privilege.
+1. **WASI Microkernel:** All application logic runs as sandboxed WASM components. The host loads, executes, and manages these components. There is no Rust-native fallback for core logic — WASM modules must be present.
 
-This assessment evaluates the current codebase against this vision. Our methodology combines deep code analysis, architectural review, and an evaluation of ecosystem compatibility. We examined all major components—including `BaseApp`, the WASI runtime, the VFS, and supporting modules—and cross-referenced the implementation against project documentation.
+2. **State as a Virtual Filesystem (VFS):** A single `GlobalAppStore` backed by a Patricia Merkle Trie replaces the traditional MultiStore. State access is mediated through a VFS with namespace isolation (`/bank/`, `/auth/`, `/staking/`, `/gov/`). WASM modules interact with state through a `kvstore` WIT interface that routes through the VFS to the Merkle trie.
 
-The scope of this review covers the implementation's fidelity to the architectural design, its alignment with critical ecosystem integration requirements (wallets, explorers, IBC), and its readiness for production deployment, considering the needs of validators, developers, and end-users.
+3. **Dynamic Component Loading:** WASM components are loaded from well-known paths and can be replaced at runtime. The `ModuleGovernance` system supports `MsgStoreCode`, `MsgInstallModule`, and `MsgUpgradeModule` for on-chain module management. Components are currently loaded from the filesystem; storing them in the Merkle trie is a future goal.
 
-## Assessment Scope, Methodology, and Criteria
+4. **Capability-Based Security:** Modules receive scoped access to state namespaces. The VFS enforces read/write capabilities per namespace. The `CapabilityManager` tracks permissions with delegation and revocation support.
 
-This assessment evaluates the implementation across four key dimensions: **architectural integrity**, **implementation quality**, **ecosystem compatibility**, and **production readiness**. Our analysis concludes that the project has successfully transitioned from a proof-of-concept to a viable production candidate, validating the core architectural principles of determinism, isolation, and upgradeability. The successful execution of the ante handler as a WASI module, for instance, proves the technical feasibility of the microkernel approach with acceptable performance.
+## Execution Pipeline
 
-However, while the foundational architecture is sound, the implementation sits at a "validated proof-of-concept with production gaps" stage. Significant work remains to bridge these gaps, particularly in security hardening, performance optimization, and operational tooling.
+The full block execution pipeline is WASM-native:
 
-This architectural document is focused exclusively on the **core SDK framework**—the foundational layers and libraries required to build a blockchain application, not the application-specific business logic itself.
+```
+execute_block(height, timestamp, chain_id, txs)
+  │
+  ├── 1. hook.pre_execute(block_ctx)              → WASM hook component
+  │
+  ├── 2. For each TX:
+  │   ├── a. validator.validate(tx_ctx, raw_bytes) → WASM validator component
+  │   │      • JSON decode
+  │   │      • Ed25519 signature verification
+  │   │      • Sequence number check (via kvstore → VFS → auth namespace)
+  │   │      • Message extraction
+  │   │
+  │   ├── b. For each message:
+  │   │      module.handle(ctx, msg)               → WASM domain module (bank, etc.)
+  │   │      • State reads/writes via kvstore WIT → VFS → MerkleStore
+  │   │
+  │   └── c. Increment sender sequence
+  │
+  ├── 3. hook.post_execute(block_ctx, stats)       → WASM hook component
+  │
+  └── 4. Compute state root from MerkleStore
+```
 
-**In Scope:**
+## Consensus Layer: Commonware Simplex
 
-- **Microkernel & Engine (`baseapp`):** The core engine managing state, the ABCI lifecycle, and the WASM runtime.
-- **WASM Runtime Integration:** The integration of the `wasmtime` engine and the WASI environment, including the VFS and capability system.
-- **State Store (`store`):** The Merkleized key-value store (JMT).
-- **Core Types (`types`):** Fundamental data structures shared across the SDK.
-- **Core Libraries:** Foundational data structures (`types`, `math`), cryptography (`crypto`, `keyring`), and diagnostics (`errors`, `log`).
-- **Node Infrastructure:** The node daemon and CLI tooling (`server`, `client`).
-- **Testing Framework (`simapp`):** The SDK for property-based and integration testing.
+Gridway uses the Commonware Library's Simplex BFT consensus engine:
 
-**Out of Scope:**
+- **`GridwayApp`** implements `Application`, `VerifyingApplication`, and `Reporter` traits
+- **`propose()`** drains pending TXs → executes via BaseApp → returns `GridwayBlock` with state root
+- **`verify()`** re-executes the proposed block's TXs → checks state root matches
+- **`report()`** on finalization → commits state to MerkleStore
 
-- **Standard Application Modules (`x/`):** Implementations of modules like `x/bank` or `x/staking` will be built *using* this framework but are not part of its core design.
-- **Inter-Blockchain Communication (IBC):** While the SDK is designed to be IBC-compatible, the implementation of the `ibc-go` module's Rust equivalent is a separate undertaking.
-- **CometBFT:** We integrate with CometBFT via its ABCI 2.0 interface; a rewrite of the consensus engine itself is out of scope.
-- **WASM Runtime Implementation:** We integrate and build upon the existing `wasmtime` runtime; we are not creating a new WebAssembly runtime.
+Supporting infrastructure:
+- **BLS12-381 threshold signing** for consensus certificates (notarization, finalization)
+- **Ed25519** for validator identity and P2P authentication
+- **`commonware-p2p` (authenticated)** for networking
+- **`commonware-broadcast` (buffered)** for message dissemination
+- **`commonware-storage` (archive)** for persisting finalized blocks and certificates
+- **Block replay** on node restart from the archive to rebuild BaseApp state
 
-## Component Architecture Documentation
+### Block Type
 
-The detailed implementation architecture is documented in component-specific PLAN.md files:
+`GridwayBlock` implements all required Commonware traits:
+- `commonware_consensus::Block` (parent digest reference)
+- `Heightable` (block height)
+- `Digestible` / `Committable` (SHA-256 content hash)
+- `Write` / `Read` (codec serialization)
 
-### Core Components
+Fields: `parent` digest, `height`, `timestamp`, `state_root`, `transactions`.
 
-- **[BaseApp Architecture](crates/gridway-baseapp/PLAN.md)**: WASI microkernel foundation, Virtual Filesystem (VFS), capability-based security model, and transaction processing engine
-- **[Store Architecture](crates/gridway-store/PLAN.md)**: GlobalAppStore state management, JMT (Jellyfish Merkle Tree) implementation, and persistence layer
-- **[Crypto Architecture](crates/gridway-crypto/PLAN.md)**: Cryptographic infrastructure, key management, and signature verification
-- **[Server Architecture](crates/gridway-server/PLAN.md)**: Network layer, gRPC/REST APIs, and ABCI implementation
-- **[Client Architecture](crates/gridway-client/PLAN.md)**: Wallet integration, transaction building, and developer tools
-- **[Types Architecture](crates/gridway-types/PLAN.md)**: Core data structures and minimal protobuf utilities
+### Node Binary
 
-### Architecture Decision Records
+`gridway-node` is the validator binary. It wires together:
+- Commonware tokio runtime
+- Authenticated P2P networking
+- Buffered broadcast engine
+- Simplex consensus engine with random leader election
+- GridwayApp (BaseApp + WASM microkernel)
 
-- **[ADR-001: The Determinism Challenge](docs/architecture/ADR-001-determinism-challenge.md)**: Balancing a Unix API with blockchain consensus requirements
-- **[ADR-002: Observability Architecture](docs/architecture/ADR-002-observability-architecture.md)**: Telemetry and monitoring in a microkernel system
-- **[ADR-003: Ecosystem Integration](docs/architecture/ADR-003-ecosystem-integration.md)**: Compatibility with existing blockchain infrastructure
+Configuration is YAML-based (`NodeConfig`) with Ed25519 private key, BLS threshold share, P2P peers, and storage directory.
 
-## Component Types and Execution Model
+## Crate Architecture
 
-Gridway supports three distinct component types, enabling diverse development patterns:
+```
+gridway (root)
+├── crates/
+│   ├── gridway-consensus/     — Commonware integration (Application, Engine, node binary)
+│   ├── gridway-baseapp/       — WASM microkernel host (ComponentHost, VFS, capabilities)
+│   ├── gridway-store/         — Patricia Merkle Trie + GlobalAppStore + namespaced views
+│   ├── gridway-types/         — GridwayBlock, transaction types, events
+│   ├── gridway-crypto/        — Ed25519 signing/verification, SHA-256, address derivation
+│   ├── gridway-errors/        — Error types
+│   ├── gridway-log/           — Logging/tracing utilities
+│   ├── gridway-math/          — Numeric types (Dec, Int)
+│   ├── gridway-telemetry/     — Metrics instrumentation
+│   └── wasi-modules/          — WASM component source code
+│       ├── bank/              — Bank module (MsgSend, balance queries)
+│       ├── validator/         — TX validation (decode, ed25519 verify, sequence check)
+│       ├── hook/              — Block lifecycle hooks (pre/post execute)
+│       ├── ante-handler/      — Legacy ante handler (superseded by validator)
+│       ├── begin-blocker/     — Legacy begin blocker (superseded by hook)
+│       ├── end-blocker/       — Legacy end blocker (superseded by hook)
+│       ├── tx-decoder/        — Legacy TX decoder (superseded by validator)
+│       └── test-minimal/      — Minimal test component
+├── wit/                       — WIT interface definitions
+│   ├── module.wit             — Domain module interface (handle, query)
+│   ├── kvstore.wit            — KVStore resource interface (get, set, delete, range)
+│   ├── validator.wit          — TX validation interface (validate → validated-tx)
+│   └── hook.wit               — Block hook interface (pre-execute, post-execute)
+└── modules/                   — Compiled .wasm binaries
+    ├── bank_component.wasm
+    ├── hook_component.wasm
+    └── validator_component.wasm
+```
 
-1. **SDK-Style Modules:** Traditional blockchain modules implementing specific interfaces (e.g., `bank`, `staking`)
-2. **Chain-in-Chain Modules:** Full ABCI 2.0 applications running as nested chains within transactions
-3. **Shell-Like Executables:** Simple string-based I/O programs for utilities and scripting
+### Dependency Graph
 
-Components are loaded from the merkle tree filesystem hierarchy:
-- `/sbin/`: Core system components (ante-handler, begin-blocker, end-blocker)
-- `/bin/`: Application modules
-- `/lib/`: Shared libraries and utilities
-- `/home/{module}/`: Module-specific persistent state
-- `/tmp/`: Transaction-scoped temporary storage
-- `/sys/`: System information and runtime state
+```
+gridway-consensus
+  ├── gridway-baseapp
+  │   ├── gridway-store (MerkleStore, GlobalAppStore, KVStore trait)
+  │   ├── gridway-types
+  │   ├── gridway-crypto
+  │   └── gridway-telemetry
+  ├── gridway-types (GridwayBlock)
+  ├── gridway-crypto
+  └── commonware-* (consensus, p2p, broadcast, storage, runtime, ...)
+```
 
-**Important:** The WASI modules included in the repository (e.g., `crates/wasi-modules/`) are reference implementations, not statically linked components. They serve as default options for development and can be completely replaced by governance-uploaded alternatives stored in the merkle tree.
+## WIT Interfaces
 
-## Current State Summary
+WASM modules communicate with the host through four WIT interfaces:
 
-The Gridway SDK has validated core concepts but remains a proof-of-concept. While WASI execution works and individual components exist, they are not integrated into the revolutionary architecture described in this document. The implementation demonstrates feasibility but lacks the persistence, security, and upgradeability required for production use.
+- **`kvstore`** — Namespace-scoped key-value store backed by VFS → MerkleStore. Resource-based: `open-store(name) → store`, then `store.get/set/delete/has/range`.
+- **`module`** — Domain module interface: `handle(context, message) → module-response`. Used by bank and future modules.
+- **`validator`** — TX validation: `validate(tx-context, raw-tx) → validation-result`. Combines decoding, signature verification, and message extraction.
+- **`hook`** — Block lifecycle: `pre-execute(block-context) → hook-result`, `post-execute(block-context, tx-count, total-gas) → hook-result`.
 
-The implementation status of key components:
+## State Store
 
-| Component | Status | Reality |
-|-----------|---------|----------|
-| WASI Microkernel | ⚠️ Partial | Executes WASI modules but not as designed - uses old module approach, not components |
-| Virtual Filesystem | ⚠️ Disconnected | VFS exists but isn't connected to WASI - modules cannot use file operations |
-| Capability Security | ❌ Wrong Model | In-memory only, uses traditional capabilities instead of file descriptors |
-| JMT Storage | ❌ Not Connected | JMT exists but BaseApp uses MemStore - no state persistence |
-| Dynamic Loading | ❌ Not Implemented | Components loaded from filesystem, not merkle storage |
-| API Compatibility | ✅ Maintained | gRPC/REST endpoints match Cosmos SDK standards |
+- **MerkleStore**: Patricia Merkle Trie using Parity's `trie-db` with SHA-256. In-memory backend (`memory-db`). Provides deterministic state root hashes for consensus.
+- **GlobalAppStore**: Wraps a single MerkleStore with namespace isolation. Each namespace (bank, auth, staking, gov) gets a prefixed view.
+- **NamespacedStore**: Implements `KVStore` trait with automatic key prefixing.
+- **VFS**: Mounts NamespacedStores, enforces capabilities, provides file-like operations and direct key access.
 
-Critical architectural gaps that must be addressed:
+The pipeline: WASM module → kvstore WIT → ComponentHost → VFS → NamespacedStore → MerkleStore → trie-db.
 
-| Gap | Priority | Impact |
-|-----|----------|---------|
-| State Persistence | 🔴 Critical | No JMT integration - entire system is in-memory only |
-| Component Storage | 🔴 Critical | Components not stored in merkle tree as designed |
-| VFS-WASI Bridge | 🔴 Critical | Modules cannot access state through file operations |
-| Capability Model | 🔴 Critical | Wrong implementation - not file descriptor based |
-| Resource Limits | 🟡 High | No CPU/memory limits could enable DoS attacks |
-| Developer Tooling | 🟡 High | Limited CLI and SDK support |
+State is in-memory (MemoryDB backend). For persistence across restarts, the consensus layer replays finalized blocks from the Commonware archive. A persistent trie backend (RocksDB/sled) is a future option.
 
-The assessment places the project at **Technology Readiness Level 3-4**: Proof of concept with component validation. The core concepts are validated but the revolutionary architecture remains unimplemented. Specifically:
+## Current Implementation Status
 
-- The system cannot persist state across restarts
-- Components cannot be loaded from or stored in the blockchain
-- The elegant file-based state access model is not functional
-- The capability system doesn't follow the ocap design
+**Working (102 tests passing):**
+- Full WASM execution pipeline: validate_tx → WASM validator (ed25519 verify + sequence check), bank.MsgSend → WASM bank module, hooks → WASM hook module
+- VFS → MerkleStore integration with namespace isolation
+- Deterministic state root hashes from Patricia Merkle Trie
+- `commit()` returns real Merkle root hash
+- Account management (auth namespace) with sequence tracking
+- State snapshot export/import for state sync
+- Commonware Application/VerifyingApplication/Reporter trait implementations
+- Block proposal, verification, and finalization flow
+- Block replay from archive on restart
+- Module governance (store code, install, upgrade)
+- Capability-based access control with delegation
 
-## Future Evolution Pathways
+**Not yet working:**
+- Multi-node testnet (networking not tested end-to-end)
+- Persistent trie backend (in-memory only, relies on block replay)
+- Component storage in Merkle trie (loaded from filesystem)
+- File-descriptor-based capability model (uses path-based capabilities)
+- IBC module
+- Staking/governance modules as WASM components
 
-The WASI microkernel architecture is not just an endpoint but a foundation for significant future evolution, positioning the Gridway SDK to pioneer capabilities beyond those of traditional blockchain platforms.
+## Module Governance
 
-### Evolving the Core Protocol
+The `ModuleGovernance` system enables on-chain module management:
+- `MsgStoreCode` — Store WASM bytecode with metadata (SHA-256 verified)
+- `MsgInstallModule` — Deploy a stored code as a named module with config (message routes, capabilities, gas limits)
+- `MsgUpgradeModule` — Replace a module's code reference while preserving its state
 
-The architecture is designed for future enhancements to its core security and scalability:
+This is a built-in handler, not a WASM module itself. It bridges the gap toward fully governance-controlled component upgrades.
 
-- **Capability Delegation:** Allowing modules to temporarily and securely grant a subset of their rights to other modules
-- **Temporal Capabilities:** Granting permissions that automatically expire after a certain time or number of uses
-- **Hierarchical Permissions:** Creating complex, nested permission structures for advanced applications
+## Design Decisions
 
-Beyond security, the architecture provides a clear path toward a **distributed execution model**. The isolation of modules makes it feasible to explore execution parallelism, where different modules could run concurrently when they have no intersecting state modification.
+1. **WASM-only execution**: No Rust-native fallback for module logic. If a WASM module fails to load, the operation errors. This enforces the microkernel boundary.
 
-### Deepening Interoperability
+2. **Commonware Simplex consensus**: Replaced CometBFT/ABCI with Commonware Library. Provides BFT consensus with BLS threshold signatures, integrated P2P, and archive-based persistence. Cosmos SDK compatibility is not a goal.
 
-While already IBC-compatible, the modular design enables more advanced **cross-chain communication patterns**. Specialized bridge modules could be developed to create high-performance, trust-minimized connections to other ecosystems, and multi-chain applications could be orchestrated with greater ease than on monolithic platforms.
+3. **Patricia Merkle Trie**: Uses `trie-db` (Parity) instead of JMT or IAVL. SHA-256 based, deterministic, with in-memory backend.
 
-## Summary of Critical Architectural Decisions
+4. **Ed25519 + BLS12-381**: Ed25519 for validator identity and TX signatures. BLS12-381 threshold signatures for consensus certificates.
 
-These are the architectural decisions that define Gridway, though most remain unimplemented:
+5. **JSON TX format**: Transactions are JSON-encoded `SignedTx` with ed25519 signatures over canonical body bytes. Simpler than Protobuf/Amino but sufficient for the current stage.
 
-1. **WASI Component Model Architecture:** The foundational choice to implement blockchain logic as dynamically loaded, sandboxed WebAssembly components using WASI 0.2, enabling modularity and multi-language support. *(Partially implemented - uses old WASI module approach)*
-
-2. **Dynamic Component Loading from Merkle Storage:** Components are stored in the merkle tree itself and loaded from well-known paths, enabling governance-controlled upgrades of even core system components without hard forks. *(Not implemented - loads from filesystem)*
-
-3. **Unified GlobalAppStore:** A single merkle tree (using JMT or Merk) replaces the traditional MultiStore, with logical isolation achieved through VFS paths rather than separate stores. *(Not implemented - uses MemStore)*
-
-4. **File Descriptor-Based Capabilities:** Security through unforgeable file descriptors as capability handles, where possession of a descriptor proves access rights. *(Not implemented - uses wrong capability model)*
-
-5. **VFS-Mediated State Access:** All state access through POSIX file operations, making blockchain development intuitive and language-agnostic. *(Not implemented - VFS not connected to WASI)*
-
-6. **CometBFT and ABCI 2.0:** Full integration with modern consensus features. *(Partially implemented)*
-
-7. **Ecosystem API Compatibility:** Strict adherence to existing Cosmos SDK API contracts. *(Implemented)*
+6. **In-memory state with block replay**: State is not persisted directly. On restart, finalized blocks are replayed from the Commonware archive to rebuild state. Snapshot export/import provides an alternative path.

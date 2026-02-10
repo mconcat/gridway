@@ -6,11 +6,13 @@
 //! `HashDB` implementation over RocksDB / sled / etc.
 
 use crate::{Hash, KVStore, Result, StoreError};
-use hash_db::Hasher;
+use crate::persistent::SledBackend;
+use hash_db::{HashDB, Hasher};
 use serde::{Serialize, Deserialize};
 use memory_db::{HashKey, MemoryDB};
 use reference_trie::GenericNoExtensionLayout;
 use sha2::{Digest, Sha256};
+use std::path::Path;
 use trie_db::{DBValue, Trie, TrieDBBuilder, TrieDBMutBuilder, TrieMut};
 
 // ─── SHA-256 Hasher for hash-db ──────────────────────────────────────────────
@@ -95,6 +97,8 @@ pub struct MerkleStore {
     /// Store name (for logging / debugging).
     #[allow(dead_code)]
     name: String,
+    /// Optional sled persistence backend.
+    persistence: Option<SledBackend>,
 }
 
 impl MerkleStore {
@@ -114,7 +118,139 @@ impl MerkleStore {
             root,
             version: 0,
             name,
+            persistence: None,
         }
+    }
+
+    /// Create a new `MerkleStore` with sled persistence at the given path.
+    ///
+    /// If the database already contains state, it will be loaded automatically.
+    /// Otherwise, an empty trie is initialized and persisted.
+    pub fn with_persistence(name: String, path: &Path) -> Result<Self> {
+        let backend = SledBackend::open(path)?;
+
+        let store = if backend.has_state()? {
+            // Load existing state from disk
+            let mut store = Self::new(name);
+            store.persistence = Some(backend);
+            store.load_from_disk()?;
+            store
+        } else {
+            // Fresh database — initialize empty trie and persist it
+            let mut store = Self::new(name);
+            store.persistence = Some(backend);
+            store.flush_to_disk()?;
+            store
+        };
+
+        Ok(store)
+    }
+
+    /// Flush the current memory-db state to sled.
+    ///
+    /// Writes all trie node entries from memory-db to the sled backend,
+    /// along with the current root hash and version.
+    pub fn flush_to_disk(&self) -> Result<()> {
+        let backend = self.persistence.as_ref()
+            .ok_or_else(|| StoreError::BackendError("no persistence backend configured".into()))?;
+
+        // Extract all entries from memory-db by iterating its internal data.
+        // memory-db stores data as HashMap<hash, (value, rc)> — we serialize
+        // each entry as key=hash_bytes, value=node_bytes.
+        //
+        // We use the HashDB::keys() method to get all keys, then get() each one.
+        let keys = self.db.keys();
+        let mut entries: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(keys.len());
+
+        for (key, rc) in &keys {
+            if *rc > 0 {
+                // Only persist entries with positive reference count
+                if let Some(value) = HashDB::<Sha256Hasher, _>::get(&self.db, key, hash_db::EMPTY_PREFIX) {
+                    let entry_key = key.as_ref().to_vec();
+                    entries.push((entry_key, value));
+                }
+            }
+        }
+
+        // Clear and rewrite all nodes
+        backend.clear_nodes()?;
+        let refs: Vec<(&[u8], &[u8])> = entries.iter()
+            .map(|(k, v)| (k.as_slice(), v.as_slice()))
+            .collect();
+        backend.write_nodes(&refs)?;
+
+        // Store metadata
+        backend.set_root(&self.root)?;
+        backend.set_version(self.version)?;
+        backend.flush()?;
+
+        log::debug!(
+            "flushed {} trie nodes to disk (root={}, version={})",
+            entries.len(),
+            hex::encode(&self.root),
+            self.version
+        );
+
+        Ok(())
+    }
+
+    /// Load state from the sled backend into memory-db.
+    ///
+    /// Replaces the current in-memory state entirely. Returns the
+    /// restored root hash.
+    pub fn load_from_disk(&mut self) -> Result<[u8; 32]> {
+        let backend = self.persistence.as_ref()
+            .ok_or_else(|| StoreError::BackendError("no persistence backend configured".into()))?;
+
+        let root = backend.get_root()?
+            .ok_or_else(|| StoreError::BackendError("no root hash in sled database".into()))?;
+        let version = backend.get_version()?
+            .unwrap_or(0);
+        let entries = backend.read_all_nodes()?;
+
+        // Rebuild memory-db from sled entries
+        let mut db = GridwayMemoryDB::default();
+
+        // First initialize an empty trie to set up the DB properly
+        let mut new_root = Hash::default();
+        {
+            let _ = TrieDBMutBuilder::<GridwayTrieLayout>::new(&mut db, &mut new_root).build();
+        }
+
+        // Insert all nodes from disk into memory-db using emplace
+        for (key, value) in &entries {
+            if key.len() == 32 {
+                let mut hash = [0u8; 32];
+                hash.copy_from_slice(key);
+                HashDB::<Sha256Hasher, _>::emplace(&mut db, hash, hash_db::EMPTY_PREFIX, value.clone());
+            }
+        }
+
+        self.db = db;
+        self.root = root;
+        self.version = version;
+
+        log::info!(
+            "loaded {} trie nodes from disk (root={}, version={})",
+            entries.len(),
+            hex::encode(&self.root),
+            self.version
+        );
+
+        Ok(root)
+    }
+
+    /// Flush pending state and cleanly close the sled backend.
+    pub fn close(&self) -> Result<()> {
+        if self.persistence.is_some() {
+            self.flush_to_disk()?;
+        }
+        Ok(())
+    }
+
+    /// Returns whether persistence is enabled.
+    pub fn has_persistence(&self) -> bool {
+        self.persistence.is_some()
     }
 
     /// Get the current version number.
@@ -135,6 +271,12 @@ impl MerkleStore {
     /// current root.
     pub fn commit(&mut self) -> Result<Hash> {
         self.version += 1;
+
+        // Auto-flush to disk if persistence is enabled
+        if self.persistence.is_some() {
+            self.flush_to_disk()?;
+        }
+
         Ok(self.root)
     }
 
@@ -434,5 +576,172 @@ mod tests {
         assert_eq!(store.get(b"key_0042").unwrap(), Some(b"val_42".to_vec()));
         assert_eq!(store.get(b"key_0099").unwrap(), Some(b"val_99".to_vec()));
         assert!(store.get(b"key_0100").unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_persistent_store_basic() {
+        let tmp = TempDir::new().unwrap();
+        let mut store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+        assert!(store.has_persistence());
+
+        store.set(b"key1", b"value1").unwrap();
+        let hash = store.commit().unwrap();
+        assert_ne!(hash, [0u8; 32]);
+        assert_eq!(store.version(), 1);
+        assert_eq!(store.get(b"key1").unwrap(), Some(b"value1".to_vec()));
+    }
+
+    #[test]
+    fn test_persistent_store_survives_reopen() {
+        let tmp = TempDir::new().unwrap();
+        let root_after_commit;
+
+        // Write data and commit
+        {
+            let mut store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+            store.set(b"alice", b"1000").unwrap();
+            store.set(b"bob", b"2000").unwrap();
+            root_after_commit = store.commit().unwrap();
+            assert_eq!(store.version(), 1);
+        }
+
+        // Reopen and verify data survives
+        {
+            let store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+            assert_eq!(store.version(), 1);
+            assert_eq!(store.root_hash(), root_after_commit);
+            assert_eq!(store.get(b"alice").unwrap(), Some(b"1000".to_vec()));
+            assert_eq!(store.get(b"bob").unwrap(), Some(b"2000".to_vec()));
+        }
+    }
+
+    #[test]
+    fn test_persistent_store_multiple_commits() {
+        let tmp = TempDir::new().unwrap();
+        let root_v2;
+
+        {
+            let mut store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+            store.set(b"key1", b"v1").unwrap();
+            store.commit().unwrap(); // version 1
+
+            store.set(b"key2", b"v2").unwrap();
+            root_v2 = store.commit().unwrap(); // version 2
+            assert_eq!(store.version(), 2);
+        }
+
+        // Reopen — should have the latest state
+        {
+            let store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+            assert_eq!(store.version(), 2);
+            assert_eq!(store.root_hash(), root_v2);
+            assert_eq!(store.get(b"key1").unwrap(), Some(b"v1".to_vec()));
+            assert_eq!(store.get(b"key2").unwrap(), Some(b"v2".to_vec()));
+        }
+    }
+
+    #[test]
+    fn test_persistent_store_delete_survives_reopen() {
+        let tmp = TempDir::new().unwrap();
+
+        {
+            let mut store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+            store.set(b"key1", b"value1").unwrap();
+            store.set(b"key2", b"value2").unwrap();
+            store.commit().unwrap();
+
+            store.delete(b"key1").unwrap();
+            store.commit().unwrap();
+        }
+
+        {
+            let store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+            assert!(store.get(b"key1").unwrap().is_none());
+            assert_eq!(store.get(b"key2").unwrap(), Some(b"value2".to_vec()));
+        }
+    }
+
+    #[test]
+    fn test_persistent_store_snapshot_compatibility() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create persistent store with data
+        let mut store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+        store.set(b"bank:alice", b"1000").unwrap();
+        store.set(b"bank:bob", b"2000").unwrap();
+        store.commit().unwrap();
+
+        // Export snapshot should still work
+        let snapshot = store.to_snapshot();
+        assert_eq!(snapshot.entries.len(), 2);
+        assert_eq!(snapshot.version, 1);
+
+        // Import snapshot into a non-persistent store should also work
+        let mut mem_store = MerkleStore::new("mem".to_string());
+        mem_store.from_snapshot(&snapshot).unwrap();
+        assert_eq!(mem_store.root_hash(), store.root_hash());
+    }
+
+    #[test]
+    fn test_persistent_store_many_keys() {
+        let tmp = TempDir::new().unwrap();
+        let expected_root;
+
+        {
+            let mut store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+            for i in 0..100u32 {
+                store.set(
+                    format!("key_{i:04}").as_bytes(),
+                    format!("val_{i}").as_bytes(),
+                ).unwrap();
+            }
+            expected_root = store.commit().unwrap();
+        }
+
+        {
+            let store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+            assert_eq!(store.root_hash(), expected_root);
+            assert_eq!(store.get(b"key_0042").unwrap(), Some(b"val_42".to_vec()));
+            assert_eq!(store.get(b"key_0099").unwrap(), Some(b"val_99".to_vec()));
+            assert!(store.get(b"key_0100").unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn test_in_memory_mode_still_works() {
+        // Ensure in-memory mode (no persistence) is not broken
+        let mut store = MerkleStore::new("test".to_string());
+        assert!(!store.has_persistence());
+
+        store.set(b"key1", b"value1").unwrap();
+        let hash = store.commit().unwrap();
+        assert_ne!(hash, [0u8; 32]);
+        assert_eq!(store.get(b"key1").unwrap(), Some(b"value1".to_vec()));
+    }
+
+    #[test]
+    fn test_explicit_flush_and_load() {
+        let tmp = TempDir::new().unwrap();
+
+        {
+            let mut store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
+            store.set(b"x", b"1").unwrap();
+
+            // Explicit flush (without commit — version stays 0 but data is saved)
+            store.flush_to_disk().unwrap();
+        }
+        // Drop the first store so sled releases the lock
+
+        // Reopen and verify data is present
+        {
+            let store2 = MerkleStore::with_persistence("test2".to_string(), tmp.path()).unwrap();
+            assert_eq!(store2.get(b"x").unwrap(), Some(b"1".to_vec()));
+        }
     }
 }

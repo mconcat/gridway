@@ -9,14 +9,22 @@
 
 use gridway_consensus::{
     application::GridwayApp,
-    config::{NodeConfig, Peers},
+    config::{GenesisConfig, NodeConfig, Peers},
     engine,
     types::{PublicKey, EPOCH, NAMESPACE},
+    mempool::MempoolError,
 };
 use gridway_baseapp::{BaseApp, Account};
 
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::{get, post},
+    Json, Router,
+};
 use clap::{Arg, Command};
-use commonware_codec::{Decode, DecodeExt, Encode};
+use commonware_codec::{Decode, DecodeExt};
 use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
     bls12381::primitives::{group, sharing::Sharing, variant::MinSig},
@@ -28,14 +36,16 @@ use commonware_runtime::{tokio, Metrics, RayonPoolSpawner, Runner};
 use commonware_utils::{from_hex_formatted, ordered::Set, union_unique, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
+use serde::Serialize;
 use std::{
-    io::{BufRead, BufReader, Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU32,
     path::PathBuf,
     str::FromStr,
+    sync::Arc,
     time::Duration,
 };
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, Level};
 
 const PENDING_CHANNEL: u64 = 0;
@@ -57,236 +67,296 @@ const MAX_FETCH_SIZE: usize = 512 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
-/// Fixed seeds for deterministic genesis keypairs (testing only!)
-const ALICE_SEED: u64 = 1;
-const BOB_SEED: u64 = 2;
-
 // ============================================================================
-// HTTP API server for transaction submission and balance queries
+// Genesis state loading
 // ============================================================================
 
-/// Start a simple HTTP server for TX submission and balance queries.
+/// Apply genesis state from a GenesisConfig to a BaseApp.
 ///
-/// Runs in a separate OS thread (std::thread) so it doesn't interfere with
-/// the commonware async runtime. Uses blocking I/O — perfectly fine for a
-/// demo/testnet API that handles a handful of requests.
-fn start_http_server(addr: SocketAddr, app: GridwayApp) {
-    std::thread::spawn(move || {
-        let listener = match std::net::TcpListener::bind(addr) {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!("Failed to bind HTTP server on {}: {}", addr, e);
-                return;
-            }
-        };
-        // Use println here since tracing may not be set up on this thread
-        println!("HTTP API listening on http://{}", addr);
-        println!("  POST /tx                        — submit transaction");
-        println!("  GET  /balance/{{address}}/{{denom}}  — query balance");
-        println!("  GET  /account/{{address}}           — query account info");
-        println!("  GET  /status                       — node status & state root");
-        println!("  GET  /snapshot                     — full state snapshot (JSON)");
+/// Sets accounts and balances for all genesis accounts, then commits
+/// to produce the initial state root. Returns the genesis state root hash.
+fn apply_genesis(baseapp: &mut BaseApp, genesis: &GenesisConfig) -> Result<[u8; 32], String> {
+    for account in &genesis.accounts {
+        baseapp
+            .set_account(
+                &account.address,
+                &Account {
+                    public_key: account.public_key_hex.clone(),
+                    sequence: 0,
+                },
+            )
+            .map_err(|e| format!("set_account for {}: {e}", account.address))?;
 
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
-            let app = app.clone();
-            std::thread::spawn(move || {
-                if let Err(e) = handle_http_request(stream, &app) {
-                    eprintln!("HTTP request error: {}", e);
-                }
-            });
-        }
-    });
-}
-
-fn handle_http_request(
-    mut stream: std::net::TcpStream,
-    app: &GridwayApp,
-) -> std::io::Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-
-    let mut reader = BufReader::new(&stream);
-
-    // Read request line
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
-    if parts.len() < 2 {
-        let resp = http_response(400, "application/json", r#"{"error":"bad request"}"#);
-        stream.write_all(resp.as_bytes())?;
-        return Ok(());
-    }
-
-    let method = parts[0];
-    let path = parts[1];
-
-    // Read headers
-    let mut content_length: usize = 0;
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        if line.trim().is_empty() {
-            break;
-        }
-        if let Some(val) = line.to_lowercase().strip_prefix("content-length:") {
-            content_length = val.trim().parse().unwrap_or(0);
+        for balance in &account.balances {
+            baseapp
+                .set_balance(&account.address, &balance.denom, balance.amount)
+                .map_err(|e| {
+                    format!(
+                        "set_balance for {} {}: {e}",
+                        account.address, balance.denom
+                    )
+                })?;
         }
     }
 
-    // Read body
-    let body = if content_length > 0 {
-        let mut buf = vec![0u8; content_length];
-        reader.read_exact(&mut buf)?;
-        buf
-    } else {
-        Vec::new()
-    };
-
-    // Route request
-    let response = match (method, path) {
-        ("POST", "/tx") => handle_submit_tx(app, &body),
-        ("GET", p) if p.starts_with("/balance/") => handle_balance_query(app, p),
-        ("GET", p) if p.starts_with("/account/") => handle_account_query(app, p),
-        ("GET", "/health") => http_response(200, "application/json", r#"{"status":"ok"}"#),
-        ("GET", "/status") => handle_status(app),
-        ("GET", "/snapshot") => handle_snapshot(app),
-        _ => http_response(404, "application/json", r#"{"error":"not found"}"#),
-    };
-
-    stream.write_all(response.as_bytes())?;
-    Ok(())
+    let root = baseapp
+        .commit()
+        .map_err(|e| format!("genesis commit: {e}"))?;
+    Ok(root)
 }
 
-fn handle_submit_tx(app: &GridwayApp, body: &[u8]) -> String {
+// ============================================================================
+// HTTP API — axum-based server
+// ============================================================================
+
+/// JSON response for successful tx submission.
+#[derive(Serialize)]
+struct SubmitTxResponse {
+    status: String,
+    tx_hash: String,
+}
+
+/// JSON response for balance queries.
+#[derive(Serialize)]
+struct BalanceResponse {
+    address: String,
+    denom: String,
+    balance: u64,
+}
+
+/// JSON response for account queries.
+#[derive(Serialize)]
+struct AccountResponse {
+    address: String,
+    public_key: String,
+    sequence: u64,
+}
+
+/// JSON response for node status.
+#[derive(Serialize)]
+struct StatusResponse {
+    chain_id: String,
+    state_root: String,
+    pending_tx_count: usize,
+}
+
+/// JSON response for health check.
+#[derive(Serialize)]
+struct HealthResponse {
+    status: String,
+}
+
+/// JSON error response — unified format for all errors.
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+/// Convenience: build an error JSON response with a status code.
+fn error_response(status: StatusCode, msg: impl Into<String>) -> Response {
+    (status, Json(ErrorResponse { error: msg.into() })).into_response()
+}
+
+/// POST /tx — submit a transaction.
+async fn handle_submit_tx(
+    State(app): State<Arc<GridwayApp>>,
+    body: axum::body::Bytes,
+) -> Response {
     if body.is_empty() {
-        return http_response(400, "application/json", r#"{"error":"empty body"}"#);
+        return error_response(StatusCode::BAD_REQUEST, "empty body");
     }
 
-    // Validate it's at least valid JSON
-    if serde_json::from_slice::<serde_json::Value>(body).is_err() {
-        return http_response(400, "application/json", r#"{"error":"invalid JSON"}"#);
+    // Validate JSON
+    if serde_json::from_slice::<serde_json::Value>(&body).is_err() {
+        return error_response(StatusCode::BAD_REQUEST, "invalid JSON");
     }
 
-    app.submit_tx(body.to_vec());
-    http_response(200, "application/json", r#"{"status":"submitted"}"#)
+    match app.submit_tx(body.to_vec()) {
+        Ok(tx_hash) => (
+            StatusCode::OK,
+            Json(SubmitTxResponse {
+                status: "submitted".to_string(),
+                tx_hash,
+            }),
+        )
+            .into_response(),
+        Err(MempoolError::TxTooLarge { size, max }) => error_response(
+            StatusCode::BAD_REQUEST,
+            format!("transaction too large: {} bytes (max {})", size, max),
+        ),
+        Err(MempoolError::DuplicateTx { tx_hash }) => error_response(
+            StatusCode::BAD_REQUEST,
+            format!("duplicate transaction: {}", tx_hash),
+        ),
+        Err(MempoolError::MempoolFull { reason }) => error_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("mempool full: {}", reason),
+        ),
+        Err(MempoolError::LockPoisoned) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal error: mempool lock poisoned",
+        ),
+    }
 }
 
-fn handle_balance_query(app: &GridwayApp, path: &str) -> String {
-    let stripped = path.trim_start_matches("/balance/");
-    let parts: Vec<&str> = stripped.splitn(2, '/').collect();
-    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
-        return http_response(
-            400,
-            "application/json",
-            r#"{"error":"use /balance/{address}/{denom}"}"#,
-        );
-    }
-
-    let address = parts[0];
-    let denom = parts[1];
-
+/// GET /balance/:address/:denom — query balance.
+async fn handle_balance_query(
+    State(app): State<Arc<GridwayApp>>,
+    Path((address, denom)): Path<(String, String)>,
+) -> Response {
     let balance = match app.baseapp().lock() {
-        Ok(baseapp) => baseapp.get_balance(address, denom).unwrap_or(0),
-        Err(_) => {
-            return http_response(
-                500,
-                "application/json",
-                r#"{"error":"internal: lock poisoned"}"#,
-            );
-        }
+        Ok(baseapp) => baseapp.get_balance(&address, &denom).unwrap_or(0),
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal: lock poisoned"),
     };
 
-    let body = format!(
-        r#"{{"address":"{}","denom":"{}","balance":{}}}"#,
-        address, denom, balance
-    );
-    http_response(200, "application/json", &body)
+    (
+        StatusCode::OK,
+        Json(BalanceResponse {
+            address,
+            denom,
+            balance,
+        }),
+    )
+        .into_response()
 }
 
-fn handle_account_query(app: &GridwayApp, path: &str) -> String {
-    let address = path.trim_start_matches("/account/");
-    if address.is_empty() {
-        return http_response(
-            400,
-            "application/json",
-            r#"{"error":"use /account/{address}"}"#,
-        );
-    }
-
+/// GET /account/:address — query account info.
+async fn handle_account_query(
+    State(app): State<Arc<GridwayApp>>,
+    Path(address): Path<String>,
+) -> Response {
     let account = match app.baseapp().lock() {
-        Ok(baseapp) => baseapp.get_account(address),
-        Err(_) => {
-            return http_response(
-                500,
-                "application/json",
-                r#"{"error":"internal: lock poisoned"}"#,
-            );
-        }
+        Ok(baseapp) => baseapp.get_account(&address),
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal: lock poisoned"),
     };
 
     match account {
-        Some(acct) => {
-            let body = format!(
-                r#"{{"address":"{}","public_key":"{}","sequence":{}}}"#,
-                address, acct.public_key, acct.sequence
-            );
-            http_response(200, "application/json", &body)
-        }
-        None => {
-            let body = format!(r#"{{"error":"account not found: {}"}}"#, address);
-            http_response(404, "application/json", &body)
-        }
+        Some(acct) => (
+            StatusCode::OK,
+            Json(AccountResponse {
+                address,
+                public_key: acct.public_key,
+                sequence: acct.sequence,
+            }),
+        )
+            .into_response(),
+        None => error_response(
+            StatusCode::NOT_FOUND,
+            format!("account not found: {}", address),
+        ),
     }
 }
 
-fn handle_status(app: &GridwayApp) -> String {
+/// GET /status — node status.
+async fn handle_status(State(app): State<Arc<GridwayApp>>) -> Response {
     match app.baseapp().lock() {
         Ok(baseapp) => {
             let root = hex::encode(baseapp.last_state_root());
-            let body = format!(r#"{{"state_root":"{}"}}"#, root);
-            http_response(200, "application/json", &body)
+            let chain_id = app.chain_id().to_string();
+            let pending_tx_count = app.pending_tx_count();
+            (
+                StatusCode::OK,
+                Json(StatusResponse {
+                    chain_id,
+                    state_root: root,
+                    pending_tx_count,
+                }),
+            )
+                .into_response()
         }
-        Err(_) => http_response(500, "application/json", r#"{"error":"lock failed"}"#),
+        Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "lock failed"),
     }
 }
 
-fn handle_snapshot(app: &GridwayApp) -> String {
+/// GET /snapshot — full state snapshot.
+async fn handle_snapshot(State(app): State<Arc<GridwayApp>>) -> Response {
     match app.baseapp().lock() {
-        Ok(baseapp) => {
-            match baseapp.export_snapshot() {
-                Ok(snapshot) => {
-                    match serde_json::to_string(&snapshot) {
-                        Ok(json) => http_response(200, "application/json", &json),
-                        Err(e) => http_response(
-                            500,
-                            "application/json",
-                            &format!(r#"{{"error":"serialize: {e}"}}"#),
-                        ),
-                    }
-                }
-                Err(e) => http_response(
-                    500,
-                    "application/json",
-                    &format!(r#"{{"error":"export: {e}"}}"#),
+        Ok(baseapp) => match baseapp.export_snapshot() {
+            Ok(snapshot) => match serde_json::to_string(&snapshot) {
+                Ok(json) => (
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    json,
+                )
+                    .into_response(),
+                Err(e) => error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("serialize: {e}"),
                 ),
-            }
-        }
-        Err(_) => http_response(500, "application/json", r#"{"error":"lock failed"}"#),
+            },
+            Err(e) => error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("export: {e}"),
+            ),
+        },
+        Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "lock failed"),
     }
 }
 
-fn http_response(status: u16, content_type: &str, body: &str) -> String {
-    let status_text = match status {
-        200 => "OK",
-        400 => "Bad Request",
-        404 => "Not Found",
-        500 => "Internal Server Error",
-        _ => "Unknown",
-    };
-    format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{}",
-        status, status_text, content_type, body.len(), body
-    )
+/// GET /health — health check.
+async fn handle_health() -> impl IntoResponse {
+    Json(HealthResponse {
+        status: "ok".to_string(),
+    })
+}
+
+/// Build the axum Router with all endpoints.
+fn build_router(app: GridwayApp) -> Router {
+    let shared_state = Arc::new(app);
+
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    Router::new()
+        .route("/tx", post(handle_submit_tx))
+        .route("/balance/{address}/{denom}", get(handle_balance_query))
+        .route("/account/{address}", get(handle_account_query))
+        .route("/status", get(handle_status))
+        .route("/snapshot", get(handle_snapshot))
+        .route("/health", get(handle_health))
+        .layer(cors)
+        .with_state(shared_state)
+}
+
+/// Start the HTTP API server on a separate OS thread with its own tokio runtime.
+///
+/// This avoids conflicts with commonware's internal tokio runtime.
+fn start_http_server(addr: SocketAddr, app: GridwayApp) {
+    std::thread::spawn(move || {
+        let rt = match ::tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("Failed to create tokio runtime for HTTP server: {}", e);
+                return;
+            }
+        };
+
+        rt.block_on(async move {
+            let router = build_router(app);
+
+            let listener = match ::tokio::net::TcpListener::bind(addr).await {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("Failed to bind HTTP server on {}: {}", addr, e);
+                    return;
+                }
+            };
+
+            println!("HTTP API listening on http://{}", addr);
+            println!("  POST /tx                        — submit transaction");
+            println!("  GET  /balance/{{address}}/{{denom}}  — query balance");
+            println!("  GET  /account/{{address}}           — query account info");
+            println!("  GET  /status                       — node status & state root");
+            println!("  GET  /snapshot                     — full state snapshot (JSON)");
+            println!("  GET  /health                       — health check");
+
+            if let Err(e) = axum::serve(listener, router).await {
+                eprintln!("HTTP server error: {}", e);
+            }
+        });
+    });
 }
 
 // ============================================================================
@@ -299,35 +369,117 @@ fn main() {
         .about("Validator for a gridway chain.")
         .arg(Arg::new("peers").long("peers").required(true))
         .arg(Arg::new("config").long("config").required(true))
+        .arg(Arg::new("genesis").long("genesis").required(true)
+            .help("Path to genesis.yaml containing initial chain state"))
         .arg(Arg::new("snapshot")
             .long("snapshot")
             .help("Path or URL to state snapshot JSON file for fast bootstrap"))
         .get_matches();
 
     // Load peers file
-    let peers_file = matches.get_one::<String>("peers").unwrap();
-    let peers_content = std::fs::read_to_string(peers_file).expect("Could not read peers file");
-    let peers: Peers =
-        serde_yaml::from_str(&peers_content).expect("Could not parse peers file");
+    let peers_file = match matches.get_one::<String>("peers") {
+        Some(f) => f,
+        None => {
+            eprintln!("Missing required argument: --peers");
+            std::process::exit(1);
+        }
+    };
+    let peers_content = match std::fs::read_to_string(peers_file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Could not read peers file '{}': {}", peers_file, e);
+            std::process::exit(1);
+        }
+    };
+    let peers: Peers = match serde_yaml::from_str(&peers_content) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Could not parse peers file: {}", e);
+            std::process::exit(1);
+        }
+    };
     let peer_map: std::collections::HashMap<PublicKey, SocketAddr> = peers
         .addresses
         .into_iter()
         .map(|peer| {
-            let key = from_hex_formatted(&peer.0).expect("Could not parse peer key");
-            let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+            let key = match from_hex_formatted(&peer.0) {
+                Some(k) => k,
+                None => {
+                    eprintln!("Could not parse peer key '{}'", peer.0);
+                    std::process::exit(1);
+                }
+            };
+            let key = match PublicKey::decode(key.as_ref()) {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!("Peer key is invalid '{}': {}", peer.0, e);
+                    std::process::exit(1);
+                }
+            };
             (key, peer.1)
         })
         .collect();
 
     // Load config
-    let config_file = matches.get_one::<String>("config").unwrap();
-    let config_content =
-        std::fs::read_to_string(config_file).expect("Could not read config file");
-    let config: NodeConfig =
-        serde_yaml::from_str(&config_content).expect("Could not parse config file");
-    let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
-    let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
+    let config_file = match matches.get_one::<String>("config") {
+        Some(f) => f,
+        None => {
+            eprintln!("Missing required argument: --config");
+            std::process::exit(1);
+        }
+    };
+    let config_content = match std::fs::read_to_string(config_file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Could not read config file '{}': {}", config_file, e);
+            std::process::exit(1);
+        }
+    };
+    let config: NodeConfig = match serde_yaml::from_str(&config_content) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Could not parse config file: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let key = match from_hex_formatted(&config.private_key) {
+        Some(k) => k,
+        None => {
+            eprintln!("Could not parse private key");
+            std::process::exit(1);
+        }
+    };
+    let signer = match PrivateKey::decode(key.as_ref()) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Private key is invalid: {}", e);
+            std::process::exit(1);
+        }
+    };
     let public_key = signer.public_key();
+
+    // Load genesis config
+    let genesis_file = match matches.get_one::<String>("genesis") {
+        Some(f) => f,
+        None => {
+            eprintln!("Missing required argument: --genesis");
+            std::process::exit(1);
+        }
+    };
+    let genesis_content = match std::fs::read_to_string(genesis_file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Could not read genesis file '{}': {}", genesis_file, e);
+            std::process::exit(1);
+        }
+    };
+    let genesis: GenesisConfig = match serde_yaml::from_str(&genesis_content) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("Could not parse genesis file: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // Capture tx_port and snapshot path before config is moved into the async block
     let tx_port = config.tx_port;
@@ -344,7 +496,13 @@ fn main() {
     // Start runtime
     executor.start(|context| async move {
         // Configure telemetry
-        let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
+        let log_level = match Level::from_str(&config.log_level) {
+            Ok(l) => l,
+            Err(e) => {
+                error!("Invalid log level '{}': {}", config.log_level, e);
+                return;
+            }
+        };
         tokio::telemetry::init(
             context.with_label("telemetry"),
             tokio::telemetry::Logging {
@@ -365,115 +523,199 @@ fn main() {
         // Build bootstrapper list
         let mut bootstrappers = Vec::new();
         for bootstrapper_hex in &config.bootstrappers {
-            let key =
-                from_hex_formatted(bootstrapper_hex).expect("Could not parse bootstrapper key");
-            let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
-            let socket = peer_map
-                .get(&key)
-                .expect("Could not find bootstrapper in peers");
+            let key = match from_hex_formatted(bootstrapper_hex) {
+                Some(k) => k,
+                None => {
+                    error!("Could not parse bootstrapper key '{}'", bootstrapper_hex);
+                    return;
+                }
+            };
+            let key = match PublicKey::decode(key.as_ref()) {
+                Ok(k) => k,
+                Err(e) => {
+                    error!("Bootstrapper key is invalid '{}': {}", bootstrapper_hex, e);
+                    return;
+                }
+            };
+            let socket = match peer_map.get(&key) {
+                Some(s) => s,
+                None => {
+                    error!("Could not find bootstrapper in peers: {}", bootstrapper_hex);
+                    return;
+                }
+            };
             bootstrappers.push((key, Ingress::Socket(*socket)));
         }
 
-        let ip = peer_map
-            .get(&public_key)
-            .expect("Could not find self in peers")
-            .ip();
+        let ip = match peer_map.get(&public_key) {
+            Some(addr) => addr.ip(),
+            None => {
+                error!("Could not find self in peers");
+                return;
+            }
+        };
         info!(peers = peer_keys.len(), "loaded peers");
 
         // Parse BLS keys
-        let share = from_hex_formatted(&config.share).expect("Could not parse share");
-        let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
-        let polynomial =
-            from_hex_formatted(&config.polynomial).expect("Could not parse polynomial");
-        let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(peers_u32))
-            .expect("Polynomial is invalid");
+        let share = match from_hex_formatted(&config.share) {
+            Some(s) => s,
+            None => {
+                error!("Could not parse share hex");
+                return;
+            }
+        };
+        let share = match group::Share::decode(share.as_ref()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Share is invalid: {}", e);
+                return;
+            }
+        };
+        let polynomial = match from_hex_formatted(&config.polynomial) {
+            Some(p) => p,
+            None => {
+                error!("Could not parse polynomial hex");
+                return;
+            }
+        };
+        let polynomial = match Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(peers_u32)) {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Polynomial is invalid: {}", e);
+                return;
+            }
+        };
         let identity = polynomial.public();
         info!(
             ?public_key,
             ?identity,
             ?ip,
             port = config.port,
+            chain_id = %genesis.chain_id,
             "loaded config"
         );
 
         // ====================================================================
-        // Create BaseApp with genesis state using deterministic keypairs
+        // Create BaseApp with persistent state (if directory configured)
         // ====================================================================
-        let mut baseapp = BaseApp::new("gridway".to_string()).expect("Failed to create BaseApp");
+        let state_db_path = PathBuf::from(&config.directory).join("state");
+        let mut baseapp = match BaseApp::with_persistence("gridway".to_string(), &state_db_path) {
+            Ok(b) => {
+                info!(path = %state_db_path.display(), "created BaseApp with sled persistence");
+                b
+            }
+            Err(e) => {
+                error!("Failed to create persistent BaseApp at {}: {}", state_db_path.display(), e);
+                info!("Falling back to in-memory BaseApp");
+                match BaseApp::new("gridway".to_string()) {
+                    Ok(b) => b,
+                    Err(e2) => {
+                        error!("Failed to create in-memory BaseApp: {}", e2);
+                        return;
+                    }
+                }
+            }
+        };
 
-        // Generate deterministic keypairs from fixed seeds
-        let alice_key = commonware_cryptography::ed25519::PrivateKey::from_seed(ALICE_SEED);
-        let alice_pk = alice_key.public_key();
-        let alice_addr = gridway_crypto::Address::from_public_key(&alice_pk).to_hex();
+        // Check if state was loaded from disk
+        let loaded_from_disk = {
+            let store = baseapp.global_store().get_store();
+            let store = store.lock().unwrap();
+            store.has_persistence() && store.version() > 0
+        };
 
-        let bob_key = commonware_cryptography::ed25519::PrivateKey::from_seed(BOB_SEED);
-        let bob_pk = bob_key.public_key();
-        let bob_addr = gridway_crypto::Address::from_public_key(&bob_pk).to_hex();
+        if loaded_from_disk {
+            let state_root = baseapp.last_state_root();
+            let version = {
+                let store = baseapp.global_store().get_store();
+                let store = store.lock().unwrap();
+                store.version()
+            };
+            info!(
+                state_root = hex::encode(state_root),
+                version = version,
+                "loaded persisted state from disk"
+            );
+        }
 
-        // Print genesis keypair info for test script use
-        println!("=== GENESIS KEYPAIRS ===");
-        println!("ALICE_PRIVKEY={}", hex::encode(alice_key.encode()));
-        println!("ALICE_PUBKEY={}", hex::encode(alice_pk.as_ref()));
-        println!("ALICE_ADDRESS={}", alice_addr);
-        println!("BOB_PRIVKEY={}", hex::encode(bob_key.encode()));
-        println!("BOB_PUBKEY={}", hex::encode(bob_pk.as_ref()));
-        println!("BOB_ADDRESS={}", bob_addr);
-        println!("========================");
+        // Apply genesis state (always needed to ensure accounts are set up)
+        let genesis_root = match apply_genesis(&mut baseapp, &genesis) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to apply genesis state: {}", e);
+                return;
+            }
+        };
 
-        // Create accounts
-        baseapp.set_account(&alice_addr, &Account {
-            public_key: hex::encode(alice_pk.as_ref()),
-            sequence: 0,
-        }).expect("Failed to set alice account");
-        baseapp.set_account(&bob_addr, &Account {
-            public_key: hex::encode(bob_pk.as_ref()),
-            sequence: 0,
-        }).expect("Failed to set bob account");
-
-        // Set genesis balances using hex addresses
-        baseapp.set_balance(&alice_addr, "ugridway", 1_000_000).expect("Failed to set alice balance");
-        baseapp.set_balance(&bob_addr, "ugridway", 0).expect("Failed to set bob balance");
-
-        // Commit genesis state so the Merkle root reflects initial balances
-        let genesis_root = baseapp.commit().expect("Failed to commit genesis state");
         info!(
             state_root = hex::encode(genesis_root),
-            alice_address = %alice_addr,
-            bob_address = %bob_addr,
-            "committed genesis state (alice: 1_000_000 ugridway, bob: 0 ugridway)"
+            accounts = genesis.accounts.len(),
+            chain_id = %genesis.chain_id,
+            "committed genesis state"
         );
+
+        // Print genesis account info
+        println!("=== GENESIS ACCOUNTS ===");
+        for account in &genesis.accounts {
+            let balance_str: Vec<String> = account
+                .balances
+                .iter()
+                .map(|b| format!("{} {}", b.amount, b.denom))
+                .collect();
+            println!(
+                "  ADDRESS={} PUBKEY={} BALANCES=[{}]",
+                account.address,
+                account.public_key_hex,
+                balance_str.join(", ")
+            );
+        }
+        println!("========================");
 
         // If a snapshot was provided, import it (overrides genesis state)
         let skip_replay = if let Some(ref snap_path) = snapshot_path {
             info!(path = %snap_path, "loading state snapshot for fast bootstrap");
             let snapshot_data = if snap_path.starts_with("http://") || snap_path.starts_with("https://") {
-                // Download from URL using a simple blocking HTTP GET
-                // (we're still in the async block but this runs once at startup)
-                std::process::Command::new("curl")
+                match std::process::Command::new("curl")
                     .args(["-s", "-f", snap_path])
                     .output()
-                    .map(|o| {
-                        if o.status.success() {
-                            Ok(o.stdout)
-                        } else {
-                            Err(format!("curl failed with status {}", o.status))
-                        }
-                    })
-                    .unwrap_or_else(|e| Err(format!("curl error: {e}")))
-                    .expect("Failed to download snapshot")
+                {
+                    Ok(o) if o.status.success() => o.stdout,
+                    Ok(o) => {
+                        error!("Failed to download snapshot: curl failed with status {}", o.status);
+                        return;
+                    }
+                    Err(e) => {
+                        error!("Failed to download snapshot: curl error: {}", e);
+                        return;
+                    }
+                }
             } else {
-                std::fs::read(snap_path).expect("Failed to read snapshot file")
+                match std::fs::read(snap_path) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        error!("Failed to read snapshot file '{}': {}", snap_path, e);
+                        return;
+                    }
+                }
             };
 
-            let snapshot: gridway_store::merkle::StateSnapshot =
-                serde_json::from_slice(&snapshot_data).expect("Failed to parse snapshot JSON");
+            let snapshot: gridway_store::merkle::StateSnapshot = match serde_json::from_slice(&snapshot_data) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Failed to parse snapshot JSON: {}", e);
+                    return;
+                }
+            };
             info!(
                 entries = snapshot.entries.len(),
                 version = snapshot.version,
                 root_hash = hex::encode(&snapshot.root_hash),
                 "importing snapshot"
             );
-            baseapp.import_snapshot(&snapshot).expect("Failed to import snapshot");
+            if let Err(e) = baseapp.import_snapshot(&snapshot) {
+                error!("Failed to import snapshot: {}", e);
+                return;
+            }
             info!(
                 state_root = hex::encode(baseapp.last_state_root()),
                 "snapshot imported successfully"
@@ -483,8 +725,8 @@ fn main() {
             false
         };
 
-        // Create the application wrapper
-        let gridway_app = GridwayApp::new(baseapp);
+        // Create the application wrapper with chain_id from genesis
+        let gridway_app = GridwayApp::new(baseapp, genesis.chain_id.clone());
 
         // ====================================================================
         // Start HTTP API server (if tx_port configured)
@@ -554,9 +796,13 @@ fn main() {
         let p2p = network.start();
 
         // Create parallel strategy
-        let strategy = context
-            .create_strategy(NZUsize!(config.signature_threads))
-            .unwrap();
+        let strategy = match context.create_strategy(NZUsize!(config.signature_threads)) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create parallel strategy: {:?}", e);
+                return;
+            }
+        };
 
         // Create engine (pass the pre-configured GridwayApp)
         let engine_cfg = engine::Config {
@@ -583,11 +829,17 @@ fn main() {
             strategy,
             skip_replay,
         };
-        let engine = engine::Engine::new(
+        let engine = match engine::Engine::new(
             context.with_label("engine"),
             engine_cfg,
             gridway_app,
-        ).await;
+        ).await {
+            Ok(e) => e,
+            Err(e) => {
+                error!("Failed to create consensus engine: {}", e);
+                return;
+            }
+        };
 
         // Create marshal resolver
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
@@ -609,6 +861,7 @@ fn main() {
             engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);
 
         info!("Gridway node started");
+        info!("  Chain ID: {}", genesis.chain_id);
         info!("  Consensus: commonware-consensus (simplex BFT)");
         info!("  Networking: commonware-p2p (authenticated)");
         info!("  Execution: gridway-baseapp (WASM microkernel + native bank)");
