@@ -211,7 +211,10 @@ impl Mempool {
             }
             let tx_size = tx.len();
             if self.total_size + tx_size > self.config.max_total_size {
-                tracing::warn!("requeue: total size limit reached, dropping tx {}", hex::encode(hash));
+                tracing::warn!(
+                    "requeue: total size limit reached, dropping tx {}",
+                    hex::encode(hash)
+                );
                 continue;
             }
             self.seen_hashes.insert(hash);
@@ -341,7 +344,8 @@ mod tests {
         pool.drain(10);
 
         // Same tx should be allowed after drain
-        pool.submit(vec![1, 2, 3]).expect("resubmit after drain should succeed");
+        pool.submit(vec![1, 2, 3])
+            .expect("resubmit after drain should succeed");
         assert_eq!(pool.len(), 1);
     }
 
@@ -404,14 +408,21 @@ mod tests {
 
     #[test]
     fn test_error_display() {
-        let err = MempoolError::TxTooLarge { size: 500, max: 100 };
+        let err = MempoolError::TxTooLarge {
+            size: 500,
+            max: 100,
+        };
         assert!(err.to_string().contains("500"));
         assert!(err.to_string().contains("100"));
 
-        let err = MempoolError::DuplicateTx { tx_hash: "abc".to_string() };
+        let err = MempoolError::DuplicateTx {
+            tx_hash: "abc".to_string(),
+        };
         assert!(err.to_string().contains("abc"));
 
-        let err = MempoolError::MempoolFull { reason: "test".to_string() };
+        let err = MempoolError::MempoolFull {
+            reason: "test".to_string(),
+        };
         assert!(err.to_string().contains("test"));
 
         let err = MempoolError::LockPoisoned;

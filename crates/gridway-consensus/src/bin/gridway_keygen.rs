@@ -89,15 +89,14 @@ fn cmd_sign(matches: &clap::ArgMatches) {
 
     // Decode private key
     let key_bytes = hex::decode(key_hex).expect("Invalid private key hex");
-    let private_key = ed25519::PrivateKey::decode(key_bytes.as_ref())
-        .expect("Invalid ed25519 private key");
+    let private_key =
+        ed25519::PrivateKey::decode(key_bytes.as_ref()).expect("Invalid ed25519 private key");
     let public_key = private_key.public_key();
 
     // Parse and re-serialize body for canonical JSON
-    let body_value: serde_json::Value = serde_json::from_str(body_json_str)
-        .expect("Invalid body JSON");
-    let canonical_body = serde_json::to_string(&body_value)
-        .expect("Failed to serialize body");
+    let body_value: serde_json::Value =
+        serde_json::from_str(body_json_str).expect("Invalid body JSON");
+    let canonical_body = serde_json::to_string(&body_value).expect("Failed to serialize body");
 
     // Sign
     let signature = gridway_crypto::sign_tx_body(&private_key, canonical_body.as_bytes());
@@ -116,8 +115,8 @@ fn cmd_address(matches: &clap::ArgMatches) {
     let pubkey_hex = matches.get_one::<String>("pubkey").unwrap();
 
     let pk_bytes = hex::decode(pubkey_hex).expect("Invalid public key hex");
-    let public_key = ed25519::PublicKey::decode(pk_bytes.as_ref())
-        .expect("Invalid ed25519 public key");
+    let public_key =
+        ed25519::PublicKey::decode(pk_bytes.as_ref()).expect("Invalid ed25519 public key");
     let address = Address::from_public_key(&public_key).to_hex();
 
     let output = serde_json::json!({

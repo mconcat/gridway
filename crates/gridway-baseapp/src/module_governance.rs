@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -74,8 +73,6 @@ pub struct MsgStoreCode {
     pub metadata: CodeMetadata,
 }
 
-
-
 /// Message to install a new module
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MsgInstallModule {
@@ -88,8 +85,6 @@ pub struct MsgInstallModule {
     /// Initial migration data (if needed)
     pub init_data: Option<Vec<u8>>,
 }
-
-
 
 /// Message to upgrade an existing module
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,8 +100,6 @@ pub struct MsgUpgradeModule {
     /// Whether to force upgrade (skip compatibility checks)
     pub force: bool,
 }
-
-
 
 /// WASM code metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,18 +224,24 @@ impl ModuleGovernance {
     pub fn load_registries(&self) -> Result<()> {
         // Load code registry
         if let Ok(Some(data)) = self.vfs.read_key("system", b"code_registry") {
-            let registry: HashMap<u64, StoredCode> = serde_json::from_slice(&data)
-                .map_err(|e| GovernanceError::StorageError(
-                    format!("Failed to deserialize code registry: {e}")
-                ))?;
+            let registry: HashMap<u64, StoredCode> =
+                serde_json::from_slice(&data).map_err(|e| {
+                    GovernanceError::StorageError(format!(
+                        "Failed to deserialize code registry: {e}"
+                    ))
+                })?;
             let max_id = registry.keys().copied().max().unwrap_or(0);
             {
-                let mut code_reg = self.code_registry.lock()
+                let mut code_reg = self
+                    .code_registry
+                    .lock()
                     .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
                 *code_reg = registry;
             }
             {
-                let mut next_id = self.next_code_id.lock()
+                let mut next_id = self
+                    .next_code_id
+                    .lock()
                     .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
                 *next_id = max_id + 1;
             }
@@ -252,12 +251,16 @@ impl ModuleGovernance {
         // Load module registry
         if let Ok(Some(data)) = self.vfs.read_key("system", b"module_registry") {
             let registry: HashMap<String, InstalledModule> = serde_json::from_slice(&data)
-                .map_err(|e| GovernanceError::StorageError(
-                    format!("Failed to deserialize module registry: {e}")
-                ))?;
+                .map_err(|e| {
+                    GovernanceError::StorageError(format!(
+                        "Failed to deserialize module registry: {e}"
+                    ))
+                })?;
             let count = registry.len();
             {
-                let mut mod_reg = self.module_registry.lock()
+                let mut mod_reg = self
+                    .module_registry
+                    .lock()
                     .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
                 *mod_reg = registry;
             }
@@ -536,7 +539,10 @@ impl ModuleGovernance {
 
     /// Get current block timestamp (deterministic, set by execute_block)
     fn current_timestamp(&self) -> u64 {
-        *self.block_timestamp.lock().unwrap_or_else(|e| e.into_inner())
+        *self
+            .block_timestamp
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// Create ModuleConfig from install config and stored code
@@ -645,12 +651,18 @@ impl ModuleGovernance {
         let serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed:: {e}")))?;
 
-        self.vfs.write_key("system", b"code_registry", &serialized)
-            .map_err(|e| GovernanceError::StorageError(
-                format!("Failed to persist code registry to VFS: {e}")
-            ))?;
+        self.vfs
+            .write_key("system", b"code_registry", &serialized)
+            .map_err(|e| {
+                GovernanceError::StorageError(format!(
+                    "Failed to persist code registry to VFS: {e}"
+                ))
+            })?;
 
-        debug!("Persisted code registry with {} entries to VFS", registry.len());
+        debug!(
+            "Persisted code registry with {} entries to VFS",
+            registry.len()
+        );
         Ok(())
     }
 
@@ -664,12 +676,18 @@ impl ModuleGovernance {
         let serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed:: {e}")))?;
 
-        self.vfs.write_key("system", b"module_registry", &serialized)
-            .map_err(|e| GovernanceError::StorageError(
-                format!("Failed to persist module registry to VFS: {e}")
-            ))?;
+        self.vfs
+            .write_key("system", b"module_registry", &serialized)
+            .map_err(|e| {
+                GovernanceError::StorageError(format!(
+                    "Failed to persist module registry to VFS: {e}"
+                ))
+            })?;
 
-        debug!("Persisted module registry with {} entries to VFS", registry.len());
+        debug!(
+            "Persisted module registry with {} entries to VFS",
+            registry.len()
+        );
         Ok(())
     }
 
@@ -737,8 +755,8 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_test_governance() -> (ModuleGovernance, TempDir) {
-        use gridway_store::MemStore;
         use crate::vfs::Capability;
+        use gridway_store::MemStore;
         use std::path::PathBuf;
 
         let temp_dir = TempDir::new().unwrap();
@@ -750,7 +768,8 @@ mod tests {
             Arc::new(std::sync::Mutex::new(MemStore::new()));
         vfs.mount_store("system".to_string(), system_store).unwrap();
         let system_path = PathBuf::from("/system");
-        vfs.add_capability(Capability::Read(system_path.clone())).unwrap();
+        vfs.add_capability(Capability::Read(system_path.clone()))
+            .unwrap();
         vfs.add_capability(Capability::Write(system_path)).unwrap();
 
         let router = Arc::new(ModuleRouter::new(wasi_host, vfs.clone()));

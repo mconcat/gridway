@@ -242,6 +242,7 @@ mod tests {
     fn test_sim_state_verify_balances() {
         let (app, accounts, sim) = setup_genesis(2, 5000);
         // SimState should match BaseApp at genesis
-        sim.verify_balances(&app).expect("balances should match at genesis");
+        sim.verify_balances(&app)
+            .expect("balances should match at genesis");
     }
 }

@@ -21,7 +21,7 @@ pub mod module_router;
 pub mod vfs;
 pub mod wasi_host;
 
-use gridway_store::{GlobalAppStore, MerkleStore, KVStore};
+use gridway_store::{GlobalAppStore, KVStore, MerkleStore};
 use gridway_types::{Event, EventAttribute, TxResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -150,8 +150,9 @@ impl BaseApp {
         let global_store = Arc::new(GlobalAppStore::new(merkle_store));
 
         for ns in ["bank", "auth", "staking", "gov", "system"] {
-            global_store.register_namespace(ns, false)
-                .map_err(|e| BaseAppError::Store(format!("Failed to register {ns} namespace: {e}")))?;
+            global_store.register_namespace(ns, false).map_err(|e| {
+                BaseAppError::Store(format!("Failed to register {ns} namespace: {e}"))
+            })?;
         }
 
         let wasi_host = Arc::new(WasiHost::new().map_err(|e| {
@@ -172,7 +173,9 @@ impl BaseApp {
         let module_router = Arc::new(ModuleRouter::new(wasi_host.clone(), vfs.clone()));
         let governance_authority = "gridway_governance".to_string();
         let module_governance = Arc::new(ModuleGovernance::new(
-            module_router.clone(), vfs.clone(), governance_authority,
+            module_router.clone(),
+            vfs.clone(),
+            governance_authority,
         ));
 
         // Load persisted governance registries from VFS
@@ -191,15 +194,25 @@ impl BaseApp {
 
         let committed_checkpoint = {
             let store_arc = global_store.get_store();
-            let store = store_arc.lock()
-                .map_err(|e| BaseAppError::Store(format!("Failed to lock store for initial checkpoint: {e}")))?;
+            let store = store_arc.lock().map_err(|e| {
+                BaseAppError::Store(format!("Failed to lock store for initial checkpoint: {e}"))
+            })?;
             Some(store.checkpoint())
         };
 
         Ok(Self {
-            name, context: None, wasi_host, component_host, vfs,
-            module_router, capability_manager, module_governance, module_paths,
-            global_store, last_state_root: [0u8; 32], committed_checkpoint,
+            name,
+            context: None,
+            wasi_host,
+            component_host,
+            vfs,
+            module_router,
+            capability_manager,
+            module_governance,
+            module_paths,
+            global_store,
+            last_state_root: [0u8; 32],
+            committed_checkpoint,
         })
     }
 
@@ -211,14 +224,15 @@ impl BaseApp {
     ///
     /// Keeps full backward compatibility — use `new()` for in-memory only.
     pub fn with_persistence(name: String, db_path: &Path) -> Result<Self> {
-        let global_store = Arc::new(
-            GlobalAppStore::with_persistence(db_path)
-                .map_err(|e| BaseAppError::Store(format!("Failed to create persistent store: {e}")))?
-        );
+        let global_store =
+            Arc::new(GlobalAppStore::with_persistence(db_path).map_err(|e| {
+                BaseAppError::Store(format!("Failed to create persistent store: {e}"))
+            })?);
 
         for ns in ["bank", "auth", "staking", "gov", "system"] {
-            global_store.register_namespace(ns, false)
-                .map_err(|e| BaseAppError::Store(format!("Failed to register {ns} namespace: {e}")))?;
+            global_store.register_namespace(ns, false).map_err(|e| {
+                BaseAppError::Store(format!("Failed to register {ns} namespace: {e}"))
+            })?;
         }
 
         let wasi_host = Arc::new(WasiHost::new().map_err(|e| {
@@ -239,7 +253,9 @@ impl BaseApp {
         let module_router = Arc::new(ModuleRouter::new(wasi_host.clone(), vfs.clone()));
         let governance_authority = "gridway_governance".to_string();
         let module_governance = Arc::new(ModuleGovernance::new(
-            module_router.clone(), vfs.clone(), governance_authority,
+            module_router.clone(),
+            vfs.clone(),
+            governance_authority,
         ));
 
         // Load persisted governance registries from VFS
@@ -259,29 +275,48 @@ impl BaseApp {
         // Recover state root from the loaded persistent store
         let last_state_root = {
             let store = global_store.get_store();
-            let store = store.lock()
+            let store = store
+                .lock()
                 .map_err(|e| BaseAppError::Store(format!("Failed to lock store: {e}")))?;
             store.root_hash()
         };
 
         let committed_checkpoint = {
             let store_arc2 = global_store.get_store();
-            let store2 = store_arc2.lock()
-                .map_err(|e| BaseAppError::Store(format!("Failed to lock store for initial checkpoint: {e}")))?;
+            let store2 = store_arc2.lock().map_err(|e| {
+                BaseAppError::Store(format!("Failed to lock store for initial checkpoint: {e}"))
+            })?;
             Some(store2.checkpoint())
         };
 
         Ok(Self {
-            name, context: None, wasi_host, component_host, vfs,
-            module_router, capability_manager, module_governance, module_paths,
-            global_store, last_state_root, committed_checkpoint,
+            name,
+            context: None,
+            wasi_host,
+            component_host,
+            vfs,
+            module_router,
+            capability_manager,
+            module_governance,
+            module_paths,
+            global_store,
+            last_state_root,
+            committed_checkpoint,
         })
     }
 
-    pub fn module_governance(&self) -> &Arc<ModuleGovernance> { &self.module_governance }
-    pub fn module_router(&self) -> &Arc<ModuleRouter> { &self.module_router }
-    pub fn global_store(&self) -> &Arc<GlobalAppStore> { &self.global_store }
-    pub fn vfs(&self) -> &Arc<VirtualFilesystem> { &self.vfs }
+    pub fn module_governance(&self) -> &Arc<ModuleGovernance> {
+        &self.module_governance
+    }
+    pub fn module_router(&self) -> &Arc<ModuleRouter> {
+        &self.module_router
+    }
+    pub fn global_store(&self) -> &Arc<GlobalAppStore> {
+        &self.global_store
+    }
+    pub fn vfs(&self) -> &Arc<VirtualFilesystem> {
+        &self.vfs
+    }
 
     fn find_module_base_path() -> String {
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -313,10 +348,14 @@ impl BaseApp {
         "modules".to_string()
     }
 
-    fn setup_stores(vfs: &Arc<VirtualFilesystem>, global_store: &Arc<GlobalAppStore>) -> Result<()> {
+    fn setup_stores(
+        vfs: &Arc<VirtualFilesystem>,
+        global_store: &Arc<GlobalAppStore>,
+    ) -> Result<()> {
         use crate::vfs::Capability;
         for ns in ["auth", "bank", "staking", "gov", "system"] {
-            let ns_store = global_store.get_namespace(ns)
+            let ns_store = global_store
+                .get_namespace(ns)
                 .map_err(|e| BaseAppError::Store(format!("Failed to get {ns} namespace: {e}")))?;
             let store_arc: Arc<std::sync::Mutex<dyn KVStore>> =
                 Arc::new(std::sync::Mutex::new(ns_store));
@@ -324,9 +363,13 @@ impl BaseApp {
                 .map_err(|e| BaseAppError::Store(format!("Failed to mount {ns} store: {e}")))?;
             let ns_path = PathBuf::from(format!("/{ns}"));
             vfs.add_capability(Capability::Read(ns_path.clone()))
-                .map_err(|e| BaseAppError::Store(format!("Failed to add read cap for {ns}: {e}")))?;
+                .map_err(|e| {
+                    BaseAppError::Store(format!("Failed to add read cap for {ns}: {e}"))
+                })?;
             vfs.add_capability(Capability::Write(ns_path))
-                .map_err(|e| BaseAppError::Store(format!("Failed to add write cap for {ns}: {e}")))?;
+                .map_err(|e| {
+                    BaseAppError::Store(format!("Failed to add write cap for {ns}: {e}"))
+                })?;
         }
         Ok(())
     }
@@ -339,7 +382,8 @@ impl BaseApp {
         let key = format!("account_{address}");
         let value = serde_json::to_string(account)
             .map_err(|e| BaseAppError::Store(format!("Failed to serialize account: {e}")))?;
-        self.global_store.set_namespaced("auth", key.as_bytes(), value.as_bytes())
+        self.global_store
+            .set_namespaced("auth", key.as_bytes(), value.as_bytes())
             .map_err(|e| BaseAppError::Store(format!("Failed to set account: {e}")))?;
         Ok(())
     }
@@ -356,7 +400,8 @@ impl BaseApp {
     }
 
     pub fn increment_sequence(&mut self, address: &str) -> Result<()> {
-        let mut account = self.get_account(address)
+        let mut account = self
+            .get_account(address)
             .ok_or_else(|| BaseAppError::AuthError(format!("account not found: {address}")))?;
         account.sequence += 1;
         self.set_account(address, &account)
@@ -369,10 +414,11 @@ impl BaseApp {
     /// Store WASM bytecode in VFS under the "system" namespace with key `code/{name}`.
     fn store_wasm_to_vfs(&self, name: &str, bytes: &[u8]) -> Result<()> {
         let key = format!("code/{name}");
-        self.vfs.write_key("system", key.as_bytes(), bytes)
-            .map_err(|e| BaseAppError::Store(
-                format!("Failed to store WASM for {name} in VFS: {e}")
-            ))?;
+        self.vfs
+            .write_key("system", key.as_bytes(), bytes)
+            .map_err(|e| {
+                BaseAppError::Store(format!("Failed to store WASM for {name} in VFS: {e}"))
+            })?;
         log::info!("Stored {name} WASM ({} bytes) to VFS", bytes.len());
         Ok(())
     }
@@ -402,15 +448,15 @@ impl BaseApp {
             bytes
         } else {
             // Fall back to filesystem (genesis / migration)
-            let wasm_path = self.module_paths.get(name)
-                .ok_or_else(|| BaseAppError::ModuleNotFound(
-                    format!("{name} module path not configured")
-                ))?;
+            let wasm_path = self.module_paths.get(name).ok_or_else(|| {
+                BaseAppError::ModuleNotFound(format!("{name} module path not configured"))
+            })?;
 
-            let bytes = std::fs::read(wasm_path)
-                .map_err(|e| BaseAppError::ModuleNotFound(
-                    format!("failed to read {name}.wasm at {wasm_path}: {e}")
-                ))?;
+            let bytes = std::fs::read(wasm_path).map_err(|e| {
+                BaseAppError::ModuleNotFound(format!(
+                    "failed to read {name}.wasm at {wasm_path}: {e}"
+                ))
+            })?;
 
             // Store to VFS for future loads (genesis initialization)
             if let Err(e) = self.store_wasm_to_vfs(name, &bytes) {
@@ -426,7 +472,9 @@ impl BaseApp {
             _ => 10_000_000,
         };
 
-        let path = self.module_paths.get(name)
+        let path = self
+            .module_paths
+            .get(name)
             .map(|p| p.clone().into())
             .unwrap_or_else(|| format!("vfs://system/wasm/{name}").into());
 
@@ -437,10 +485,11 @@ impl BaseApp {
             gas_limit,
         };
 
-        self.component_host.load_component(name, &component_bytes, info)
-            .map_err(|e| BaseAppError::ExecutionError(
-                format!("failed to load {name} component: {e}")
-            ))
+        self.component_host
+            .load_component(name, &component_bytes, info)
+            .map_err(|e| {
+                BaseAppError::ExecutionError(format!("failed to load {name} component: {e}"))
+            })
     }
 
     // =========================================================================
@@ -461,56 +510,72 @@ impl BaseApp {
         self.load_wasm_module("validator", ComponentType::Validator)?;
 
         // Execute through ComponentHost → wasmtime → WIT bindings → VFS kvstore
-        let result = self.component_host.execute_validator(
-            "validator", height, timestamp, chain_id, tx_bytes,
-        ).map_err(|e| BaseAppError::ExecutionError(
-            format!("validator WASM execution error: {e}")
-        ))?;
+        let result = self
+            .component_host
+            .execute_validator("validator", height, timestamp, chain_id, tx_bytes)
+            .map_err(|e| {
+                BaseAppError::ExecutionError(format!("validator WASM execution error: {e}"))
+            })?;
 
         if !result.success {
             return Err(BaseAppError::InvalidTx(
-                result.error.unwrap_or_else(|| "validation failed".into())
+                result.error.unwrap_or_else(|| "validation failed".into()),
             ));
         }
 
         // Extract ValidatedTx from ComponentResult
-        let data = result.data
+        let data = result
+            .data
             .ok_or_else(|| BaseAppError::InvalidTx("validator returned no data".into()))?;
 
-        let tx_data = data.get("tx")
+        let tx_data = data
+            .get("tx")
             .and_then(|v| if v.is_null() { None } else { Some(v) })
             .ok_or_else(|| BaseAppError::InvalidTx("validator returned no tx".into()))?;
 
-        let sender = tx_data.get("sender")
+        let sender = tx_data
+            .get("sender")
             .and_then(|v| v.as_str())
             .ok_or_else(|| BaseAppError::InvalidTx("missing sender in validated tx".into()))?
             .to_string();
 
-        let sequence = tx_data.get("sequence")
+        let sequence = tx_data
+            .get("sequence")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
 
-        let gas_limit = tx_data.get("gas_limit")
+        let gas_limit = tx_data
+            .get("gas_limit")
             .and_then(|v| v.as_u64())
             .unwrap_or(200_000);
 
-        let messages = tx_data.get("messages")
+        let messages = tx_data
+            .get("messages")
             .and_then(|v| v.as_array())
             .ok_or_else(|| BaseAppError::InvalidTx("missing messages in validated tx".into()))?
             .iter()
             .map(|m| {
                 Ok(TxMessage {
-                    type_url: m.get("type_url").and_then(|v| v.as_str())
+                    type_url: m
+                        .get("type_url")
+                        .and_then(|v| v.as_str())
                         .ok_or_else(|| BaseAppError::InvalidTx("message missing type_url".into()))?
                         .to_string(),
-                    data: m.get("data").and_then(|v| v.as_str())
+                    data: m
+                        .get("data")
+                        .and_then(|v| v.as_str())
                         .ok_or_else(|| BaseAppError::InvalidTx("message missing data".into()))?
                         .to_string(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(ValidatedTx { sender, messages, sequence, gas_limit })
+        Ok(ValidatedTx {
+            sender,
+            messages,
+            sequence,
+            gas_limit,
+        })
     }
 
     // =========================================================================
@@ -521,15 +586,18 @@ impl BaseApp {
     fn run_hook_pre(&self, height: u64, timestamp: u64, chain_id: &str) -> Result<Vec<Event>> {
         self.load_wasm_module("hook", ComponentType::Hook)?;
 
-        let result = self.component_host.execute_hook_pre(
-            "hook", height, timestamp, chain_id, None,
-        ).map_err(|e| BaseAppError::ExecutionError(
-            format!("hook pre-execute WASM error: {e}")
-        ))?;
+        let result = self
+            .component_host
+            .execute_hook_pre("hook", height, timestamp, chain_id, None)
+            .map_err(|e| {
+                BaseAppError::ExecutionError(format!("hook pre-execute WASM error: {e}"))
+            })?;
 
         if !result.success {
             return Err(BaseAppError::ExecutionError(
-                result.error.unwrap_or_else(|| "hook pre-execute failed".into())
+                result
+                    .error
+                    .unwrap_or_else(|| "hook pre-execute failed".into()),
             ));
         }
 
@@ -538,20 +606,29 @@ impl BaseApp {
 
     /// Run post-execute hook via WASM. Errors if hook WASM not found.
     fn run_hook_post(
-        &self, height: u64, timestamp: u64, chain_id: &str,
-        tx_count: u32, total_gas: u64,
+        &self,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+        tx_count: u32,
+        total_gas: u64,
     ) -> Result<Vec<Event>> {
         self.load_wasm_module("hook", ComponentType::Hook)?;
 
-        let result = self.component_host.execute_hook_post(
-            "hook", height, timestamp, chain_id, None, tx_count, total_gas,
-        ).map_err(|e| BaseAppError::ExecutionError(
-            format!("hook post-execute WASM error: {e}")
-        ))?;
+        let result = self
+            .component_host
+            .execute_hook_post(
+                "hook", height, timestamp, chain_id, None, tx_count, total_gas,
+            )
+            .map_err(|e| {
+                BaseAppError::ExecutionError(format!("hook post-execute WASM error: {e}"))
+            })?;
 
         if !result.success {
             return Err(BaseAppError::ExecutionError(
-                result.error.unwrap_or_else(|| "hook post-execute failed".into())
+                result
+                    .error
+                    .unwrap_or_else(|| "hook post-execute failed".into()),
             ));
         }
 
@@ -570,15 +647,19 @@ impl BaseApp {
                 return Ok(module_name.to_string());
             }
         }
-        Err(BaseAppError::ExecutionError(
-            format!("cannot resolve module from type_url: {type_url}")
-        ))
+        Err(BaseAppError::ExecutionError(format!(
+            "cannot resolve module from type_url: {type_url}"
+        )))
     }
 
     /// Dispatch a message to the appropriate WASM module.
     fn dispatch_message(
-        &self, sender: &str, msg: &TxMessage,
-        height: u64, timestamp: u64, chain_id: &str,
+        &self,
+        sender: &str,
+        msg: &TxMessage,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
     ) -> Result<(u64, Vec<Event>)> {
         let module_name = self.resolve_module(&msg.type_url)?;
 
@@ -591,12 +672,21 @@ impl BaseApp {
         // All other modules: WASM dispatch (no fallback)
         self.load_wasm_module(&module_name, ComponentType::Module)?;
 
-        let result = self.component_host.execute_module(
-            &module_name, height, timestamp, chain_id,
-            &msg.type_url, &msg.data, sender, 100_000,
-        ).map_err(|e| BaseAppError::ExecutionError(
-            format!("{module_name} WASM module error: {e}")
-        ))?;
+        let result = self
+            .component_host
+            .execute_module(
+                &module_name,
+                height,
+                timestamp,
+                chain_id,
+                &msg.type_url,
+                &msg.data,
+                sender,
+                100_000,
+            )
+            .map_err(|e| {
+                BaseAppError::ExecutionError(format!("{module_name} WASM module error: {e}"))
+            })?;
 
         log::info!(
             "{module_name} WASM execute_module result: {:?}",
@@ -606,16 +696,17 @@ impl BaseApp {
         if result.success {
             Ok((result.gas_used, Self::parse_component_events(&result.data)))
         } else {
-            Err(BaseAppError::TxFailed(
-                result.error.unwrap_or_else(|| format!("{module_name} WASM execution failed"))
-            ))
+            Err(BaseAppError::TxFailed(result.error.unwrap_or_else(|| {
+                format!("{module_name} WASM execution failed")
+            })))
         }
     }
 
     /// Handle governance messages (built-in — not a WASM module).
     fn handle_governance_msg(&self, msg: &TxMessage) -> Result<(u64, Vec<Event>)> {
-        let msg_value: serde_json::Value = serde_json::from_str(&msg.data)
-            .map_err(|e| BaseAppError::InvalidTx(format!("invalid governance message data: {e}")))?;
+        let msg_value: serde_json::Value = serde_json::from_str(&msg.data).map_err(|e| {
+            BaseAppError::InvalidTx(format!("invalid governance message data: {e}"))
+        })?;
 
         let msg_name = msg.type_url.split('.').nth(1).unwrap_or("");
 
@@ -624,45 +715,66 @@ impl BaseApp {
                 let store_msg: MsgStoreCode = serde_json::from_value(msg_value)
                     .map_err(|e| BaseAppError::InvalidTx(format!("decode MsgStoreCode: {e}")))?;
                 match self.module_governance.handle_store_code(store_msg) {
-                    Ok(code_id) => Ok((50_000, vec![
-                        Event::new("store_code", vec![EventAttribute::new("code_id", code_id.to_string())])
-                    ])),
+                    Ok(code_id) => Ok((
+                        50_000,
+                        vec![Event::new(
+                            "store_code",
+                            vec![EventAttribute::new("code_id", code_id.to_string())],
+                        )],
+                    )),
                     Err(e) => Err(BaseAppError::TxFailed(format!("store_code failed: {e}"))),
                 }
             }
             "MsgInstallModule" => {
-                let install_msg: MsgInstallModule = serde_json::from_value(msg_value)
-                    .map_err(|e| BaseAppError::InvalidTx(format!("decode MsgInstallModule: {e}")))?;
+                let install_msg: MsgInstallModule =
+                    serde_json::from_value(msg_value).map_err(|e| {
+                        BaseAppError::InvalidTx(format!("decode MsgInstallModule: {e}"))
+                    })?;
                 let name = install_msg.config.name.clone();
                 let code_id = install_msg.code_id;
                 match self.module_governance.handle_install_module(install_msg) {
-                    Ok(_) => Ok((100_000, vec![
-                        Event::new("install_module", vec![
-                            EventAttribute::new("module_name", &name),
-                            EventAttribute::new("code_id", code_id.to_string()),
-                        ])
-                    ])),
-                    Err(e) => Err(BaseAppError::TxFailed(format!("install_module failed: {e}"))),
+                    Ok(_) => Ok((
+                        100_000,
+                        vec![Event::new(
+                            "install_module",
+                            vec![
+                                EventAttribute::new("module_name", &name),
+                                EventAttribute::new("code_id", code_id.to_string()),
+                            ],
+                        )],
+                    )),
+                    Err(e) => Err(BaseAppError::TxFailed(format!(
+                        "install_module failed: {e}"
+                    ))),
                 }
             }
             "MsgUpgradeModule" => {
-                let upgrade_msg: MsgUpgradeModule = serde_json::from_value(msg_value)
-                    .map_err(|e| BaseAppError::InvalidTx(format!("decode MsgUpgradeModule: {e}")))?;
+                let upgrade_msg: MsgUpgradeModule =
+                    serde_json::from_value(msg_value).map_err(|e| {
+                        BaseAppError::InvalidTx(format!("decode MsgUpgradeModule: {e}"))
+                    })?;
                 let mname = upgrade_msg.module_name.clone();
                 let new_code_id = upgrade_msg.new_code_id;
                 match self.module_governance.handle_upgrade_module(upgrade_msg) {
-                    Ok(_) => Ok((150_000, vec![
-                        Event::new("upgrade_module", vec![
-                            EventAttribute::new("module_name", &mname),
-                            EventAttribute::new("new_code_id", new_code_id.to_string()),
-                        ])
-                    ])),
-                    Err(e) => Err(BaseAppError::TxFailed(format!("upgrade_module failed: {e}"))),
+                    Ok(_) => Ok((
+                        150_000,
+                        vec![Event::new(
+                            "upgrade_module",
+                            vec![
+                                EventAttribute::new("module_name", &mname),
+                                EventAttribute::new("new_code_id", new_code_id.to_string()),
+                            ],
+                        )],
+                    )),
+                    Err(e) => Err(BaseAppError::TxFailed(format!(
+                        "upgrade_module failed: {e}"
+                    ))),
                 }
             }
-            _ => Err(BaseAppError::ExecutionError(
-                format!("unknown governance message: {}", msg.type_url)
-            ))
+            _ => Err(BaseAppError::ExecutionError(format!(
+                "unknown governance message: {}",
+                msg.type_url
+            ))),
         }
     }
 
@@ -676,14 +788,33 @@ impl BaseApp {
             if let Some(evt_array) = data.get("events").and_then(|e| e.as_array()) {
                 for evt in evt_array {
                     events.push(Event {
-                        r#type: evt.get("event_type").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                        attributes: evt.get("attributes").and_then(|a| a.as_array()).map(|attrs| {
-                            attrs.iter().map(|a| EventAttribute {
-                                key: a.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string(),
-                                value: a.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                                index: true,
-                            }).collect()
-                        }).unwrap_or_default(),
+                        r#type: evt
+                            .get("event_type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        attributes: evt
+                            .get("attributes")
+                            .and_then(|a| a.as_array())
+                            .map(|attrs| {
+                                attrs
+                                    .iter()
+                                    .map(|a| EventAttribute {
+                                        key: a
+                                            .get("key")
+                                            .and_then(|k| k.as_str())
+                                            .unwrap_or("")
+                                            .to_string(),
+                                        value: a
+                                            .get("value")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string(),
+                                        index: true,
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                     });
                 }
             }
@@ -697,10 +828,16 @@ impl BaseApp {
 
     /// Execute a block. All steps go through WASM components.
     pub fn execute_block(
-        &mut self, height: u64, timestamp: u64, chain_id: &str, txs: &[Vec<u8>],
+        &mut self,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+        txs: &[Vec<u8>],
     ) -> Result<([u8; 32], Vec<TxResponse>)> {
         self.context = Some(BlockContext {
-            height, timestamp, chain_id: chain_id.to_string(),
+            height,
+            timestamp,
+            chain_id: chain_id.to_string(),
         });
 
         // Set deterministic block timestamp for module governance
@@ -721,7 +858,10 @@ impl BaseApp {
                 }
                 Err(e) => {
                     responses.push(TxResponse::failure(
-                        1, format!("Transaction {i} failed: {e}"), 0, 0,
+                        1,
+                        format!("Transaction {i} failed: {e}"),
+                        0,
+                        0,
                     ));
                 }
             }
@@ -729,13 +869,18 @@ impl BaseApp {
 
         // 3. Post-execute hook (WASM)
         let _post_events = self.run_hook_post(
-            height, timestamp, chain_id, txs.len() as u32, block_gas_used,
+            height,
+            timestamp,
+            chain_id,
+            txs.len() as u32,
+            block_gas_used,
         )?;
 
         // 4. Compute state root
         let state_root = {
             let store_arc = self.global_store.get_store();
-            let store = store_arc.lock()
+            let store = store_arc
+                .lock()
                 .map_err(|e| BaseAppError::Store(format!("Failed to lock store: {e}")))?;
             store.root_hash()
         };
@@ -746,7 +891,11 @@ impl BaseApp {
 
     /// Process a single transaction: validate (WASM) → dispatch (WASM) → increment sequence.
     fn process_transaction(
-        &mut self, tx_bytes: &[u8], height: u64, timestamp: u64, chain_id: &str,
+        &mut self,
+        tx_bytes: &[u8],
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
     ) -> Result<TxResponse> {
         // 2a. Validate via WASM validator
         let validated = self.validate_tx(tx_bytes, height, timestamp, chain_id)?;
@@ -760,19 +909,18 @@ impl BaseApp {
         let tx_checkpoint = self.store_checkpoint()?;
 
         for msg in &validated.messages {
-            match self.dispatch_message(
-                &validated.sender, msg, height, timestamp, chain_id,
-            ) {
+            match self.dispatch_message(&validated.sender, msg, height, timestamp, chain_id) {
                 Ok((gas, msg_events)) => {
                     total_gas_used += gas;
                     events.extend(msg_events);
                 }
                 Err(e) => {
                     // Rollback all state changes for this TX
-                    self.store_restore(tx_checkpoint)
-                        .map_err(|re| BaseAppError::Store(
-                            format!("rollback after tx failure failed: {re} (original: {e})")
-                        ))?;
+                    self.store_restore(tx_checkpoint).map_err(|re| {
+                        BaseAppError::Store(format!(
+                            "rollback after tx failure failed: {re} (original: {e})"
+                        ))
+                    })?;
                     return Err(e);
                 }
             }
@@ -792,9 +940,11 @@ impl BaseApp {
     pub fn commit(&mut self) -> Result<[u8; 32]> {
         let root_hash = {
             let store_arc = self.global_store.get_store();
-            let mut store = store_arc.lock()
+            let mut store = store_arc
+                .lock()
                 .map_err(|e| BaseAppError::Store(format!("Failed to lock store: {e}")))?;
-            store.commit()
+            store
+                .commit()
                 .map_err(|e| BaseAppError::Store(format!("Commit failed: {e}")))?
         };
         self.last_state_root = root_hash;
@@ -804,7 +954,9 @@ impl BaseApp {
         Ok(root_hash)
     }
 
-    pub fn last_state_root(&self) -> &[u8; 32] { &self.last_state_root }
+    pub fn last_state_root(&self) -> &[u8; 32] {
+        &self.last_state_root
+    }
 
     // =========================================================================
     // Store checkpoint/restore — overlay mechanism for consensus safety
@@ -813,13 +965,15 @@ impl BaseApp {
     /// Create a checkpoint of the current store state.
     /// The checkpoint can later be passed to `store_restore()` to roll back.
     pub fn store_checkpoint(&self) -> Result<gridway_store::MerkleCheckpoint> {
-        self.global_store.checkpoint()
+        self.global_store
+            .checkpoint()
             .map_err(|e| BaseAppError::Store(format!("checkpoint failed: {e}")))
     }
 
     /// Restore store state from a checkpoint, discarding all changes since.
     pub fn store_restore(&self, cp: gridway_store::MerkleCheckpoint) -> Result<()> {
-        self.global_store.restore(cp)
+        self.global_store
+            .restore(cp)
             .map_err(|e| BaseAppError::Store(format!("restore failed: {e}")))
     }
 
@@ -830,7 +984,8 @@ impl BaseApp {
     /// previously verified or proposed block.
     pub fn restore_to_committed(&self) -> Result<()> {
         if let Some(ref cp) = self.committed_checkpoint {
-            self.global_store.restore_from(cp)
+            self.global_store
+                .restore_from(cp)
                 .map_err(|e| BaseAppError::Store(format!("restore to committed failed: {e}")))?;
         }
         Ok(())
@@ -841,7 +996,11 @@ impl BaseApp {
     /// Returns only the computed state root.  Used by `verify()` so that
     /// verifying a block does NOT mutate the shared store state.
     pub fn execute_block_ephemeral(
-        &mut self, height: u64, timestamp: u64, chain_id: &str, txs: &[Vec<u8>],
+        &mut self,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+        txs: &[Vec<u8>],
     ) -> Result<[u8; 32]> {
         // Start from committed state
         self.restore_to_committed()?;
@@ -855,14 +1014,23 @@ impl BaseApp {
 
     pub fn export_snapshot(&self) -> Result<gridway_store::merkle::StateSnapshot> {
         let store = self.global_store.get_store();
-        let store = store.lock().map_err(|e| BaseAppError::Store(format!("lock: {e}")))?;
+        let store = store
+            .lock()
+            .map_err(|e| BaseAppError::Store(format!("lock: {e}")))?;
         Ok(store.to_snapshot())
     }
 
-    pub fn import_snapshot(&mut self, snapshot: &gridway_store::merkle::StateSnapshot) -> Result<()> {
+    pub fn import_snapshot(
+        &mut self,
+        snapshot: &gridway_store::merkle::StateSnapshot,
+    ) -> Result<()> {
         let store = self.global_store.get_store();
-        let mut store = store.lock().map_err(|e| BaseAppError::Store(format!("lock: {e}")))?;
-        store.from_snapshot(snapshot).map_err(|e| BaseAppError::Store(format!("import: {e}")))?;
+        let mut store = store
+            .lock()
+            .map_err(|e| BaseAppError::Store(format!("lock: {e}")))?;
+        store
+            .from_snapshot(snapshot)
+            .map_err(|e| BaseAppError::Store(format!("import: {e}")))?;
         self.last_state_root = store.root_hash();
         Ok(())
     }
@@ -874,7 +1042,8 @@ impl BaseApp {
     pub fn set_balance(&mut self, address: &str, denom: &str, amount: u64) -> Result<()> {
         let key = format!("balance_{address}_{denom}");
         let value = amount.to_string();
-        self.global_store.set_namespaced("bank", key.as_bytes(), value.as_bytes())
+        self.global_store
+            .set_namespaced("bank", key.as_bytes(), value.as_bytes())
             .map_err(|e| BaseAppError::Store(format!("Failed to set balance: {e}")))?;
         Ok(())
     }
@@ -885,7 +1054,8 @@ impl BaseApp {
             Ok(Some(value)) => {
                 let amount_str = String::from_utf8(value)
                     .map_err(|e| BaseAppError::Store(format!("Invalid balance encoding: {e}")))?;
-                let amount: u64 = amount_str.parse()
+                let amount: u64 = amount_str
+                    .parse()
                     .map_err(|e| BaseAppError::Store(format!("Invalid balance value: {e}")))?;
                 Ok(amount)
             }
@@ -939,7 +1109,10 @@ mod tests {
         let store_arc = app.global_store().get_store();
         let store = store_arc.lock().unwrap();
         let root_after = store.root_hash();
-        assert_eq!(root_before, root_after, "ephemeral execution must not mutate state");
+        assert_eq!(
+            root_before, root_after,
+            "ephemeral execution must not mutate state"
+        );
     }
 
     #[test]
@@ -964,7 +1137,10 @@ mod tests {
             let guard = store_arc.lock().unwrap();
             guard.root_hash()
         };
-        assert_eq!(committed_root, restored_root, "restore_to_committed must revert state");
+        assert_eq!(
+            committed_root, restored_root,
+            "restore_to_committed must revert state"
+        );
     }
 
     #[test]
@@ -973,7 +1149,10 @@ mod tests {
         // Without executed_heights guard, re-executing at same height should work
         let (root1, _) = app.execute_block(1, 1000, "test", &[]).unwrap();
         let (root2, _) = app.execute_block(1, 1000, "test", &[]).unwrap();
-        assert_eq!(root1, root2, "re-executing same block should give same root");
+        assert_eq!(
+            root1, root2,
+            "re-executing same block should give same root"
+        );
     }
 
     #[test]
@@ -1003,7 +1182,10 @@ mod tests {
     #[test]
     fn test_account_crud() {
         let mut app = BaseApp::new("test-app".to_string()).unwrap();
-        let account = Account { public_key: "abcd1234".to_string(), sequence: 0 };
+        let account = Account {
+            public_key: "abcd1234".to_string(),
+            sequence: 0,
+        };
         app.set_account("test_addr", &account).unwrap();
         let loaded = app.get_account("test_addr").unwrap();
         assert_eq!(loaded.public_key, "abcd1234");
@@ -1016,7 +1198,9 @@ mod tests {
     #[test]
     fn test_vfs_jmt_end_to_end() {
         let app = BaseApp::new("test-vfs-e2e".to_string()).unwrap();
-        app.vfs.write_key("bank", b"balance_alice_ugridway", b"1000").unwrap();
+        app.vfs
+            .write_key("bank", b"balance_alice_ugridway", b"1000")
+            .unwrap();
         let alice = app.vfs.read_key("bank", b"balance_alice_ugridway").unwrap();
         assert_eq!(alice, Some(b"1000".to_vec()));
     }
@@ -1026,15 +1210,23 @@ mod tests {
         let app = BaseApp::new("test-ns".to_string()).unwrap();
         app.vfs.write_key("bank", b"key1", b"bank_value").unwrap();
         app.vfs.write_key("auth", b"key1", b"auth_value").unwrap();
-        assert_eq!(app.vfs.read_key("bank", b"key1").unwrap(), Some(b"bank_value".to_vec()));
-        assert_eq!(app.vfs.read_key("auth", b"key1").unwrap(), Some(b"auth_value".to_vec()));
+        assert_eq!(
+            app.vfs.read_key("bank", b"key1").unwrap(),
+            Some(b"bank_value".to_vec())
+        );
+        assert_eq!(
+            app.vfs.read_key("auth", b"key1").unwrap(),
+            Some(b"auth_value".to_vec())
+        );
     }
 
     #[test]
     fn test_deterministic_hash() {
         let run = || {
             let mut app = BaseApp::new("test-det".to_string()).unwrap();
-            app.vfs.write_key("bank", b"balance_alice", b"1000").unwrap();
+            app.vfs
+                .write_key("bank", b"balance_alice", b"1000")
+                .unwrap();
             app.vfs.write_key("bank", b"balance_bob", b"2000").unwrap();
             app.commit().unwrap()
         };
@@ -1052,8 +1244,14 @@ mod tests {
     fn test_resolve_module() {
         let app = BaseApp::new("test-app".to_string()).unwrap();
         assert_eq!(app.resolve_module("bank.MsgSend").unwrap(), "bank");
-        assert_eq!(app.resolve_module("governance.MsgStoreCode").unwrap(), "governance");
-        assert_eq!(app.resolve_module("staking.MsgDelegate").unwrap(), "staking");
+        assert_eq!(
+            app.resolve_module("governance.MsgStoreCode").unwrap(),
+            "governance"
+        );
+        assert_eq!(
+            app.resolve_module("staking.MsgDelegate").unwrap(),
+            "staking"
+        );
         assert!(app.resolve_module("NoModule").is_err());
         assert!(app.resolve_module("").is_err());
         assert!(app.resolve_module(".MsgSend").is_err());
@@ -1081,9 +1279,7 @@ mod tests {
         let app = BaseApp::new("test-app".to_string()).unwrap();
         // Missing signature
         let tx = serde_json::json!({"public_key": "aa", "body": {}});
-        let result = app.validate_tx(
-            serde_json::to_vec(&tx).unwrap().as_slice(), 1, 1000, "test",
-        );
+        let result = app.validate_tx(serde_json::to_vec(&tx).unwrap().as_slice(), 1, 1000, "test");
         assert!(result.is_err());
     }
 
@@ -1101,9 +1297,9 @@ mod tests {
         // For this test we verify the full WASM pipeline works end-to-end.
 
         // Use gridway_crypto to create a keypair and sign a tx
-        use gridway_crypto::{sign_tx_body, Address};
         use commonware_cryptography::ed25519::PrivateKey;
         use commonware_cryptography::Signer as _;
+        use gridway_crypto::{sign_tx_body, Address};
 
         let private_key = PrivateKey::from_seed(42);
         let public_key = private_key.public_key();
@@ -1111,10 +1307,14 @@ mod tests {
         let address = Address::from_public_key(&public_key).to_hex();
 
         // Register account
-        app.set_account(&address, &Account {
-            public_key: pk_hex.clone(),
-            sequence: 0,
-        }).unwrap();
+        app.set_account(
+            &address,
+            &Account {
+                public_key: pk_hex.clone(),
+                sequence: 0,
+            },
+        )
+        .unwrap();
         app.set_balance(&address, "ugridway", 5000).unwrap();
 
         // Create a signed transaction
@@ -1139,9 +1339,15 @@ mod tests {
         let tx_bytes = serde_json::to_vec(&signed_tx).unwrap();
 
         // Execute block with this transaction — all through WASM
-        let (state_root, responses) = app.execute_block(1, 1000, "test-chain", &[tx_bytes]).unwrap();
+        let (state_root, responses) = app
+            .execute_block(1, 1000, "test-chain", &[tx_bytes])
+            .unwrap();
         assert_eq!(responses.len(), 1);
-        assert_eq!(responses[0].code, 0, "tx should succeed: {}", responses[0].log);
+        assert_eq!(
+            responses[0].code, 0,
+            "tx should succeed: {}",
+            responses[0].log
+        );
 
         // Verify balance changed
         assert_eq!(app.get_balance(&address, "ugridway").unwrap(), 4900);

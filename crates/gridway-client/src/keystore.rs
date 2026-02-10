@@ -389,7 +389,10 @@ mod tests {
         ks.store_key("bob", &key, "correct-password").unwrap();
         let result = ks.load_key("bob", "wrong-password");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), KeystoreError::DecryptionFailed));
+        assert!(matches!(
+            result.unwrap_err(),
+            KeystoreError::DecryptionFailed
+        ));
     }
 
     #[test]
@@ -462,13 +465,22 @@ mod tests {
         let key = fake_key();
 
         let result = ks.store_key("", &key, "pw");
-        assert!(matches!(result.unwrap_err(), KeystoreError::InvalidKeyName(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            KeystoreError::InvalidKeyName(_)
+        ));
 
         let result = ks.store_key("has spaces", &key, "pw");
-        assert!(matches!(result.unwrap_err(), KeystoreError::InvalidKeyName(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            KeystoreError::InvalidKeyName(_)
+        ));
 
         let result = ks.store_key("../escape", &key, "pw");
-        assert!(matches!(result.unwrap_err(), KeystoreError::InvalidKeyName(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            KeystoreError::InvalidKeyName(_)
+        ));
     }
 
     #[test]

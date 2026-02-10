@@ -3,14 +3,8 @@
 //! Wraps commonware-cryptography for ed25519 signing and SHA-256 hashing.
 //! Replaces the previous Cosmos-style (secp256k1, bech32) crypto layer.
 
-pub use commonware_cryptography::ed25519::{
-    PrivateKey, PublicKey, Signature,
-};
-pub use commonware_cryptography::{
-    Digestible, Hasher, Sha256,
-    sha256::Digest,
-    Signer, Verifier,
-};
+pub use commonware_cryptography::ed25519::{PrivateKey, PublicKey, Signature};
+pub use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256, Signer, Verifier};
 
 use sha2::Digest as Sha2Digest;
 use thiserror::Error;

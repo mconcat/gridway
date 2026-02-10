@@ -33,8 +33,8 @@ const META_VERSION_KEY: &[u8] = b"version";
 impl SledBackend {
     /// Open or create a sled database at the given path.
     pub fn open(path: &Path) -> Result<Self> {
-        let db = sled::open(path)
-            .map_err(|e| StoreError::BackendError(format!("sled open: {e}")))?;
+        let db =
+            sled::open(path).map_err(|e| StoreError::BackendError(format!("sled open: {e}")))?;
 
         let nodes = db
             .open_tree("trie_nodes")
@@ -63,8 +63,7 @@ impl SledBackend {
     pub fn read_all_nodes(&self) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut entries = Vec::new();
         for item in self.nodes.iter() {
-            let (k, v) = item
-                .map_err(|e| StoreError::BackendError(format!("sled iter: {e}")))?;
+            let (k, v) = item.map_err(|e| StoreError::BackendError(format!("sled iter: {e}")))?;
             entries.push((k.to_vec(), v.to_vec()));
         }
         Ok(entries)
@@ -140,7 +139,9 @@ impl SledBackend {
 
     /// Check if the database has any stored state.
     pub fn has_state(&self) -> Result<bool> {
-        Ok(self.meta.get(META_ROOT_KEY)
+        Ok(self
+            .meta
+            .get(META_ROOT_KEY)
             .map_err(|e| StoreError::BackendError(format!("sled has_state: {e}")))?
             .is_some())
     }

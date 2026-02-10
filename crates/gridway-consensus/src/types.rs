@@ -8,11 +8,7 @@ use commonware_consensus::simplex::types::{
     Activity as CActivity, Finalization as CFinalization, Notarization as CNotarization,
 };
 use commonware_consensus::types::Epoch;
-use commonware_cryptography::{
-    bls12381::primitives::variant::MinSig,
-    ed25519,
-    sha256::Digest,
-};
+use commonware_cryptography::{bls12381::primitives::variant::MinSig, ed25519, sha256::Digest};
 use commonware_utils::NZU64;
 use std::num::NonZero;
 

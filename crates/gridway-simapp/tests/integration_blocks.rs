@@ -6,9 +6,7 @@
 //!   c) Large block — 10 transfers in one block
 //!   d) Replay consistency — deterministic replay on fresh BaseApp
 
-use gridway_simapp::{
-    build_transfer_tx, setup_genesis, SimState, TEST_CHAIN_ID, TEST_DENOM,
-};
+use gridway_simapp::{build_transfer_tx, setup_genesis, SimState, TEST_CHAIN_ID, TEST_DENOM};
 
 // ─── (a) Multi-block Transfer Chain ──────────────────────────────────────────
 //
@@ -79,15 +77,20 @@ fn multi_block_transfer_chain() {
     // Verify: all balances back to initial (cyclic transfer)
     for (_, addr) in &accounts {
         let bal = app.get_balance(addr, TEST_DENOM).unwrap();
-        assert_eq!(bal, initial,
-            "account {} should have {} after cyclic transfers, got {}", addr, initial, bal);
+        assert_eq!(
+            bal, initial,
+            "account {} should have {} after cyclic transfers, got {}",
+            addr, initial, bal
+        );
     }
 
     // SimState should also agree
-    sim.verify_balances(&app).expect("SimState should match on-chain after chain transfer");
+    sim.verify_balances(&app)
+        .expect("SimState should match on-chain after chain transfer");
 
     // Total supply conserved
-    let total: u64 = accounts.iter()
+    let total: u64 = accounts
+        .iter()
         .map(|(_, addr)| app.get_balance(addr, TEST_DENOM).unwrap())
         .sum();
     assert_eq!(total, initial * n as u64);
@@ -107,7 +110,10 @@ fn empty_block_handling() {
         .execute_block(1, 1000, TEST_CHAIN_ID, &[])
         .expect("empty block should succeed");
     app.commit().unwrap();
-    assert!(responses.is_empty(), "empty block should produce no responses");
+    assert!(
+        responses.is_empty(),
+        "empty block should produce no responses"
+    );
 
     let mut prev_root = first_root;
     for height in 2..=10 {
@@ -116,13 +122,21 @@ fn empty_block_handling() {
             .expect("empty block should succeed");
         app.commit().unwrap();
 
-        assert!(responses.is_empty(), "empty block should produce no responses");
+        assert!(
+            responses.is_empty(),
+            "empty block should produce no responses"
+        );
 
         // State root should remain constant across empty blocks
         // (after the first block establishes the post-genesis baseline)
-        assert_eq!(root, prev_root,
+        assert_eq!(
+            root,
+            prev_root,
             "state root should be stable across empty blocks (block {}): {:?} vs {:?}",
-            height, hex::encode(root), hex::encode(prev_root));
+            height,
+            hex::encode(root),
+            hex::encode(prev_root)
+        );
         prev_root = root;
     }
 }
@@ -159,10 +173,14 @@ fn large_block() {
     assert_eq!(responses.len(), n_transfers);
 
     let success_count = responses.iter().filter(|r| r.code == 0).count();
-    assert_eq!(success_count, n_transfers,
+    assert_eq!(
+        success_count,
+        n_transfers,
         "all {} transfers should succeed, got {} successes (first failure: {:?})",
-        n_transfers, success_count,
-        responses.iter().find(|r| r.code != 0).map(|r| &r.log));
+        n_transfers,
+        success_count,
+        responses.iter().find(|r| r.code != 0).map(|r| &r.log)
+    );
 
     // Update SimState
     for _ in 0..n_transfers {
@@ -177,15 +195,22 @@ fn large_block() {
     let from_bal = app.get_balance(from_addr, TEST_DENOM).unwrap();
     let to_bal = app.get_balance(to_addr, TEST_DENOM).unwrap();
 
-    assert_eq!(from_bal, expected_from,
-        "sender should have {}, got {}", expected_from, from_bal);
-    assert_eq!(to_bal, expected_to,
-        "receiver should have {}, got {}", expected_to, to_bal);
+    assert_eq!(
+        from_bal, expected_from,
+        "sender should have {}, got {}",
+        expected_from, from_bal
+    );
+    assert_eq!(
+        to_bal, expected_to,
+        "receiver should have {}, got {}",
+        expected_to, to_bal
+    );
 
     // Total conserved
     assert_eq!(from_bal + to_bal, initial * 2);
 
-    sim.verify_balances(&app).expect("SimState should match after large block");
+    sim.verify_balances(&app)
+        .expect("SimState should match after large block");
 }
 
 // ─── (d) Replay Consistency ──────────────────────────────────────────────────
@@ -208,13 +233,17 @@ fn replay_consistency() {
 
     // Block 1: account[0] → account[1], 10000
     let tx1 = build_transfer_tx(&accounts1[0].0, &accounts1[1].1, 10_000, TEST_DENOM, 0);
-    let (root1, resp1) = app1.execute_block(1, 1000, TEST_CHAIN_ID, &[tx1.clone()]).unwrap();
+    let (root1, resp1) = app1
+        .execute_block(1, 1000, TEST_CHAIN_ID, &[tx1.clone()])
+        .unwrap();
     assert_eq!(resp1[0].code, 0, "run1 block1: {}", resp1[0].log);
     app1.commit().unwrap();
 
     // Block 2: account[1] → account[2], 5000
     let tx2 = build_transfer_tx(&accounts1[1].0, &accounts1[2].1, 5_000, TEST_DENOM, 0);
-    let (root2, resp2) = app1.execute_block(2, 2000, TEST_CHAIN_ID, &[tx2.clone()]).unwrap();
+    let (root2, resp2) = app1
+        .execute_block(2, 2000, TEST_CHAIN_ID, &[tx2.clone()])
+        .unwrap();
     assert_eq!(resp2[0].code, 0, "run1 block2: {}", resp2[0].log);
     app1.commit().unwrap();
 
@@ -224,7 +253,9 @@ fn replay_consistency() {
 
     // Block 4: account[2] → account[0], 2000
     let tx4 = build_transfer_tx(&accounts1[2].0, &accounts1[0].1, 2_000, TEST_DENOM, 0);
-    let (root4, resp4) = app1.execute_block(4, 4000, TEST_CHAIN_ID, &[tx4.clone()]).unwrap();
+    let (root4, resp4) = app1
+        .execute_block(4, 4000, TEST_CHAIN_ID, &[tx4.clone()])
+        .unwrap();
     assert_eq!(resp4[0].code, 0, "run1 block4: {}", resp4[0].log);
     app1.commit().unwrap();
 
@@ -235,12 +266,20 @@ fn replay_consistency() {
     assert_eq!(genesis_root, genesis_root2, "genesis roots must match");
 
     let (replay_root1, replay_resp1) = app2.execute_block(1, 1000, TEST_CHAIN_ID, &[tx1]).unwrap();
-    assert_eq!(replay_resp1[0].code, 0, "replay block1: {}", replay_resp1[0].log);
+    assert_eq!(
+        replay_resp1[0].code, 0,
+        "replay block1: {}",
+        replay_resp1[0].log
+    );
     app2.commit().unwrap();
     assert_eq!(root1, replay_root1, "block 1 roots diverged");
 
     let (replay_root2, replay_resp2) = app2.execute_block(2, 2000, TEST_CHAIN_ID, &[tx2]).unwrap();
-    assert_eq!(replay_resp2[0].code, 0, "replay block2: {}", replay_resp2[0].log);
+    assert_eq!(
+        replay_resp2[0].code, 0,
+        "replay block2: {}",
+        replay_resp2[0].log
+    );
     app2.commit().unwrap();
     assert_eq!(root2, replay_root2, "block 2 roots diverged");
 
@@ -249,7 +288,11 @@ fn replay_consistency() {
     assert_eq!(root3, replay_root3, "block 3 roots diverged");
 
     let (replay_root4, replay_resp4) = app2.execute_block(4, 4000, TEST_CHAIN_ID, &[tx4]).unwrap();
-    assert_eq!(replay_resp4[0].code, 0, "replay block4: {}", replay_resp4[0].log);
+    assert_eq!(
+        replay_resp4[0].code, 0,
+        "replay block4: {}",
+        replay_resp4[0].log
+    );
     app2.commit().unwrap();
     assert_eq!(root4, replay_root4, "block 4 roots diverged");
 
@@ -258,7 +301,10 @@ fn replay_consistency() {
         let (_, ref addr) = _accounts2[i];
         let bal1 = app1.get_balance(addr, TEST_DENOM).unwrap();
         let bal2 = app2.get_balance(addr, TEST_DENOM).unwrap();
-        assert_eq!(bal1, bal2,
-            "balance mismatch for account {} after replay: {} vs {}", addr, bal1, bal2);
+        assert_eq!(
+            bal1, bal2,
+            "balance mismatch for account {} after replay: {} vs {}",
+            addr, bal1, bal2
+        );
     }
 }

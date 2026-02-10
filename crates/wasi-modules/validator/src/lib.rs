@@ -67,10 +67,10 @@ fn validate_inner(
         .ok_or_else(|| ("missing body field".to_string(), 1000))?;
 
     // ── 2. Verify ed25519 signature ──────────────────────────────────────
-    use ed25519_dalek::{Verifier, VerifyingKey, Signature};
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
-    let pk_bytes = hex::decode(public_key_hex)
-        .map_err(|e| (format!("invalid public_key hex: {e}"), 2000))?;
+    let pk_bytes =
+        hex::decode(public_key_hex).map_err(|e| (format!("invalid public_key hex: {e}"), 2000))?;
     if pk_bytes.len() != 32 {
         return Err(("public key must be 32 bytes".to_string(), 2000));
     }
@@ -78,8 +78,8 @@ fn validate_inner(
     let verifying_key = VerifyingKey::from_bytes(&pk_array)
         .map_err(|e| (format!("invalid ed25519 public key: {e}"), 2000))?;
 
-    let sig_bytes = hex::decode(signature_hex)
-        .map_err(|e| (format!("invalid signature hex: {e}"), 2000))?;
+    let sig_bytes =
+        hex::decode(signature_hex).map_err(|e| (format!("invalid signature hex: {e}"), 2000))?;
     if sig_bytes.len() != 64 {
         return Err(("signature must be 64 bytes".to_string(), 2000));
     }

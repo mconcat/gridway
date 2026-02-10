@@ -21,8 +21,8 @@ use commonware_consensus::{
 };
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_runtime::{Clock, Metrics, Spawner};
-use commonware_utils::SystemTimeExt;
 use commonware_utils::Acknowledgement;
+use commonware_utils::SystemTimeExt;
 use futures::StreamExt;
 use rand::Rng;
 use std::sync::{Arc, Mutex, RwLock};
@@ -62,7 +62,11 @@ impl GridwayApp {
     }
 
     /// Create a new GridwayApp with a custom mempool configuration.
-    pub fn with_mempool_config(baseapp: BaseApp, chain_id: String, mempool_config: MempoolConfig) -> Self {
+    pub fn with_mempool_config(
+        baseapp: BaseApp,
+        chain_id: String,
+        mempool_config: MempoolConfig,
+    ) -> Self {
         let genesis = GridwayBlock::genesis();
         Self {
             chain_id: Arc::new(chain_id),
@@ -122,7 +126,10 @@ impl GridwayApp {
                 tracing::info!(count, "requeued transactions after execution failure");
             }
             Err(e) => {
-                tracing::error!("mempool lock poisoned in requeue_txs: {e} — {} txs lost", txs.len());
+                tracing::error!(
+                    "mempool lock poisoned in requeue_txs: {e} — {} txs lost",
+                    txs.len()
+                );
             }
         }
     }
@@ -132,7 +139,10 @@ impl GridwayApp {
     /// Used on node restart to catch up BaseApp with persisted block history.
     /// Genesis state must already be applied before calling this method.
     pub fn replay_blocks(&self, blocks: &[GridwayBlock]) -> std::result::Result<(), String> {
-        let mut app = self.baseapp.write().map_err(|e| format!("write lock: {e}"))?;
+        let mut app = self
+            .baseapp
+            .write()
+            .map_err(|e| format!("write lock: {e}"))?;
 
         for block in blocks {
             let height = block.height.get();
@@ -146,7 +156,8 @@ impl GridwayApp {
                             hex::encode(state_root)
                         ));
                     }
-                    app.commit().map_err(|e| format!("commit at height {height}: {e}"))?;
+                    app.commit()
+                        .map_err(|e| format!("commit at height {height}: {e}"))?;
                     info!(
                         height,
                         state_root = hex::encode(state_root),
@@ -208,24 +219,20 @@ where
             }
         };
         if let Err(e) = app.restore_to_committed() {
-            tracing::error!(height = new_height.get(), "failed to restore committed state in propose: {e}");
+            tracing::error!(
+                height = new_height.get(),
+                "failed to restore committed state in propose: {e}"
+            );
             return None;
         }
-        match app.execute_block(
-            new_height.get(),
-            current,
-            &self.chain_id,
-            &txs,
-        ) {
-            Ok((state_root, _responses)) => {
-                Some(GridwayBlock::new(
-                    parent.digest(),
-                    new_height,
-                    current,
-                    state_root,
-                    txs,
-                ))
-            }
+        match app.execute_block(new_height.get(), current, &self.chain_id, &txs) {
+            Ok((state_root, _responses)) => Some(GridwayBlock::new(
+                parent.digest(),
+                new_height,
+                current,
+                state_root,
+                txs,
+            )),
             Err(e) => {
                 tracing::error!(height = new_height.get(), "block execution failed: {e}");
                 // On failure, restore to committed and propose an empty block.
@@ -426,7 +433,8 @@ mod tests {
 
         for i in 0..100u16 {
             // Use 2 bytes per tx to ensure uniqueness
-            app.submit_tx(i.to_le_bytes().to_vec()).expect("submit should succeed");
+            app.submit_tx(i.to_le_bytes().to_vec())
+                .expect("submit should succeed");
         }
 
         // Drain with limit
@@ -498,19 +506,18 @@ mod tests {
     fn test_genesis_loading_balance() {
         let genesis = GenesisConfig {
             chain_id: "test-genesis".to_string(),
-            accounts: vec![
-                GenesisAccount {
-                    address: "aabbccddee00112233445566778899aabbccddee".to_string(),
-                    public_key_hex: "00".repeat(32),
-                    balances: vec![GenesisBalance {
-                        denom: "ugridway".to_string(),
-                        amount: 1_000_000,
-                    }],
-                },
-            ],
+            accounts: vec![GenesisAccount {
+                address: "aabbccddee00112233445566778899aabbccddee".to_string(),
+                public_key_hex: "00".repeat(32),
+                balances: vec![GenesisBalance {
+                    denom: "ugridway".to_string(),
+                    amount: 1_000_000,
+                }],
+            }],
         };
 
-        let mut baseapp = BaseApp::new("test-genesis".to_string()).expect("baseapp creation failed");
+        let mut baseapp =
+            BaseApp::new("test-genesis".to_string()).expect("baseapp creation failed");
 
         // Apply genesis
         for account in &genesis.accounts {
@@ -546,22 +553,20 @@ mod tests {
     fn test_genesis_config_yaml_roundtrip() {
         let genesis = GenesisConfig {
             chain_id: "test-chain-1".to_string(),
-            accounts: vec![
-                GenesisAccount {
-                    address: "aabbccddee00112233445566778899aabbccddee".to_string(),
-                    public_key_hex: "aa".repeat(32),
-                    balances: vec![
-                        GenesisBalance {
-                            denom: "ugridway".to_string(),
-                            amount: 500_000,
-                        },
-                        GenesisBalance {
-                            denom: "uatom".to_string(),
-                            amount: 100,
-                        },
-                    ],
-                },
-            ],
+            accounts: vec![GenesisAccount {
+                address: "aabbccddee00112233445566778899aabbccddee".to_string(),
+                public_key_hex: "aa".repeat(32),
+                balances: vec![
+                    GenesisBalance {
+                        denom: "ugridway".to_string(),
+                        amount: 500_000,
+                    },
+                    GenesisBalance {
+                        denom: "uatom".to_string(),
+                        amount: 100,
+                    },
+                ],
+            }],
         };
 
         let yaml = serde_yaml::to_string(&genesis).expect("serialize failed");

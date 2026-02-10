@@ -277,8 +277,8 @@ impl TxBuilder {
 
 #[cfg(test)]
 mod tests {
-    use commonware_codec::Encode;
     use super::*;
+    use commonware_codec::Encode;
     use commonware_cryptography::ed25519;
 
     #[test]
@@ -347,7 +347,9 @@ mod tests {
 
         let json: serde_json::Value = serde_json::from_str(&tx.to_json().unwrap()).unwrap();
         assert_eq!(
-            json["body"]["messages"][0]["from_address"].as_str().unwrap(),
+            json["body"]["messages"][0]["from_address"]
+                .as_str()
+                .unwrap(),
             expected_address
         );
     }
@@ -504,10 +506,7 @@ mod tests {
         let tx = TxBuilder::new(private_key)
             .bank_send(
                 "recipient",
-                vec![
-                    Coin::new("ugridway", 1000),
-                    Coin::new("uatom", 500),
-                ],
+                vec![Coin::new("ugridway", 1000), Coin::new("uatom", 500)],
             )
             .build()
             .unwrap();

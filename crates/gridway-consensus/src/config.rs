@@ -74,7 +74,6 @@ pub struct Peers {
     pub addresses: HashMap<String, SocketAddr>,
 }
 
-
 /// Genesis state configuration.
 ///
 /// Defines the initial chain state loaded into BaseApp on first start.

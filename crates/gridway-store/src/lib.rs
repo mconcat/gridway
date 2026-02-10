@@ -211,7 +211,11 @@ impl<S: KVStore> CacheStore<S> {
         let hits = self.cache_hits.load(Ordering::Relaxed);
         let misses = self.cache_misses.load(Ordering::Relaxed);
         let total = hits + misses;
-        if total == 0 { 0.0 } else { hits as f64 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            hits as f64 / total as f64
+        }
     }
 
     pub fn cache_stats(&self) -> (u64, u64) {

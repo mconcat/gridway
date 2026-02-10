@@ -64,12 +64,7 @@ pub struct TxResponse {
 
 impl TxResponse {
     /// Create a success response
-    pub fn success(
-        log: String,
-        gas_wanted: i64,
-        gas_used: i64,
-        events: Vec<crate::Event>,
-    ) -> Self {
+    pub fn success(log: String, gas_wanted: i64, gas_used: i64, events: Vec<crate::Event>) -> Self {
         Self {
             code: 0,
             data: vec![],
@@ -104,8 +99,15 @@ pub type GridwayTx = SignedTx;
 pub trait SdkMsg: Send + Sync {
     fn type_url(&self) -> &str;
     fn validate_basic(&self) -> std::result::Result<(), String>;
-    fn encode(&self) -> Vec<u8> { vec![] }
-    fn as_any(&self) -> &dyn std::any::Any where Self: Sized + 'static { self }
+    fn encode(&self) -> Vec<u8> {
+        vec![]
+    }
+    fn as_any(&self) -> &dyn std::any::Any
+    where
+        Self: Sized + 'static,
+    {
+        self
+    }
 }
 
 // === Legacy types kept for backward compatibility with module_router ===

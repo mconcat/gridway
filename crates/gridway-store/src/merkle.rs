@@ -5,12 +5,12 @@
 //! suitable for experiments. For production, swap in a persistent
 //! `HashDB` implementation over RocksDB / sled / etc.
 
-use crate::{Hash, KVStore, Result, StoreError};
 use crate::persistent::SledBackend;
+use crate::{Hash, KVStore, Result, StoreError};
 use hash_db::{HashDB, Hasher};
-use serde::{Serialize, Deserialize};
 use memory_db::{HashKey, MemoryDB};
 use reference_trie::GenericNoExtensionLayout;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use trie_db::{DBValue, Trie, TrieDBBuilder, TrieDBMutBuilder, TrieMut};
@@ -65,7 +65,6 @@ pub type GridwayTrieLayout = GenericNoExtensionLayout<Sha256Hasher>;
 type GridwayMemoryDB = MemoryDB<Sha256Hasher, HashKey<Sha256Hasher>, DBValue>;
 
 // ─── MerkleStore ─────────────────────────────────────────────────────────────
-
 
 /// A snapshot of the entire MerkleStore state.
 /// Can be serialized/deserialized for state sync between nodes.
@@ -163,7 +162,9 @@ impl MerkleStore {
     /// Writes all trie node entries from memory-db to the sled backend,
     /// along with the current root hash and version.
     pub fn flush_to_disk(&self) -> Result<()> {
-        let backend = self.persistence.as_ref()
+        let backend = self
+            .persistence
+            .as_ref()
             .ok_or_else(|| StoreError::BackendError("no persistence backend configured".into()))?;
 
         // Extract all entries from memory-db by iterating its internal data.
@@ -177,7 +178,9 @@ impl MerkleStore {
         for (key, rc) in &keys {
             if *rc > 0 {
                 // Only persist entries with positive reference count
-                if let Some(value) = HashDB::<Sha256Hasher, _>::get(&self.db, key, hash_db::EMPTY_PREFIX) {
+                if let Some(value) =
+                    HashDB::<Sha256Hasher, _>::get(&self.db, key, hash_db::EMPTY_PREFIX)
+                {
                     let entry_key = key.as_ref().to_vec();
                     entries.push((entry_key, value));
                 }
@@ -186,7 +189,8 @@ impl MerkleStore {
 
         // Clear and rewrite all nodes
         backend.clear_nodes()?;
-        let refs: Vec<(&[u8], &[u8])> = entries.iter()
+        let refs: Vec<(&[u8], &[u8])> = entries
+            .iter()
             .map(|(k, v)| (k.as_slice(), v.as_slice()))
             .collect();
         backend.write_nodes(&refs)?;
@@ -211,13 +215,15 @@ impl MerkleStore {
     /// Replaces the current in-memory state entirely. Returns the
     /// restored root hash.
     pub fn load_from_disk(&mut self) -> Result<[u8; 32]> {
-        let backend = self.persistence.as_ref()
+        let backend = self
+            .persistence
+            .as_ref()
             .ok_or_else(|| StoreError::BackendError("no persistence backend configured".into()))?;
 
-        let root = backend.get_root()?
+        let root = backend
+            .get_root()?
             .ok_or_else(|| StoreError::BackendError("no root hash in sled database".into()))?;
-        let version = backend.get_version()?
-            .unwrap_or(0);
+        let version = backend.get_version()?.unwrap_or(0);
         let entries = backend.read_all_nodes()?;
 
         // Rebuild memory-db from sled entries
@@ -234,7 +240,12 @@ impl MerkleStore {
             if key.len() == 32 {
                 let mut hash = [0u8; 32];
                 hash.copy_from_slice(key);
-                HashDB::<Sha256Hasher, _>::emplace(&mut db, hash, hash_db::EMPTY_PREFIX, value.clone());
+                HashDB::<Sha256Hasher, _>::emplace(
+                    &mut db,
+                    hash,
+                    hash_db::EMPTY_PREFIX,
+                    value.clone(),
+                );
             }
         }
 
@@ -259,7 +270,6 @@ impl MerkleStore {
         }
         Ok(())
     }
-
 
     /// Create a lightweight checkpoint of the current state.
     ///
@@ -336,7 +346,8 @@ impl MerkleStore {
         self.root = Hash::default();
         // Build empty trie
         {
-            let _ = TrieDBMutBuilder::<GridwayTrieLayout>::new(&mut self.db, &mut self.root).build();
+            let _ =
+                TrieDBMutBuilder::<GridwayTrieLayout>::new(&mut self.db, &mut self.root).build();
         }
         // Insert all entries
         for (key, value) in entries {
@@ -358,7 +369,9 @@ impl MerkleStore {
     pub fn from_snapshot(&mut self, snapshot: &StateSnapshot) -> Result<()> {
         let root = self.import_state(&snapshot.entries)?;
         if root != snapshot.root_hash {
-            return Err(StoreError::InvalidData("snapshot root hash mismatch".into()));
+            return Err(StoreError::InvalidData(
+                "snapshot root hash mismatch".into(),
+            ));
         }
         self.version = snapshot.version;
         Ok(())
@@ -492,7 +505,10 @@ mod tests {
 
         store.set(b"key1", b"value1").unwrap();
         let root_after_insert = store.root_hash();
-        assert_ne!(empty_root, root_after_insert, "root must change after insert");
+        assert_ne!(
+            empty_root, root_after_insert,
+            "root must change after insert"
+        );
 
         store.delete(b"key1").unwrap();
         let root_after_delete = store.root_hash();
@@ -513,7 +529,11 @@ mod tests {
         let balance_items: Vec<_> = store.prefix_iterator(b"balance_").collect();
         assert_eq!(balance_items.len(), 3);
         for (k, _) in &balance_items {
-            assert!(k.starts_with(b"balance_"), "key {:?} should start with balance_", k);
+            assert!(
+                k.starts_with(b"balance_"),
+                "key {:?} should start with balance_",
+                k
+            );
         }
 
         // supply_ prefix should yield exactly one entry
@@ -588,8 +608,14 @@ mod tests {
         assert_eq!(store2.version(), store.version());
 
         // Verify individual keys
-        assert_eq!(store2.get(b"bank:balance_alice").unwrap(), Some(b"1000".to_vec()));
-        assert_eq!(store2.get(b"bank:balance_bob").unwrap(), Some(b"2000".to_vec()));
+        assert_eq!(
+            store2.get(b"bank:balance_alice").unwrap(),
+            Some(b"1000".to_vec())
+        );
+        assert_eq!(
+            store2.get(b"bank:balance_bob").unwrap(),
+            Some(b"2000".to_vec())
+        );
     }
 
     #[test]
@@ -609,7 +635,12 @@ mod tests {
     fn test_many_keys() {
         let mut store = MerkleStore::new("test".to_string());
         for i in 0..100u32 {
-            store.set(format!("key_{i:04}").as_bytes(), format!("val_{i}").as_bytes()).unwrap();
+            store
+                .set(
+                    format!("key_{i:04}").as_bytes(),
+                    format!("val_{i}").as_bytes(),
+                )
+                .unwrap();
         }
         let hash = store.commit().unwrap();
         assert_ne!(hash, [0u8; 32]);
@@ -738,10 +769,12 @@ mod persistence_tests {
         {
             let mut store = MerkleStore::with_persistence("test".to_string(), tmp.path()).unwrap();
             for i in 0..100u32 {
-                store.set(
-                    format!("key_{i:04}").as_bytes(),
-                    format!("val_{i}").as_bytes(),
-                ).unwrap();
+                store
+                    .set(
+                        format!("key_{i:04}").as_bytes(),
+                        format!("val_{i}").as_bytes(),
+                    )
+                    .unwrap();
             }
             expected_root = store.commit().unwrap();
         }

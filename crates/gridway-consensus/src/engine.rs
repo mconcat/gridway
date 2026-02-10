@@ -29,12 +29,8 @@ use commonware_runtime::{
     buffer::PoolRef, spawn_cell, Clock, ContextCell, Handle, Metrics, RayonPoolSpawner, Spawner,
     Storage,
 };
-use commonware_storage::archive::{
-    immutable,
-    Archive as ArchiveTrait,
-    Identifier as ArchiveId,
-};
-use commonware_utils::{ordered::Set, NZU16, NZUsize, NZU64};
+use commonware_storage::archive::{immutable, Archive as ArchiveTrait, Identifier as ArchiveId};
+use commonware_utils::{ordered::Set, NZUsize, NZU16, NZU64};
 use futures::{channel::mpsc, future::try_join_all};
 use governor::clock::Clock as GClock;
 use governor::Quota;
@@ -289,31 +285,32 @@ impl<
             .ok_or_else(|| "failed to create scheme".to_string())?;
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let (marshal, marshal_mailbox, _): (_, marshal::Mailbox<GridwayScheme, GridwayBlock>, _) = marshal::Actor::init(
-            context.with_label("marshal"),
-            finalizations_by_height,
-            finalized_blocks,
-            marshal::Config {
-                provider,
-                epocher: epocher.clone(),
-                partition_prefix: cfg.partition_prefix.clone(),
-                mailbox_size: cfg.mailbox_size,
-                view_retention_timeout: ViewDelta::new(
-                    cfg.activity_timeout
-                        .get()
-                        .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
-                ),
-                prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
-                replay_buffer: REPLAY_BUFFER,
-                key_write_buffer: WRITE_BUFFER,
-                value_write_buffer: WRITE_BUFFER,
-                block_codec_config: (),
-                max_repair: MAX_REPAIR,
-                buffer_pool: buffer_pool.clone(),
-                strategy: cfg.strategy.clone(),
-            },
-        )
-        .await;
+        let (marshal, marshal_mailbox, _): (_, marshal::Mailbox<GridwayScheme, GridwayBlock>, _) =
+            marshal::Actor::init(
+                context.with_label("marshal"),
+                finalizations_by_height,
+                finalized_blocks,
+                marshal::Config {
+                    provider,
+                    epocher: epocher.clone(),
+                    partition_prefix: cfg.partition_prefix.clone(),
+                    mailbox_size: cfg.mailbox_size,
+                    view_retention_timeout: ViewDelta::new(
+                        cfg.activity_timeout
+                            .get()
+                            .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
+                    ),
+                    prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
+                    replay_buffer: REPLAY_BUFFER,
+                    key_write_buffer: WRITE_BUFFER,
+                    value_write_buffer: WRITE_BUFFER,
+                    block_codec_config: (),
+                    max_repair: MAX_REPAIR,
+                    buffer_pool: buffer_pool.clone(),
+                    strategy: cfg.strategy.clone(),
+                },
+            )
+            .await;
 
         // Create the application
         let marshaled = GridwayMarshaled::new(
@@ -424,9 +421,9 @@ impl<
         let buffer_handle = self.buffer.start(broadcast);
 
         // Start marshal
-        let marshal_handle = self
-            .marshal
-            .start(self.marshaled, self.buffer_mailbox, marshal_resolver);
+        let marshal_handle =
+            self.marshal
+                .start(self.marshaled, self.buffer_mailbox, marshal_resolver);
 
         // Start consensus
         let consensus_handle = self.consensus.start(pending, recovered, resolver);

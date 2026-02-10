@@ -239,7 +239,10 @@ impl kvstore::HostStore for ComponentState {
                     }
                 }
                 Err(e) => {
-                    error!(rep = store_handle.rep(), "kvstore::set table lookup failed: {e}");
+                    error!(
+                        rep = store_handle.rep(),
+                        "kvstore::set table lookup failed: {e}"
+                    );
                 }
             }
             // Prevent drop from removing the resource
@@ -314,10 +317,7 @@ impl kvstore::HostStore for ComponentState {
         }
     }
 
-    fn drop(
-        &mut self,
-        rep: wasmtime::component::Resource<kvstore::Store>,
-    ) -> wasmtime::Result<()> {
+    fn drop(&mut self, rep: wasmtime::component::Resource<kvstore::Store>) -> wasmtime::Result<()> {
         let vfs_handle = wasmtime::component::Resource::<VfsStoreHandle>::new_own(rep.rep());
         let _ = self.table.delete(vfs_handle);
         Ok(())
@@ -389,10 +389,7 @@ impl ComponentHost {
     }
 
     /// Create a new component host with custom wasmtime and resource configuration
-    pub fn with_config(
-        mut config: Config,
-        resource_config: ResourceConfig,
-    ) -> Result<Self> {
+    pub fn with_config(mut config: Config, resource_config: ResourceConfig) -> Result<Self> {
         // Ensure component model is enabled
         config.wasm_component_model(true);
 
@@ -530,9 +527,10 @@ impl ComponentHost {
 
     /// Get a loaded component by name
     fn get_component(&self, name: &str) -> Result<Component> {
-        let components = self.components.lock().map_err(|e| {
-            ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-        })?;
+        let components = self
+            .components
+            .lock()
+            .map_err(|e| ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}")))?;
         components
             .get(name)
             .ok_or_else(|| ComponentHostError::ComponentNotFound(name.to_string()))
@@ -543,27 +541,20 @@ impl ComponentHost {
     fn fuel_gas_used(&self, store: &mut Store<ComponentState>, component_name: &str) -> u64 {
         let gas_limit = {
             let info = self.component_info.lock().ok();
-            info.and_then(|i| {
-                i.get(component_name)
-                    .map(|v| v.gas_limit)
-            })
-            .unwrap_or(self.default_gas_limit)
+            info.and_then(|i| i.get(component_name).map(|v| v.gas_limit))
+                .unwrap_or(self.default_gas_limit)
         };
         gas_limit.saturating_sub(store.get_fuel().unwrap_or(0))
     }
 
     /// Convert component events to JSON
-    fn events_to_json(
-        events: &[(String, Vec<(String, String)>)],
-    ) -> Vec<serde_json::Value> {
+    fn events_to_json(events: &[(String, Vec<(String, String)>)]) -> Vec<serde_json::Value> {
         events
             .iter()
             .map(|(event_type, attributes)| {
                 let attrs: Vec<serde_json::Value> = attributes
                     .iter()
-                    .map(|(key, value)| {
-                        serde_json::json!({ "key": key, "value": value })
-                    })
+                    .map(|(key, value)| serde_json::json!({ "key": key, "value": value }))
                     .collect();
                 serde_json::json!({
                     "event_type": event_type,
@@ -595,12 +586,13 @@ impl ComponentHost {
         let bindings = HookWorld::instantiate(&mut store, &component, &linker)
             .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
-        let ctx = crate::component_bindings::hook::exports::gridway::framework::hook::BlockContext {
-            height,
-            timestamp,
-            chain_id: chain_id.to_string(),
-            proposer,
-        };
+        let ctx =
+            crate::component_bindings::hook::exports::gridway::framework::hook::BlockContext {
+                height,
+                timestamp,
+                chain_id: chain_id.to_string(),
+                proposer,
+            };
 
         let response = bindings
             .gridway_framework_hook()
@@ -617,7 +609,10 @@ impl ComponentHost {
             .map(|e| {
                 (
                     e.event_type.clone(),
-                    e.attributes.iter().map(|a| (a.key.clone(), a.value.clone())).collect(),
+                    e.attributes
+                        .iter()
+                        .map(|a| (a.key.clone(), a.value.clone()))
+                        .collect(),
                 )
             })
             .collect();
@@ -628,7 +623,9 @@ impl ComponentHost {
             exit_code: if response.success { 0 } else { 1 },
             data: Some(serde_json::json!({ "events": events_data })),
             error: response.error,
-            stdout: serde_json::to_string(&events_data).unwrap_or_default().into_bytes(),
+            stdout: serde_json::to_string(&events_data)
+                .unwrap_or_default()
+                .into_bytes(),
             stderr: Vec::new(),
             gas_used,
         })
@@ -654,12 +651,13 @@ impl ComponentHost {
         let bindings = HookWorld::instantiate(&mut store, &component, &linker)
             .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
-        let ctx = crate::component_bindings::hook::exports::gridway::framework::hook::BlockContext {
-            height,
-            timestamp,
-            chain_id: chain_id.to_string(),
-            proposer,
-        };
+        let ctx =
+            crate::component_bindings::hook::exports::gridway::framework::hook::BlockContext {
+                height,
+                timestamp,
+                chain_id: chain_id.to_string(),
+                proposer,
+            };
 
         let response = bindings
             .gridway_framework_hook()
@@ -676,7 +674,10 @@ impl ComponentHost {
             .map(|e| {
                 (
                     e.event_type.clone(),
-                    e.attributes.iter().map(|a| (a.key.clone(), a.value.clone())).collect(),
+                    e.attributes
+                        .iter()
+                        .map(|a| (a.key.clone(), a.value.clone()))
+                        .collect(),
                 )
             })
             .collect();
@@ -687,7 +688,9 @@ impl ComponentHost {
             exit_code: if response.success { 0 } else { 1 },
             data: Some(serde_json::json!({ "events": events_data })),
             error: response.error,
-            stdout: serde_json::to_string(&events_data).unwrap_or_default().into_bytes(),
+            stdout: serde_json::to_string(&events_data)
+                .unwrap_or_default()
+                .into_bytes(),
             stderr: Vec::new(),
             gas_used,
         })
@@ -756,7 +759,10 @@ impl ComponentHost {
             .map(|e| {
                 (
                     e.event_type.clone(),
-                    e.attributes.iter().map(|a| (a.key.clone(), a.value.clone())).collect(),
+                    e.attributes
+                        .iter()
+                        .map(|a| (a.key.clone(), a.value.clone()))
+                        .collect(),
                 )
             })
             .collect();
@@ -800,9 +806,9 @@ impl ComponentHost {
         // Use the standard create_store for consistent WASI sandboxing and resource limits,
         // then override fuel with the caller-specified gas_limit.
         let mut store = self.create_store(module_name)?;
-        store
-            .set_fuel(gas_limit)
-            .map_err(|e| ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}")))?;
+        store.set_fuel(gas_limit).map_err(|e| {
+            ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}"))
+        })?;
 
         let linker = self.create_linker()?;
 
@@ -813,18 +819,20 @@ impl ComponentHost {
         .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
         // Create module context and message
-        let context = crate::component_bindings::module::exports::gridway::framework::module::ModuleContext {
-            block_height,
-            block_time,
-            chain_id: chain_id.to_string(),
-            simulate: false,
-        };
+        let context =
+            crate::component_bindings::module::exports::gridway::framework::module::ModuleContext {
+                block_height,
+                block_time,
+                chain_id: chain_id.to_string(),
+                simulate: false,
+            };
 
-        let message = crate::component_bindings::module::exports::gridway::framework::module::Message {
-            type_url: msg_type_url.to_string(),
-            data: msg_data.to_string(),
-            sender: msg_sender.to_string(),
-        };
+        let message =
+            crate::component_bindings::module::exports::gridway::framework::module::Message {
+                type_url: msg_type_url.to_string(),
+                data: msg_data.to_string(),
+                sender: msg_sender.to_string(),
+            };
 
         // Execute the component
         let response = bindings
@@ -837,7 +845,11 @@ impl ComponentHost {
         // Get remaining fuel for gas tracking
         let gas_used = gas_limit - store.get_fuel().unwrap_or(0);
         // Use the module-reported gas if available, otherwise use fuel-based measurement
-        let final_gas_used = if response.gas_used > 0 { response.gas_used } else { gas_used };
+        let final_gas_used = if response.gas_used > 0 {
+            response.gas_used
+        } else {
+            gas_used
+        };
 
         // Convert events to JSON for data field
         let events_data: Vec<serde_json::Value> = response
@@ -872,7 +884,10 @@ impl ComponentHost {
             exit_code: if response.success { 0 } else { 1 },
             data: Some(serde_json::json!({"events": events_data})),
             error: response.error,
-            stdout: serde_json::to_string(&events_data).unwrap_or_default().as_bytes().to_vec(),
+            stdout: serde_json::to_string(&events_data)
+                .unwrap_or_default()
+                .as_bytes()
+                .to_vec(),
             stderr: error_stderr,
             gas_used: final_gas_used,
         })
@@ -935,8 +950,7 @@ mod tests {
         };
 
         // Test open_store
-        let store_resource =
-            kvstore::Host::open_store(&mut state, "bank".to_string()).unwrap();
+        let store_resource = kvstore::Host::open_store(&mut state, "bank".to_string()).unwrap();
         let rep = store_resource.rep();
 
         // Test set
@@ -993,11 +1007,7 @@ mod tests {
         assert_eq!(value, None);
 
         // Test drop (cleanup)
-        kvstore::HostStore::drop(
-            &mut state,
-            wasmtime::component::Resource::new_own(rep),
-        )
-        .unwrap();
+        kvstore::HostStore::drop(&mut state, wasmtime::component::Resource::new_own(rep)).unwrap();
     }
 
     #[test]
@@ -1023,8 +1033,7 @@ mod tests {
             limits: StoreLimitsBuilder::new().build(),
         };
 
-        let store_resource =
-            kvstore::Host::open_store(&mut state, "bank".to_string()).unwrap();
+        let store_resource = kvstore::Host::open_store(&mut state, "bank".to_string()).unwrap();
         let rep = store_resource.rep();
 
         // Write multiple keys

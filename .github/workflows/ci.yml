@@ -26,7 +26,7 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo check --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
+      - run: cargo check --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --exclude validator --exclude hook --exclude bank --exclude test-minimal
 
   fmt:
     name: Format
@@ -36,7 +36,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --all -- --check
+      - name: Format check (non-WASM crates)
+        run: |
+          for pkg in gridway gridway-baseapp gridway-client gridway-consensus \
+                     gridway-crypto gridway-errors gridway-log gridway-math \
+                     gridway-simapp gridway-store gridway-telemetry gridway-types; do
+            cargo fmt -p "$pkg" -- --check
+          done
 
   clippy:
     name: Clippy
@@ -55,7 +61,7 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo clippy --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder -- -D warnings
+      - run: cargo clippy --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --exclude validator --exclude hook --exclude bank --exclude test-minimal -- -D warnings
 
   test:
     name: Test
@@ -72,7 +78,7 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
+      - run: cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --exclude validator --exclude hook --exclude bank --exclude test-minimal
 
   build-release:
     name: Build Release
@@ -89,4 +95,4 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --release
+      - run: cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --exclude validator --exclude hook --exclude bank --exclude test-minimal --release

@@ -10,9 +10,7 @@
 
 use gridway_baseapp::BaseApp;
 use gridway_consensus::mempool::{Mempool, MempoolConfig};
-use gridway_simapp::{
-    build_transfer_tx, setup_genesis, SimState, TEST_CHAIN_ID, TEST_DENOM,
-};
+use gridway_simapp::{build_transfer_tx, setup_genesis, SimState, TEST_CHAIN_ID, TEST_DENOM};
 
 use proptest::prelude::*;
 

@@ -12,10 +12,7 @@ use clap::{value_parser, Arg, Command};
 use commonware_codec::Encode;
 use commonware_consensus::simplex::scheme::bls12381_threshold;
 use commonware_cryptography::{
-    bls12381::primitives::variant::MinSig,
-    certificate::mocks::Fixture,
-    ed25519::PrivateKey,
-    Signer,
+    bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PrivateKey, Signer,
 };
 use commonware_math::algebra::Random;
 use commonware_utils::hex;
@@ -156,10 +153,7 @@ fn main() {
     let no_local = matches.get_flag("no_local");
     let internal_ports = matches.get_flag("internal_ports");
 
-    assert!(
-        n_bootstrappers <= n_peers,
-        "bootstrappers must be <= peers"
-    );
+    assert!(n_bootstrappers <= n_peers, "bootstrappers must be <= peers");
 
     // Construct output paths
     let raw_current_dir = match std::env::current_dir() {
@@ -233,10 +227,12 @@ fn main() {
     // Resolve per-peer hostnames/IPs
     let hosts: Vec<IpAddr> = if let Some(csv) = &hosts_csv {
         csv.split(',')
-            .map(|h| h.trim().parse::<IpAddr>().unwrap_or_else(|_| {
-                eprintln!("Invalid IP in --hosts: '{}'", h.trim());
-                std::process::exit(1);
-            }))
+            .map(|h| {
+                h.trim().parse::<IpAddr>().unwrap_or_else(|_| {
+                    eprintln!("Invalid IP in --hosts: '{}'", h.trim());
+                    std::process::exit(1);
+                })
+            })
             .collect()
     } else if let Some(pattern) = &host_pattern {
         // For hostname patterns we still need IPs in peers.yaml (SocketAddr).
@@ -281,10 +277,7 @@ fn main() {
             (port, port + 1, port + 2)
         };
 
-        addresses.insert(
-            name.clone(),
-            SocketAddr::new(hosts[i], p2p_port),
-        );
+        addresses.insert(name.clone(), SocketAddr::new(hosts[i], p2p_port));
         let peer_config_file = format!("{name}.yaml");
         let directory = if internal_ports {
             // Docker: use a fixed path inside the container
@@ -340,7 +333,10 @@ fn main() {
         std::process::exit(1);
     }
     if let Err(e) = fs::create_dir_all(&storage_output) {
-        eprintln!("Failed to create storage directory '{}': {}", storage_output, e);
+        eprintln!(
+            "Failed to create storage directory '{}': {}",
+            storage_output, e
+        );
         std::process::exit(1);
     }
 

@@ -19,6 +19,4 @@ pub mod types;
 pub use application::GridwayApp;
 pub use config::{GenesisAccount, GenesisBalance, GenesisConfig, NodeConfig, Peers};
 pub use mempool::{Mempool, MempoolConfig, MempoolError};
-pub use types::{
-    Activity, Finalization, GridwayScheme, Notarization, Seedable,
-};
+pub use types::{Activity, Finalization, GridwayScheme, Notarization, Seedable};

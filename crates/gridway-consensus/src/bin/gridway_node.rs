@@ -7,15 +7,15 @@
 //! - commonware-consensus (simplex) for BFT consensus
 //! - gridway-baseapp for WASM microkernel execution
 
+use gridway_baseapp::{Account, BaseApp};
+use gridway_client::Keystore;
 use gridway_consensus::{
     application::GridwayApp,
     config::{GenesisConfig, NodeConfig, Peers},
     engine,
-    types::{PublicKey, EPOCH, NAMESPACE},
     mempool::MempoolError,
+    types::{PublicKey, EPOCH, NAMESPACE},
 };
-use gridway_baseapp::{BaseApp, Account};
-use gridway_client::Keystore;
 
 use axum::{
     extract::{Path, State},
@@ -92,10 +92,7 @@ fn apply_genesis(baseapp: &mut BaseApp, genesis: &GenesisConfig) -> Result<[u8; 
             baseapp
                 .set_balance(&account.address, &balance.denom, balance.amount)
                 .map_err(|e| {
-                    format!(
-                        "set_balance for {} {}: {e}",
-                        account.address, balance.denom
-                    )
+                    format!("set_balance for {} {}: {e}", account.address, balance.denom)
                 })?;
         }
     }
@@ -161,10 +158,7 @@ fn error_response(status: StatusCode, msg: impl Into<String>) -> Response {
 /// POST /tx — submit a transaction.
 // TODO: Add per-IP rate limiting here to prevent mempool spam attacks.
 // Without rate limiting, an attacker can flood the mempool with transactions.
-async fn handle_submit_tx(
-    State(state): State<Arc<AppState>>,
-    body: axum::body::Bytes,
-) -> Response {
+async fn handle_submit_tx(State(state): State<Arc<AppState>>, body: axum::body::Bytes) -> Response {
     let app = &state.app;
     if body.is_empty() {
         return error_response(StatusCode::BAD_REQUEST, "empty body");
@@ -181,10 +175,16 @@ async fn handle_submit_tx(
         return error_response(StatusCode::BAD_REQUEST, "missing or invalid 'body' field");
     }
     if !tx_json.get("signature").is_some_and(|v| v.is_string()) {
-        return error_response(StatusCode::BAD_REQUEST, "missing or invalid 'signature' field");
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "missing or invalid 'signature' field",
+        );
     }
     if !tx_json.get("public_key").is_some_and(|v| v.is_string()) {
-        return error_response(StatusCode::BAD_REQUEST, "missing or invalid 'public_key' field");
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "missing or invalid 'public_key' field",
+        );
     }
 
     match app.submit_tx(body.to_vec()) {
@@ -223,7 +223,12 @@ async fn handle_balance_query(
     let app = &state.app;
     let balance = match app.baseapp().read() {
         Ok(baseapp) => baseapp.get_balance(&address, &denom).unwrap_or(0),
-        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal: read lock poisoned"),
+        Err(_) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal: read lock poisoned",
+            )
+        }
     };
 
     (
@@ -245,7 +250,12 @@ async fn handle_account_query(
     let app = &state.app;
     let account = match app.baseapp().read() {
         Ok(baseapp) => baseapp.get_account(&address),
-        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal: read lock poisoned"),
+        Err(_) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal: read lock poisoned",
+            )
+        }
     };
 
     match account {
@@ -302,10 +312,7 @@ struct AppState {
 ///
 /// Requires `Authorization: Bearer <token>` if `api_token` is configured.
 /// Returns 413 if state has more than SNAPSHOT_MAX_ENTRIES entries.
-async fn handle_snapshot(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Response {
+async fn handle_snapshot(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     // Check bearer token authentication
     if let Some(ref expected_token) = state.api_token {
         let authorized = headers
@@ -343,16 +350,12 @@ async fn handle_snapshot(
                         json,
                     )
                         .into_response(),
-                    Err(e) => error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("serialize: {e}"),
-                    ),
+                    Err(e) => {
+                        error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("serialize: {e}"))
+                    }
                 }
             }
-            Err(e) => error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("export: {e}"),
-            ),
+            Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("export: {e}")),
         },
         Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "read lock failed"),
     }
@@ -383,7 +386,10 @@ fn build_router(app: GridwayApp, api_token: Option<String>) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
-        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+        ]);
 
     Router::new()
         .route("/tx", post(handle_submit_tx))
@@ -445,11 +451,17 @@ fn main() {
         .about("Validator for a gridway chain.")
         .arg(Arg::new("peers").long("peers").required(true))
         .arg(Arg::new("config").long("config").required(true))
-        .arg(Arg::new("genesis").long("genesis").required(true)
-            .help("Path to genesis.yaml containing initial chain state"))
-        .arg(Arg::new("snapshot")
-            .long("snapshot")
-            .help("Path or URL to state snapshot JSON file for fast bootstrap"))
+        .arg(
+            Arg::new("genesis")
+                .long("genesis")
+                .required(true)
+                .help("Path to genesis.yaml containing initial chain state"),
+        )
+        .arg(
+            Arg::new("snapshot")
+                .long("snapshot")
+                .help("Path or URL to state snapshot JSON file for fast bootstrap"),
+        )
         .get_matches();
 
     // Load peers file
@@ -534,20 +546,27 @@ fn main() {
         };
 
         match keystore.load_key(key_name, &password) {
-            Ok(key_bytes) => {
-                match PrivateKey::decode(key_bytes.as_ref()) {
-                    Ok(s) => {
-                        eprintln!("Loaded private key from keystore: {}/{}.json", ks_path, key_name);
-                        s
-                    }
-                    Err(e) => {
-                        eprintln!("Keystore key '{}' is not a valid ed25519 private key: {}", key_name, e);
-                        std::process::exit(1);
-                    }
+            Ok(key_bytes) => match PrivateKey::decode(key_bytes.as_ref()) {
+                Ok(s) => {
+                    eprintln!(
+                        "Loaded private key from keystore: {}/{}.json",
+                        ks_path, key_name
+                    );
+                    s
                 }
-            }
+                Err(e) => {
+                    eprintln!(
+                        "Keystore key '{}' is not a valid ed25519 private key: {}",
+                        key_name, e
+                    );
+                    std::process::exit(1);
+                }
+            },
             Err(e) => {
-                eprintln!("Failed to load key '{}' from keystore at '{}': {}", key_name, ks_path, e);
+                eprintln!(
+                    "Failed to load key '{}' from keystore at '{}': {}",
+                    key_name, ks_path, e
+                );
                 std::process::exit(1);
             }
         }
@@ -690,13 +709,14 @@ fn main() {
                 return;
             }
         };
-        let polynomial = match Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(peers_u32)) {
-            Ok(p) => p,
-            Err(e) => {
-                error!("Polynomial is invalid: {}", e);
-                return;
-            }
-        };
+        let polynomial =
+            match Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(peers_u32)) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("Polynomial is invalid: {}", e);
+                    return;
+                }
+            };
         let identity = polynomial.public();
         info!(
             ?public_key,
@@ -717,7 +737,11 @@ fn main() {
                 b
             }
             Err(e) => {
-                error!("Failed to create persistent BaseApp at {}: {}", state_db_path.display(), e);
+                error!(
+                    "Failed to create persistent BaseApp at {}: {}",
+                    state_db_path.display(),
+                    e
+                );
                 info!("Falling back to in-memory BaseApp");
                 match BaseApp::new("gridway".to_string()) {
                     Ok(b) => b,
@@ -791,39 +815,44 @@ fn main() {
             info!(path = %snap_path, "loading state snapshot for fast bootstrap");
             // TODO: Replace tokio::process::Command("curl") with reqwest when added as a dependency.
             // Using async subprocess to avoid blocking the runtime during snapshot download.
-            let snapshot_data = if snap_path.starts_with("http://") || snap_path.starts_with("https://") {
-                match ::tokio::process::Command::new("curl")
-                    .args(["-s", "-f", "--max-time", "300", snap_path])
-                    .output()
-                    .await
-                {
-                    Ok(o) if o.status.success() => o.stdout,
-                    Ok(o) => {
-                        error!("Failed to download snapshot: curl failed with status {}", o.status);
-                        return;
+            let snapshot_data =
+                if snap_path.starts_with("http://") || snap_path.starts_with("https://") {
+                    match ::tokio::process::Command::new("curl")
+                        .args(["-s", "-f", "--max-time", "300", snap_path])
+                        .output()
+                        .await
+                    {
+                        Ok(o) if o.status.success() => o.stdout,
+                        Ok(o) => {
+                            error!(
+                                "Failed to download snapshot: curl failed with status {}",
+                                o.status
+                            );
+                            return;
+                        }
+                        Err(e) => {
+                            error!("Failed to download snapshot: curl error: {}", e);
+                            return;
+                        }
                     }
-                    Err(e) => {
-                        error!("Failed to download snapshot: curl error: {}", e);
-                        return;
+                } else {
+                    match std::fs::read(snap_path) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            error!("Failed to read snapshot file '{}': {}", snap_path, e);
+                            return;
+                        }
                     }
-                }
-            } else {
-                match std::fs::read(snap_path) {
-                    Ok(data) => data,
-                    Err(e) => {
-                        error!("Failed to read snapshot file '{}': {}", snap_path, e);
-                        return;
-                    }
-                }
-            };
+                };
 
-            let snapshot: gridway_store::merkle::StateSnapshot = match serde_json::from_slice(&snapshot_data) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Failed to parse snapshot JSON: {}", e);
-                    return;
-                }
-            };
+            let snapshot: gridway_store::merkle::StateSnapshot =
+                match serde_json::from_slice(&snapshot_data) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("Failed to parse snapshot JSON: {}", e);
+                        return;
+                    }
+                };
             info!(
                 entries = snapshot.entries.len(),
                 version = snapshot.version,
@@ -896,8 +925,7 @@ fn main() {
             network.register(RECOVERED_CHANNEL, recovered_limit, config.message_backlog);
 
         let resolver_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
-        let resolver =
-            network.register(RESOLVER_CHANNEL, resolver_limit, config.message_backlog);
+        let resolver = network.register(RESOLVER_CHANNEL, resolver_limit, config.message_backlog);
 
         let broadcaster_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
         let broadcaster = network.register(
@@ -951,7 +979,9 @@ fn main() {
             context.with_label("engine"),
             engine_cfg,
             gridway_app,
-        ).await {
+        )
+        .await
+        {
             Ok(e) => e,
             Err(e) => {
                 error!("Failed to create consensus engine: {}", e);

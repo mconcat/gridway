@@ -60,7 +60,11 @@ fn handle_msg_send(_ctx: &ModuleContext, msg: &Message) -> ModuleResponse {
             Ok(a) => a,
             Err(_) => return error_response(format!("invalid amount: {}", amt_str)),
         };
-        let d = coin.get("denom").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let d = coin
+            .get("denom")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         (amt, d)
     } else if let Some(amt_val) = raw.get("amount") {
         // Flat format
@@ -74,7 +78,11 @@ fn handle_msg_send(_ctx: &ModuleContext, msg: &Message) -> ModuleResponse {
         } else {
             return error_response("invalid amount type".into());
         };
-        let d = raw.get("denom").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let d = raw
+            .get("denom")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         (amt, d)
     } else {
         return error_response("missing amount".into());
@@ -153,8 +161,7 @@ fn get_balance(store: &kvstore::Store, key: &str) -> u128 {
 fn query_balance(data: &[u8]) -> Result<Vec<u8>, String> {
     let query: BalanceQuery =
         serde_json::from_slice(data).map_err(|e| format!("invalid query: {}", e))?;
-    let store =
-        kvstore::open_store("bank").map_err(|e| format!("failed to open store: {}", e))?;
+    let store = kvstore::open_store("bank").map_err(|e| format!("failed to open store: {}", e))?;
     let key = format!("balance_{}_{}", query.address, query.denom);
     let balance = get_balance(&store, &key);
     serde_json::to_vec(&BalanceResponse {

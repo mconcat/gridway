@@ -7,6 +7,6 @@ pub mod tx;
 pub use block::GridwayBlock;
 pub use event::{Event, EventAttribute};
 pub use tx::{
-    AuthInfo, Fee, FeeAmount, GridwayTx, MsgSend, RawTx, SdkMsg, SignerInfo, SignedTx,
-    TxBody, TxMessage, TxResponse,
+    AuthInfo, Fee, FeeAmount, GridwayTx, MsgSend, RawTx, SdkMsg, SignedTx, SignerInfo, TxBody,
+    TxMessage, TxResponse,
 };

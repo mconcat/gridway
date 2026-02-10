@@ -42,7 +42,9 @@ fn read_password(prompt: &str) -> String {
 
 /// Get the keystore directory from `GRIDWAY_KEYSTORE_DIR` env var, or None for default.
 fn keystore_dir() -> Option<PathBuf> {
-    std::env::var("GRIDWAY_KEYSTORE_DIR").ok().map(PathBuf::from)
+    std::env::var("GRIDWAY_KEYSTORE_DIR")
+        .ok()
+        .map(PathBuf::from)
 }
 
 #[tokio::main]
@@ -116,72 +118,68 @@ async fn main() {
                         ),
                 )
                 .subcommand(
-                    Command::new("delete")
-                        .about("Delete a stored key")
-                        .arg(
-                            Arg::new("name")
-                                .long("name")
-                                .required(true)
-                                .help("Name of the key to delete"),
-                        ),
+                    Command::new("delete").about("Delete a stored key").arg(
+                        Arg::new("name")
+                            .long("name")
+                            .required(true)
+                            .help("Name of the key to delete"),
+                    ),
                 ),
         )
         .subcommand(
-            Command::new("tx")
-                .about("Transaction commands")
-                .subcommand(
-                    Command::new("send")
-                        .about("Build, sign, and submit a bank.MsgSend transaction")
-                        .arg(
-                            Arg::new("key")
-                                .long("key")
-                                .help("Hex-encoded ed25519 private key")
-                                .conflicts_with("keyname"),
-                        )
-                        .arg(
-                            Arg::new("keyname")
-                                .long("keyname")
-                                .help("Name of a key in the encrypted keystore")
-                                .conflicts_with("key"),
-                        )
-                        .arg(
-                            Arg::new("to")
-                                .long("to")
-                                .required(true)
-                                .help("Recipient address (hex)"),
-                        )
-                        .arg(
-                            Arg::new("amount")
-                                .long("amount")
-                                .required(true)
-                                .help("Amount to send")
-                                .value_parser(clap::value_parser!(u64)),
-                        )
-                        .arg(
-                            Arg::new("denom")
-                                .long("denom")
-                                .default_value(DEFAULT_DENOM)
-                                .help("Denomination (default: ugridway)"),
-                        )
-                        .arg(
-                            Arg::new("node")
-                                .long("node")
-                                .default_value(DEFAULT_NODE)
-                                .help("Node URL (default: http://localhost:4547)"),
-                        )
-                        .arg(
-                            Arg::new("memo")
-                                .long("memo")
-                                .default_value("")
-                                .help("Transaction memo"),
-                        )
-                        .arg(
-                            Arg::new("dry-run")
-                                .long("dry-run")
-                                .action(clap::ArgAction::SetTrue)
-                                .help("Print signed TX JSON without submitting"),
-                        ),
-                ),
+            Command::new("tx").about("Transaction commands").subcommand(
+                Command::new("send")
+                    .about("Build, sign, and submit a bank.MsgSend transaction")
+                    .arg(
+                        Arg::new("key")
+                            .long("key")
+                            .help("Hex-encoded ed25519 private key")
+                            .conflicts_with("keyname"),
+                    )
+                    .arg(
+                        Arg::new("keyname")
+                            .long("keyname")
+                            .help("Name of a key in the encrypted keystore")
+                            .conflicts_with("key"),
+                    )
+                    .arg(
+                        Arg::new("to")
+                            .long("to")
+                            .required(true)
+                            .help("Recipient address (hex)"),
+                    )
+                    .arg(
+                        Arg::new("amount")
+                            .long("amount")
+                            .required(true)
+                            .help("Amount to send")
+                            .value_parser(clap::value_parser!(u64)),
+                    )
+                    .arg(
+                        Arg::new("denom")
+                            .long("denom")
+                            .default_value(DEFAULT_DENOM)
+                            .help("Denomination (default: ugridway)"),
+                    )
+                    .arg(
+                        Arg::new("node")
+                            .long("node")
+                            .default_value(DEFAULT_NODE)
+                            .help("Node URL (default: http://localhost:4547)"),
+                    )
+                    .arg(
+                        Arg::new("memo")
+                            .long("memo")
+                            .default_value("")
+                            .help("Transaction memo"),
+                    )
+                    .arg(
+                        Arg::new("dry-run")
+                            .long("dry-run")
+                            .action(clap::ArgAction::SetTrue)
+                            .help("Print signed TX JSON without submitting"),
+                    ),
+            ),
         )
         .subcommand(
             Command::new("query")
@@ -226,14 +224,12 @@ async fn main() {
                 ),
         )
         .subcommand(
-            Command::new("status")
-                .about("Query node status")
-                .arg(
-                    Arg::new("node")
-                        .long("node")
-                        .default_value(DEFAULT_NODE)
-                        .help("Node URL"),
-                ),
+            Command::new("status").about("Query node status").arg(
+                Arg::new("node")
+                    .long("node")
+                    .default_value(DEFAULT_NODE)
+                    .help("Node URL"),
+            ),
         )
         .get_matches();
 

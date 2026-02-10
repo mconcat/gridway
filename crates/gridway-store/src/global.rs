@@ -4,8 +4,8 @@
 //! Each module (bank, auth, staking, etc.) gets its own isolated namespace.
 
 use crate::{KVStore, MerkleStore, Result, StoreError};
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 /// Global application store that manages namespaced sub-stores.
@@ -41,7 +41,9 @@ impl GlobalAppStore {
 
     /// Register a namespace
     pub fn register_namespace(&self, name: &str, _read_only: bool) -> Result<()> {
-        let mut ns = self.namespaces.lock()
+        let mut ns = self
+            .namespaces
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         ns.insert(name.to_string(), _read_only);
         Ok(())
@@ -49,7 +51,9 @@ impl GlobalAppStore {
 
     /// Get a namespaced store view
     pub fn get_namespace(&self, name: &str) -> Result<NamespacedStore> {
-        let ns = self.namespaces.lock()
+        let ns = self
+            .namespaces
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         if !ns.contains_key(name) {
             return Err(StoreError::StoreNotFound(name.to_string()));
@@ -68,7 +72,9 @@ impl GlobalAppStore {
     /// Set a value in a namespace (convenience method)
     pub fn set_namespaced(&self, namespace: &str, key: &[u8], value: &[u8]) -> Result<()> {
         let prefixed_key = Self::make_key(namespace, key);
-        let mut store = self.store.lock()
+        let mut store = self
+            .store
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         store.set(&prefixed_key, value)
     }
@@ -76,7 +82,9 @@ impl GlobalAppStore {
     /// Get a value from a namespace (convenience method)
     pub fn get_namespaced(&self, namespace: &str, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let prefixed_key = Self::make_key(namespace, key);
-        let store = self.store.lock()
+        let store = self
+            .store
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         store.get(&prefixed_key)
     }
@@ -91,14 +99,18 @@ impl GlobalAppStore {
 
     /// Create a checkpoint of the underlying MerkleStore state.
     pub fn checkpoint(&self) -> Result<crate::merkle::MerkleCheckpoint> {
-        let store = self.store.lock()
+        let store = self
+            .store
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         Ok(store.checkpoint())
     }
 
     /// Restore the underlying MerkleStore from a checkpoint (consumes it).
     pub fn restore(&self, cp: crate::merkle::MerkleCheckpoint) -> Result<()> {
-        let mut store = self.store.lock()
+        let mut store = self
+            .store
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         store.restore(cp);
         Ok(())
@@ -106,12 +118,13 @@ impl GlobalAppStore {
 
     /// Restore the underlying MerkleStore from a checkpoint reference (clones data).
     pub fn restore_from(&self, cp: &crate::merkle::MerkleCheckpoint) -> Result<()> {
-        let mut store = self.store.lock()
+        let mut store = self
+            .store
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         store.restore_from(cp);
         Ok(())
     }
-
 }
 
 /// A namespaced view into the GlobalAppStore.
@@ -133,21 +146,27 @@ impl NamespacedStore {
 impl KVStore for NamespacedStore {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let prefixed = self.prefixed_key(key);
-        let store = self.store.lock()
+        let store = self
+            .store
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         store.get(&prefixed)
     }
 
     fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
         let prefixed = self.prefixed_key(key);
-        let mut store = self.store.lock()
+        let mut store = self
+            .store
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         store.set(&prefixed, value)
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<()> {
         let prefixed = self.prefixed_key(key);
-        let mut store = self.store.lock()
+        let mut store = self
+            .store
+            .lock()
             .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
         store.delete(&prefixed)
     }
