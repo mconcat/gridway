@@ -316,6 +316,10 @@ fn main() {
             mailbox_size,
             deque_size,
             signature_threads,
+
+            api_token: None,
+            keystore_path: None,
+            keystore_key_name: "node".to_string(),
         };
         configurations.push((name, peer_config_file, peer_config));
         if !internal_ports {

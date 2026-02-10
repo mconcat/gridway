@@ -15,10 +15,11 @@ use gridway_consensus::{
     mempool::MempoolError,
 };
 use gridway_baseapp::{BaseApp, Account};
+use gridway_client::Keystore;
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -159,9 +160,10 @@ fn error_response(status: StatusCode, msg: impl Into<String>) -> Response {
 
 /// POST /tx — submit a transaction.
 async fn handle_submit_tx(
-    State(app): State<Arc<GridwayApp>>,
+    State(state): State<Arc<AppState>>,
     body: axum::body::Bytes,
 ) -> Response {
+    let app = &state.app;
     if body.is_empty() {
         return error_response(StatusCode::BAD_REQUEST, "empty body");
     }
@@ -201,12 +203,13 @@ async fn handle_submit_tx(
 
 /// GET /balance/:address/:denom — query balance.
 async fn handle_balance_query(
-    State(app): State<Arc<GridwayApp>>,
+    State(state): State<Arc<AppState>>,
     Path((address, denom)): Path<(String, String)>,
 ) -> Response {
-    let balance = match app.baseapp().lock() {
+    let app = &state.app;
+    let balance = match app.baseapp().read() {
         Ok(baseapp) => baseapp.get_balance(&address, &denom).unwrap_or(0),
-        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal: lock poisoned"),
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal: read lock poisoned"),
     };
 
     (
@@ -222,12 +225,13 @@ async fn handle_balance_query(
 
 /// GET /account/:address — query account info.
 async fn handle_account_query(
-    State(app): State<Arc<GridwayApp>>,
+    State(state): State<Arc<AppState>>,
     Path(address): Path<String>,
 ) -> Response {
-    let account = match app.baseapp().lock() {
+    let app = &state.app;
+    let account = match app.baseapp().read() {
         Ok(baseapp) => baseapp.get_account(&address),
-        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal: lock poisoned"),
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal: read lock poisoned"),
     };
 
     match account {
@@ -248,8 +252,9 @@ async fn handle_account_query(
 }
 
 /// GET /status — node status.
-async fn handle_status(State(app): State<Arc<GridwayApp>>) -> Response {
-    match app.baseapp().lock() {
+async fn handle_status(State(state): State<Arc<AppState>>) -> Response {
+    let app = &state.app;
+    match app.baseapp().read() {
         Ok(baseapp) => {
             let root = hex::encode(baseapp.last_state_root());
             let chain_id = app.chain_id().to_string();
@@ -264,32 +269,78 @@ async fn handle_status(State(app): State<Arc<GridwayApp>>) -> Response {
             )
                 .into_response()
         }
-        Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "lock failed"),
+        Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "read lock failed"),
     }
 }
 
-/// GET /snapshot — full state snapshot.
-async fn handle_snapshot(State(app): State<Arc<GridwayApp>>) -> Response {
-    match app.baseapp().lock() {
+/// Maximum number of state entries before the /snapshot endpoint refuses
+/// to return inline JSON and suggests file-based export instead.
+const SNAPSHOT_MAX_ENTRIES: usize = 10_000;
+
+/// Shared state for the HTTP API, including optional API token for auth.
+#[derive(Clone)]
+struct AppState {
+    app: Arc<GridwayApp>,
+    api_token: Option<String>,
+}
+
+/// GET /snapshot — full state snapshot (authenticated, size-limited).
+///
+/// Requires `Authorization: Bearer <token>` if `api_token` is configured.
+/// Returns 413 if state has more than SNAPSHOT_MAX_ENTRIES entries.
+async fn handle_snapshot(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    // Check bearer token authentication
+    if let Some(ref expected_token) = state.api_token {
+        let authorized = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .map(|token| token == expected_token.as_str())
+            .unwrap_or(false);
+        if !authorized {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "missing or invalid Authorization: Bearer <token>",
+            );
+        }
+    }
+
+    match state.app.baseapp().read() {
         Ok(baseapp) => match baseapp.export_snapshot() {
-            Ok(snapshot) => match serde_json::to_string(&snapshot) {
-                Ok(json) => (
-                    StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    json,
-                )
-                    .into_response(),
-                Err(e) => error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("serialize: {e}"),
-                ),
-            },
+            Ok(snapshot) => {
+                // Size limit check
+                if snapshot.entries.len() > SNAPSHOT_MAX_ENTRIES {
+                    return error_response(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        format!(
+                            "state has {} entries (limit {}). Use file-based snapshot export instead (--snapshot flag on node start or export to file).",
+                            snapshot.entries.len(),
+                            SNAPSHOT_MAX_ENTRIES,
+                        ),
+                    );
+                }
+                match serde_json::to_string(&snapshot) {
+                    Ok(json) => (
+                        StatusCode::OK,
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                        json,
+                    )
+                        .into_response(),
+                    Err(e) => error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("serialize: {e}"),
+                    ),
+                }
+            }
             Err(e) => error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("export: {e}"),
             ),
         },
-        Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "lock failed"),
+        Err(_) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "read lock failed"),
     }
 }
 
@@ -301,8 +352,11 @@ async fn handle_health() -> impl IntoResponse {
 }
 
 /// Build the axum Router with all endpoints.
-fn build_router(app: GridwayApp) -> Router {
-    let shared_state = Arc::new(app);
+fn build_router(app: GridwayApp, api_token: Option<String>) -> Router {
+    let app_state = Arc::new(AppState {
+        app: Arc::new(app),
+        api_token,
+    });
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -317,13 +371,13 @@ fn build_router(app: GridwayApp) -> Router {
         .route("/snapshot", get(handle_snapshot))
         .route("/health", get(handle_health))
         .layer(cors)
-        .with_state(shared_state)
+        .with_state(app_state)
 }
 
 /// Start the HTTP API server on a separate OS thread with its own tokio runtime.
 ///
 /// This avoids conflicts with commonware's internal tokio runtime.
-fn start_http_server(addr: SocketAddr, app: GridwayApp) {
+fn start_http_server(addr: SocketAddr, app: GridwayApp, api_token: Option<String>) {
     std::thread::spawn(move || {
         let rt = match ::tokio::runtime::Runtime::new() {
             Ok(rt) => rt,
@@ -334,7 +388,7 @@ fn start_http_server(addr: SocketAddr, app: GridwayApp) {
         };
 
         rt.block_on(async move {
-            let router = build_router(app);
+            let router = build_router(app, api_token);
 
             let listener = match ::tokio::net::TcpListener::bind(addr).await {
                 Ok(l) => l,
@@ -442,18 +496,54 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let key = match from_hex_formatted(&config.private_key) {
-        Some(k) => k,
-        None => {
-            eprintln!("Could not parse private key");
-            std::process::exit(1);
+    // Load private key: prefer keystore if configured, fall back to plaintext hex
+    let signer = if let Some(ref ks_path) = config.keystore_path {
+        let keystore = Keystore::new(Some(std::path::PathBuf::from(ks_path)));
+        let key_name = &config.keystore_key_name;
+
+        // Read password from GRIDWAY_KEYSTORE_PASSWORD env var or prompt
+        let password = match std::env::var("GRIDWAY_KEYSTORE_PASSWORD") {
+            Ok(pw) => pw,
+            Err(_) => {
+                eprintln!("GRIDWAY_KEYSTORE_PASSWORD environment variable not set.");
+                eprintln!("Set it to the keystore password for key '{}'.", key_name);
+                std::process::exit(1);
+            }
+        };
+
+        match keystore.load_key(key_name, &password) {
+            Ok(key_bytes) => {
+                match PrivateKey::decode(key_bytes.as_ref()) {
+                    Ok(s) => {
+                        eprintln!("Loaded private key from keystore: {}/{}.json", ks_path, key_name);
+                        s
+                    }
+                    Err(e) => {
+                        eprintln!("Keystore key '{}' is not a valid ed25519 private key: {}", key_name, e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to load key '{}' from keystore at '{}': {}", key_name, ks_path, e);
+                std::process::exit(1);
+            }
         }
-    };
-    let signer = match PrivateKey::decode(key.as_ref()) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Private key is invalid: {}", e);
-            std::process::exit(1);
+    } else {
+        // Fall back to plaintext private key from config
+        let key = match from_hex_formatted(&config.private_key) {
+            Some(k) => k,
+            None => {
+                eprintln!("Could not parse private key");
+                std::process::exit(1);
+            }
+        };
+        match PrivateKey::decode(key.as_ref()) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Private key is invalid: {}", e);
+                std::process::exit(1);
+            }
         }
     };
     let public_key = signer.public_key();
@@ -724,7 +814,7 @@ fn main() {
         // ====================================================================
         if tx_port > 0 {
             let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), tx_port);
-            start_http_server(http_addr, gridway_app.clone());
+            start_http_server(http_addr, gridway_app.clone(), config.api_token.clone());
         }
 
         // ====================================================================

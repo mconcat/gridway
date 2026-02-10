@@ -25,7 +25,7 @@ use commonware_utils::SystemTimeExt;
 use commonware_utils::Acknowledgement;
 use futures::StreamExt;
 use rand::Rng;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tracing::info;
 
 /// Milliseconds in the future to allow for block timestamps.
@@ -46,7 +46,9 @@ pub struct GridwayApp {
 
     /// Shared reference to the BaseApp (thread-safe)
     /// The BaseApp manages all WASM module execution and state.
-    baseapp: Arc<Mutex<BaseApp>>,
+    /// Uses RwLock so that read-only HTTP queries can run concurrently,
+    /// while propose/verify/report take exclusive write locks.
+    baseapp: Arc<RwLock<BaseApp>>,
 
     /// Production-grade mempool with size limits and duplicate detection.
     mempool: Arc<Mutex<Mempool>>,
@@ -65,7 +67,7 @@ impl GridwayApp {
         Self {
             chain_id: Arc::new(chain_id),
             genesis: Arc::new(genesis),
-            baseapp: Arc::new(Mutex::new(baseapp)),
+            baseapp: Arc::new(RwLock::new(baseapp)),
             mempool: Arc::new(Mutex::new(Mempool::new(mempool_config))),
         }
     }
@@ -91,7 +93,9 @@ impl GridwayApp {
     }
 
     /// Get access to the BaseApp (for queries, etc.)
-    pub fn baseapp(&self) -> &Arc<Mutex<BaseApp>> {
+    /// Returns an RwLock — HTTP query handlers should use `.read()`,
+    /// while state-mutating operations use `.write()`.
+    pub fn baseapp(&self) -> &Arc<RwLock<BaseApp>> {
         &self.baseapp
     }
 
@@ -106,12 +110,29 @@ impl GridwayApp {
         }
     }
 
+    /// Re-insert drained transactions back into the mempool.
+    ///
+    /// Called when block execution fails so that the drained transactions
+    /// are not lost.
+    fn requeue_txs(&self, txs: Vec<Vec<u8>>) {
+        match self.mempool.lock() {
+            Ok(mut pool) => {
+                let count = txs.len();
+                pool.requeue(txs);
+                tracing::info!(count, "requeued transactions after execution failure");
+            }
+            Err(e) => {
+                tracing::error!("mempool lock poisoned in requeue_txs: {e} — {} txs lost", txs.len());
+            }
+        }
+    }
+
     /// Replay a sequence of finalized blocks to rebuild state.
     ///
     /// Used on node restart to catch up BaseApp with persisted block history.
     /// Genesis state must already be applied before calling this method.
     pub fn replay_blocks(&self, blocks: &[GridwayBlock]) -> std::result::Result<(), String> {
-        let mut app = self.baseapp.lock().map_err(|e| format!("lock: {e}"))?;
+        let mut app = self.baseapp.write().map_err(|e| format!("write lock: {e}"))?;
 
         for block in blocks {
             let height = block.height.get();
@@ -179,10 +200,10 @@ where
         // Execute through BaseApp to get state root.
         // Restore to committed state first so we always execute from a
         // clean baseline (not leftover state from a previous verify/propose).
-        let mut app = match self.baseapp.lock() {
+        let mut app = match self.baseapp.write() {
             Ok(app) => app,
             Err(e) => {
-                tracing::error!("baseapp lock poisoned in propose: {e}");
+                tracing::error!("baseapp write lock poisoned in propose: {e}");
                 return None;
             }
         };
@@ -210,6 +231,10 @@ where
                 // On failure, restore to committed and propose an empty block.
                 let _ = app.restore_to_committed();
                 let stale_root = *app.last_state_root();
+                // Drop the baseapp lock before requeuing (requeue needs mempool lock only)
+                drop(app);
+                // Re-insert drained transactions so they aren't lost
+                self.requeue_txs(txs);
                 Some(GridwayBlock::new(
                     parent.digest(),
                     new_height,
@@ -258,10 +283,10 @@ where
         // checkpoint.  This ensures verify() NEVER mutates shared state,
         // so a verified-but-not-finalized block cannot pollute the trie.
         let verified = {
-            let mut app = match self.baseapp.lock() {
+            let mut app = match self.baseapp.write() {
                 Ok(app) => app,
                 Err(e) => {
-                    tracing::error!("baseapp lock poisoned in verify: {e}");
+                    tracing::error!("baseapp write lock poisoned in verify: {e}");
                     return false;
                 }
             };
@@ -296,7 +321,7 @@ impl Reporter for GridwayApp {
         if let Update::Block(block, ack_rx) = activity {
             info!(height = %block.height(), txs = block.transactions.len(), "finalized block");
 
-            let committed = match self.baseapp.lock() {
+            let committed = match self.baseapp.write() {
                 Ok(mut app) => {
                     // Restore to committed state first so we always execute
                     // the winning block from a clean baseline.
@@ -350,7 +375,7 @@ impl Reporter for GridwayApp {
                 Err(e) => {
                     tracing::error!(
                         height = %block.height(),
-                        "CRITICAL: baseapp lock poisoned in report — NOT acknowledging: {e}"
+                        "CRITICAL: baseapp write lock poisoned in report — NOT acknowledging: {e}"
                     );
                     false
                 }

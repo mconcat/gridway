@@ -47,6 +47,25 @@ pub struct NodeConfig {
 
     /// Number of threads for parallel signature verification.
     pub signature_threads: usize,
+
+    /// Optional bearer token for authenticating sensitive API endpoints
+    /// (e.g. /snapshot). If unset, those endpoints are unrestricted.
+    #[serde(default)]
+    pub api_token: Option<String>,
+
+    /// Optional path to an encrypted keystore directory.
+    /// If set, the node will attempt to load its private key from the
+    /// keystore instead of using the plaintext `private_key` field.
+    #[serde(default)]
+    pub keystore_path: Option<String>,
+
+    /// Name of the key in the keystore to load (default: "node").
+    #[serde(default = "default_keystore_key_name")]
+    pub keystore_key_name: String,
+}
+
+fn default_keystore_key_name() -> String {
+    "node".to_string()
 }
 
 /// A list of peers provided when a validator is run locally.

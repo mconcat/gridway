@@ -190,6 +190,36 @@ impl Mempool {
         drained
     }
 
+    /// Re-insert transactions back into the front of the mempool.
+    ///
+    /// Used when block execution fails after draining — the drained
+    /// transactions are pushed back so they aren't lost.
+    /// Transactions that would violate size limits or are duplicates are
+    /// silently dropped (they were already in the pool, so duplicates
+    /// shouldn't happen unless there's a race).
+    pub fn requeue(&mut self, txs: Vec<Vec<u8>>) {
+        // Insert in reverse order at the front so original FIFO order is preserved.
+        for tx in txs.into_iter().rev() {
+            let hash = Self::tx_hash(&tx);
+            if self.seen_hashes.contains(&hash) {
+                // Already back in the pool (shouldn't happen, but be safe)
+                continue;
+            }
+            if self.txs.len() >= self.config.max_txs {
+                tracing::warn!("requeue: mempool full, dropping tx {}", hex::encode(hash));
+                continue;
+            }
+            let tx_size = tx.len();
+            if self.total_size + tx_size > self.config.max_total_size {
+                tracing::warn!("requeue: total size limit reached, dropping tx {}", hex::encode(hash));
+                continue;
+            }
+            self.seen_hashes.insert(hash);
+            self.total_size += tx_size;
+            self.txs.push_front(tx);
+        }
+    }
+
     /// Return the number of pending transactions.
     pub fn len(&self) -> usize {
         self.txs.len()
