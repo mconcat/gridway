@@ -856,7 +856,7 @@ fn main() {
             info!(
                 entries = snapshot.entries.len(),
                 version = snapshot.version,
-                root_hash = hex::encode(&snapshot.root_hash),
+                root_hash = hex::encode(snapshot.root_hash),
                 "importing snapshot"
             );
             if let Err(e) = baseapp.import_snapshot(&snapshot) {

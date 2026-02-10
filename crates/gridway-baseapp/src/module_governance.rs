@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::component_host::DEFAULT_MAX_WASM_BINARY_SIZE;
 use crate::module_router::{ModuleConfig, ModuleRouter, RouterError};

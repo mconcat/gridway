@@ -203,7 +203,7 @@ impl MerkleStore {
         log::debug!(
             "flushed {} trie nodes to disk (root={}, version={})",
             entries.len(),
-            hex::encode(&self.root),
+            hex::encode(self.root),
             self.version
         );
 
@@ -256,7 +256,7 @@ impl MerkleStore {
         log::info!(
             "loaded {} trie nodes from disk (root={}, version={})",
             entries.len(),
-            hex::encode(&self.root),
+            hex::encode(self.root),
             self.version
         );
 

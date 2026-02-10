@@ -24,8 +24,6 @@ use std::{
 };
 use tracing::info;
 
-/// Default initial balance for each validator in ugridway.
-
 fn main() {
     // Initialize logger
     tracing_subscriber::fmt().init();
@@ -234,7 +232,7 @@ fn main() {
                 })
             })
             .collect()
-    } else if let Some(pattern) = &host_pattern {
+    } else if let Some(_pattern) = &host_pattern {
         // For hostname patterns we still need IPs in peers.yaml (SocketAddr).
         // Use 172.28.0.{10+i} as convention for Docker bridge network.
         (0..n_peers)

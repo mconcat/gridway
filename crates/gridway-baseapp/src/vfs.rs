@@ -15,7 +15,7 @@ use std::time::SystemTime;
 
 use gridway_store::{KVStore, StoreError};
 use thiserror::Error;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// VFS error types
 #[derive(Error, Debug)]

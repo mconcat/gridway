@@ -216,6 +216,7 @@ impl kvstore::HostStore for ComponentState {
             wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
         let result = self.table.get(&vfs_handle).ok();
         // Prevent drop from removing the resource — handle is owned by the caller
+        #[allow(clippy::forget_non_drop)]
         std::mem::forget(vfs_handle);
         let handle = result?;
         let namespace = handle.namespace.clone();
@@ -246,7 +247,8 @@ impl kvstore::HostStore for ComponentState {
                 }
             }
             // Prevent drop from removing the resource
-            std::mem::forget(vfs_handle);
+            #[allow(clippy::forget_non_drop)]
+        std::mem::forget(vfs_handle);
         } else {
             error!("kvstore::set — VFS not available!");
         }
@@ -262,7 +264,8 @@ impl kvstore::HostStore for ComponentState {
                 wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
             let result = self.table.get(&vfs_handle);
             // Prevent drop from removing the resource — handle is owned by the caller
-            std::mem::forget(vfs_handle);
+            #[allow(clippy::forget_non_drop)]
+        std::mem::forget(vfs_handle);
             if let Ok(handle) = result {
                 let namespace = handle.namespace.clone();
                 if let Err(e) = vfs.delete_key(&namespace, &key) {
@@ -285,6 +288,7 @@ impl kvstore::HostStore for ComponentState {
             wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
         let result = self.table.get(&vfs_handle).ok();
         // Prevent drop from removing the resource — handle is owned by the caller
+        #[allow(clippy::forget_non_drop)]
         std::mem::forget(vfs_handle);
         match result {
             Some(handle) => vfs.has_key(&handle.namespace, &key).ok().unwrap_or(false),
@@ -307,6 +311,7 @@ impl kvstore::HostStore for ComponentState {
             wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
         let result = self.table.get(&vfs_handle).ok();
         // Prevent drop from removing the resource — handle is owned by the caller
+        #[allow(clippy::forget_non_drop)]
         std::mem::forget(vfs_handle);
         match result {
             Some(handle) => vfs
@@ -632,6 +637,7 @@ impl ComponentHost {
     }
 
     /// Execute the post-execute hook (called after TX processing).
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_hook_post(
         &self,
         component_name: &str,
@@ -788,6 +794,7 @@ impl ComponentHost {
     // =========================================================================
 
     /// Execute a module component (e.g., bank, staking)
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_module(
         &self,
         module_name: &str,

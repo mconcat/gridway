@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use gridway_types::SdkMsg;
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::capabilities::{CapabilityError, CapabilityManager, CapabilityType};
 use crate::vfs::{Capability, VfsError, VirtualFilesystem};
@@ -205,7 +205,7 @@ pub struct ExecutionContext {
     /// Transaction context (height, timestamp, etc.)
     pub tx_context: HashMap<String, String>,
     /// Execution mode
-    pub exec_mode: crate::ExecMode,
+        pub exec_mode: String,
 }
 
 /// Inter-module communication message
@@ -505,8 +505,7 @@ impl ModuleRouter {
         context: &ExecutionContext,
     ) -> Result<Vec<u8>> {
         // Create a standardized message envelope for WASM modules
-        #[allow(deprecated)]
-        let exec_mode_str = &context.exec_mode;
+                let exec_mode_str = &context.exec_mode;
 
         let envelope = MessageEnvelope {
             type_url: message.type_url().to_string(),

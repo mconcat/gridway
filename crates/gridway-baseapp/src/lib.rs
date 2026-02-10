@@ -124,6 +124,7 @@ pub struct BlockContext {
 ///
 /// No Rust-native fallback. WASM modules must be present.
 pub struct BaseApp {
+    #[allow(dead_code)]
     name: String,
     context: Option<BlockContext>,
     #[allow(dead_code)]
@@ -950,7 +951,7 @@ impl BaseApp {
         self.last_state_root = root_hash;
         // Save committed state checkpoint for future restore_to_committed() calls
         self.committed_checkpoint = Some(self.store_checkpoint()?);
-        log::info!("Committed state with root: {}", hex::encode(&root_hash));
+        log::info!("Committed state with root: {}", hex::encode(root_hash));
         Ok(root_hash)
     }
 
