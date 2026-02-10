@@ -487,7 +487,7 @@ async fn cmd_tx_send(matches: &clap::ArgMatches) {
             let output = serde_json::json!({
                 "status": resp.status,
                 "tx_hash": resp.tx_hash,
-                "from": signed_tx.body.messages[0]["value"]["from_address"],
+                "from": signed_tx.body.messages[0]["from_address"],
                 "to": to_address,
                 "amount": format!("{}{}", amount, denom),
             });

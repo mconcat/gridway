@@ -113,6 +113,30 @@ fn main() {
                 .value_parser(value_parser!(String))
                 .help("Output directory for config files"),
         )
+        .arg(
+            Arg::new("host_pattern")
+                .long("host-pattern")
+                .value_parser(value_parser!(String))
+                .help("Hostname pattern for peers (use {} for index, e.g. 'gridway-node-{}')"),
+        )
+        .arg(
+            Arg::new("hosts")
+                .long("hosts")
+                .value_parser(value_parser!(String))
+                .help("Comma-separated list of hostnames/IPs for each peer"),
+        )
+        .arg(
+            Arg::new("no_local")
+                .long("no-local")
+                .action(clap::ArgAction::SetTrue)
+                .help("Use recommended (non-local) P2P config (for Docker/remote)"),
+        )
+        .arg(
+            Arg::new("internal_ports")
+                .long("internal-ports")
+                .action(clap::ArgAction::SetTrue)
+                .help("All nodes use same internal ports (4545/4546/4547) — for Docker with port mapping"),
+        )
         .get_matches();
 
     let n_peers = *matches.get_one::<usize>("peers").unwrap();
@@ -127,6 +151,10 @@ fn main() {
     let deque_size = *matches.get_one::<usize>("deque_size").unwrap();
     let signature_threads = *matches.get_one::<usize>("signature_threads").unwrap();
     let output = matches.get_one::<String>("output").unwrap().clone();
+    let host_pattern = matches.get_one::<String>("host_pattern").cloned();
+    let hosts_csv = matches.get_one::<String>("hosts").cloned();
+    let no_local = matches.get_flag("no_local");
+    let internal_ports = matches.get_flag("internal_ports");
 
     assert!(
         n_bootstrappers <= n_peers,
@@ -202,18 +230,61 @@ fn main() {
         accounts: genesis_accounts,
     };
 
+    // Resolve per-peer hostnames/IPs
+    let hosts: Vec<IpAddr> = if let Some(csv) = &hosts_csv {
+        csv.split(',')
+            .map(|h| h.trim().parse::<IpAddr>().unwrap_or_else(|_| {
+                eprintln!("Invalid IP in --hosts: '{}'", h.trim());
+                std::process::exit(1);
+            }))
+            .collect()
+    } else if let Some(pattern) = &host_pattern {
+        // For hostname patterns we still need IPs in peers.yaml (SocketAddr).
+        // Use 172.28.0.{10+i} as convention for Docker bridge network.
+        (0..n_peers)
+            .map(|i| IpAddr::V4(Ipv4Addr::new(172, 28, 0, 10 + i as u8)))
+            .collect()
+    } else {
+        vec![IpAddr::V4(Ipv4Addr::LOCALHOST); n_peers]
+    };
+
+    if hosts.len() != n_peers {
+        eprintln!(
+            "--hosts count ({}) does not match --peers count ({})",
+            hosts.len(),
+            n_peers
+        );
+        std::process::exit(1);
+    }
+
+    let use_local = !no_local && host_pattern.is_none() && hosts_csv.is_none();
+
     // Generate configs
     let mut port = start_port;
     let mut addresses = HashMap::new();
     let mut configurations = Vec::new();
-    for (signer, scheme) in peer_signers.iter().zip(schemes.iter()) {
+    for (i, (signer, scheme)) in peer_signers.iter().zip(schemes.iter()).enumerate() {
         let name: String = signer.public_key().to_string();
+
+        // Port assignment: internal_ports → all nodes use same base ports (Docker)
+        // otherwise sequential (local mode)
+        let (p2p_port, metrics_port_val, tx_port_val) = if internal_ports {
+            (start_port, start_port + 1, start_port + 2)
+        } else {
+            (port, port + 1, port + 2)
+        };
+
         addresses.insert(
             name.clone(),
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
+            SocketAddr::new(hosts[i], p2p_port),
         );
         let peer_config_file = format!("{name}.yaml");
-        let directory = format!("{storage_output}/{name}");
+        let directory = if internal_ports {
+            // Docker: use a fixed path inside the container
+            "/gridway/data".to_string()
+        } else {
+            format!("{storage_output}/{name}")
+        };
 
         let share_bytes = match scheme.share() {
             Some(s) => s.encode(),
@@ -230,14 +301,14 @@ fn main() {
             share: hex(&share_bytes),
             polynomial: hex(&poly_bytes),
 
-            port,
-            metrics_port: port + 1,
-            tx_port: port + 2,
+            port: p2p_port,
+            metrics_port: metrics_port_val,
+            tx_port: tx_port_val,
             directory,
             worker_threads,
             log_level: log_level.clone(),
 
-            local: true,
+            local: use_local,
             allowed_peers: allowed_peers.clone(),
             bootstrappers: bootstrappers.clone(),
 
@@ -247,7 +318,9 @@ fn main() {
             signature_threads,
         };
         configurations.push((name, peer_config_file, peer_config));
-        port += 3; // p2p, metrics, tx
+        if !internal_ports {
+            port += 3; // p2p, metrics, tx
+        }
     }
 
     // Write output
@@ -289,8 +362,9 @@ fn main() {
     }
     info!(path = %genesis_path, accounts = genesis.accounts.len(), "wrote genesis configuration");
 
-    // Write config files
-    for (name, peer_config_file, peer_config) in &configurations {
+    // Write config files — both named and indexed (validator-N/config.yaml for Docker)
+    for (i, (name, peer_config_file, peer_config)) in configurations.iter().enumerate() {
+        // Named config (e.g. <pubkey>.yaml)
         let path = format!("{output}/{peer_config_file}");
         let file = match fs::File::create(&path) {
             Ok(f) => f,
@@ -304,6 +378,25 @@ fn main() {
             std::process::exit(1);
         }
         info!(path = peer_config_file, name, "wrote peer configuration");
+
+        // Docker-friendly indexed directory (validator-N/config.yaml)
+        let validator_dir = format!("{output}/validator-{i}");
+        if let Err(e) = fs::create_dir_all(&validator_dir) {
+            eprintln!("Failed to create validator dir '{}': {}", validator_dir, e);
+            std::process::exit(1);
+        }
+        let validator_config_path = format!("{validator_dir}/config.yaml");
+        let file = match fs::File::create(&validator_config_path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to create '{}': {}", validator_config_path, e);
+                std::process::exit(1);
+            }
+        };
+        if let Err(e) = serde_yaml::to_writer(file, peer_config) {
+            eprintln!("Failed to write '{}': {}", validator_config_path, e);
+            std::process::exit(1);
+        }
     }
 
     // Print start commands
