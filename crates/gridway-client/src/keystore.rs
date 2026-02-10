@@ -202,7 +202,24 @@ impl Keystore {
         };
 
         let json = serde_json::to_string_pretty(&file)?;
-        fs::write(&path, json)?;
+
+        // Write with restrictive permissions (0600) on Unix to protect private keys.
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&path)?;
+            f.write_all(json.as_bytes())?;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::write(&path, json)?;
+        }
         Ok(())
     }
 

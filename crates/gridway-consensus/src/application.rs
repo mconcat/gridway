@@ -250,7 +250,13 @@ where
             return false;
         }
 
-        // Re-execute transactions and verify state root
+        // Re-execute transactions and verify state root.
+        //
+        // NOTE: verify() mutates BaseApp state. This is safe because:
+        // 1. If this block wins, report() will commit the correct state
+        // 2. If another block wins, report() will re-execute the winning block
+        // 3. execute_block's height guard prevents double-execution
+        // TODO: Use snapshot/clone for proper isolation when BaseApp supports it
         let verified = {
             let mut app = match self.baseapp.lock() {
                 Ok(app) => app,
@@ -293,12 +299,22 @@ impl Reporter for GridwayApp {
             let committed = match self.baseapp.lock() {
                 Ok(mut app) => {
                     // Re-execute to ensure state is applied (idempotent if already executed)
-                    let _ = app.execute_block(
+                    match app.execute_block(
                         block.height().get(),
                         block.timestamp,
                         &self.chain_id,
                         &block.transactions,
-                    );
+                    ) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!(
+                                height = %block.height(),
+                                error = %e,
+                                "CRITICAL: execute_block failed in report — NOT committing"
+                            );
+                            return;
+                        }
+                    }
 
                     // Commit to persistent store
                     match app.commit() {

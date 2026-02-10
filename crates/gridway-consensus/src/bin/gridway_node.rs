@@ -638,22 +638,29 @@ fn main() {
             );
         }
 
-        // Apply genesis state (always needed to ensure accounts are set up)
-        let genesis_root = match apply_genesis(&mut baseapp, &genesis) {
-            Ok(r) => r,
-            Err(e) => {
-                error!("Failed to apply genesis state: {}", e);
-                return;
-            }
-        };
+        // Only apply genesis state on fresh start — skip if state was loaded from disk
+        // to avoid resetting balances/sequences to genesis values.
+        if !loaded_from_disk {
+            let genesis_root = match apply_genesis(&mut baseapp, &genesis) {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Failed to apply genesis state: {}", e);
+                    return;
+                }
+            };
 
-        // Log genesis summary (no individual keys/addresses for security)
-        info!(
-            state_root = hex::encode(genesis_root),
-            accounts = genesis.accounts.len(),
-            chain_id = %genesis.chain_id,
-            "genesis state committed"
-        );
+            info!(
+                state_root = hex::encode(genesis_root),
+                accounts = genesis.accounts.len(),
+                chain_id = %genesis.chain_id,
+                "genesis state committed (fresh start)"
+            );
+        } else {
+            info!(
+                chain_id = %genesis.chain_id,
+                "skipping genesis — state loaded from disk"
+            );
+        }
 
         // If a snapshot was provided, import it (overrides genesis state)
         let skip_replay = if let Some(ref snap_path) = snapshot_path {

@@ -258,10 +258,14 @@ impl<
                     match ArchiveTrait::get(&finalized_blocks, ArchiveId::Index(idx)).await {
                         Ok(Some(block)) => blocks_to_replay.push(block),
                         Ok(None) => {
-                            warn!(index = idx, "missing block in archive during replay");
+                            return Err(format!(
+                                "missing block at index {idx} in archive — cannot replay (gap in finalized history)"
+                            ));
                         }
                         Err(e) => {
-                            warn!(index = idx, error = %e, "failed to read block from archive");
+                            return Err(format!(
+                                "failed to read block at index {idx} from archive: {e} — cannot replay"
+                            ));
                         }
                     }
                 }

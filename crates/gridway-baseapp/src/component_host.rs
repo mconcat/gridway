@@ -778,20 +778,9 @@ impl ComponentHost {
 
         let component = self.get_component(module_name)?;
 
-        // Create store with specific gas limit and resource limits
-        let wasi = WasiCtxBuilder::new().build();
-        let state = ComponentState {
-            table: wasmtime_wasi::ResourceTable::new(),
-            wasi,
-            component_name: module_name.to_string(),
-            vfs: self.vfs.clone(),
-            limits: self.resource_config.to_store_limits(),
-        };
-        let mut store = Store::new(&self.engine, state);
-
-        // Apply resource limiter for memory, tables, instances
-        store.limiter(|state| &mut state.limits);
-
+        // Use the standard create_store for consistent WASI sandboxing and resource limits,
+        // then override fuel with the caller-specified gas_limit.
+        let mut store = self.create_store(module_name)?;
         store
             .set_fuel(gas_limit)
             .map_err(|e| ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}")))?;
@@ -870,9 +859,14 @@ impl ComponentHost {
         })
     }
 
-    /// Get the gas consumed from the last execution
+    /// Get the gas consumed from the last execution.
+    ///
+    /// Returns `gas_limit - remaining_fuel`, i.e. actual fuel burned.
+    /// Uses `default_gas_limit` as the baseline; callers needing per-component
+    /// accuracy should use `fuel_gas_used()` instead.
     pub fn get_gas_consumed(&self, store: &mut Store<ComponentState>) -> u64 {
-        store.get_fuel().unwrap_or(0)
+        let remaining = store.get_fuel().unwrap_or(0);
+        self.default_gas_limit.saturating_sub(remaining)
     }
 }
 
