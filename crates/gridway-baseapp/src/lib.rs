@@ -24,7 +24,7 @@ pub mod wasi_host;
 use gridway_store::{GlobalAppStore, MerkleStore, KVStore};
 use gridway_types::{Event, EventAttribute, TxResponse};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -138,7 +138,10 @@ pub struct BaseApp {
     module_paths: HashMap<String, String>,
     global_store: Arc<GlobalAppStore>,
     last_state_root: [u8; 32],
-    executed_heights: HashSet<u64>,
+    /// Checkpoint of the last committed store state.
+    /// Used to restore to a clean state before ephemeral execution
+    /// (verify) and before each propose/report cycle.
+    committed_checkpoint: Option<gridway_store::MerkleCheckpoint>,
 }
 
 impl BaseApp {
@@ -146,7 +149,7 @@ impl BaseApp {
         let merkle_store = MerkleStore::new("state".to_string());
         let global_store = Arc::new(GlobalAppStore::new(merkle_store));
 
-        for ns in ["bank", "auth", "staking", "gov"] {
+        for ns in ["bank", "auth", "staking", "gov", "system"] {
             global_store.register_namespace(ns, false)
                 .map_err(|e| BaseAppError::Store(format!("Failed to register {ns} namespace: {e}")))?;
         }
@@ -172,6 +175,11 @@ impl BaseApp {
             module_router.clone(), vfs.clone(), governance_authority,
         ));
 
+        // Load persisted governance registries from VFS
+        if let Err(e) = module_governance.load_registries() {
+            log::warn!("Failed to load governance registries: {e}");
+        }
+
         let module_base_path = Self::find_module_base_path();
         let mut module_paths = HashMap::new();
         for name in ["hook", "validator", "bank"] {
@@ -181,10 +189,17 @@ impl BaseApp {
             );
         }
 
+        let committed_checkpoint = {
+            let store_arc = global_store.get_store();
+            let store = store_arc.lock()
+                .map_err(|e| BaseAppError::Store(format!("Failed to lock store for initial checkpoint: {e}")))?;
+            Some(store.checkpoint())
+        };
+
         Ok(Self {
             name, context: None, wasi_host, component_host, vfs,
             module_router, capability_manager, module_governance, module_paths,
-            global_store, last_state_root: [0u8; 32], executed_heights: HashSet::new(),
+            global_store, last_state_root: [0u8; 32], committed_checkpoint,
         })
     }
 
@@ -201,7 +216,7 @@ impl BaseApp {
                 .map_err(|e| BaseAppError::Store(format!("Failed to create persistent store: {e}")))?
         );
 
-        for ns in ["bank", "auth", "staking", "gov"] {
+        for ns in ["bank", "auth", "staking", "gov", "system"] {
             global_store.register_namespace(ns, false)
                 .map_err(|e| BaseAppError::Store(format!("Failed to register {ns} namespace: {e}")))?;
         }
@@ -226,6 +241,11 @@ impl BaseApp {
         let module_governance = Arc::new(ModuleGovernance::new(
             module_router.clone(), vfs.clone(), governance_authority,
         ));
+
+        // Load persisted governance registries from VFS
+        if let Err(e) = module_governance.load_registries() {
+            log::warn!("Failed to load governance registries: {e}");
+        }
 
         let module_base_path = Self::find_module_base_path();
         let mut module_paths = HashMap::new();
@@ -244,10 +264,17 @@ impl BaseApp {
             store.root_hash()
         };
 
+        let committed_checkpoint = {
+            let store_arc2 = global_store.get_store();
+            let store2 = store_arc2.lock()
+                .map_err(|e| BaseAppError::Store(format!("Failed to lock store for initial checkpoint: {e}")))?;
+            Some(store2.checkpoint())
+        };
+
         Ok(Self {
             name, context: None, wasi_host, component_host, vfs,
             module_router, capability_manager, module_governance, module_paths,
-            global_store, last_state_root, executed_heights: HashSet::new(),
+            global_store, last_state_root, committed_checkpoint,
         })
     }
 
@@ -288,7 +315,7 @@ impl BaseApp {
 
     fn setup_stores(vfs: &Arc<VirtualFilesystem>, global_store: &Arc<GlobalAppStore>) -> Result<()> {
         use crate::vfs::Capability;
-        for ns in ["auth", "bank", "staking", "gov"] {
+        for ns in ["auth", "bank", "staking", "gov", "system"] {
             let ns_store = global_store.get_namespace(ns)
                 .map_err(|e| BaseAppError::Store(format!("Failed to get {ns} namespace: {e}")))?;
             let store_arc: Arc<std::sync::Mutex<dyn KVStore>> =
@@ -339,17 +366,53 @@ impl BaseApp {
     // WASM module loading helper
     // =========================================================================
 
-    /// Load a WASM component by name. Errors if .wasm file doesn't exist.
-    fn load_wasm_module(&self, name: &str, component_type: ComponentType) -> Result<()> {
-        let wasm_path = self.module_paths.get(name)
-            .ok_or_else(|| BaseAppError::ModuleNotFound(
-                format!("{name} module path not configured")
+    /// Store WASM bytecode in VFS under the "system" namespace with key `code/{name}`.
+    fn store_wasm_to_vfs(&self, name: &str, bytes: &[u8]) -> Result<()> {
+        let key = format!("code/{name}");
+        self.vfs.write_key("system", key.as_bytes(), bytes)
+            .map_err(|e| BaseAppError::Store(
+                format!("Failed to store WASM for {name} in VFS: {e}")
             ))?;
+        log::info!("Stored {name} WASM ({} bytes) to VFS", bytes.len());
+        Ok(())
+    }
 
-        let component_bytes = std::fs::read(wasm_path)
-            .map_err(|e| BaseAppError::ModuleNotFound(
-                format!("failed to read {name}.wasm at {wasm_path}: {e}")
-            ))?;
+    /// Load WASM bytecode from VFS. Returns None if not found.
+    fn load_wasm_from_vfs(&self, name: &str) -> Option<Vec<u8>> {
+        let key = format!("code/{name}");
+        match self.vfs.read_key("system", key.as_bytes()) {
+            Ok(Some(bytes)) if !bytes.is_empty() => {
+                log::debug!("Loaded {name} WASM ({} bytes) from VFS", bytes.len());
+                Some(bytes)
+            }
+            _ => None,
+        }
+    }
+
+    /// Load a WASM component by name. Tries VFS first, falls back to filesystem.
+    fn load_wasm_module(&self, name: &str, component_type: ComponentType) -> Result<()> {
+        // Try loading from VFS first (cached / previously stored)
+        let component_bytes = if let Some(bytes) = self.load_wasm_from_vfs(name) {
+            bytes
+        } else {
+            // Fall back to filesystem (genesis / migration)
+            let wasm_path = self.module_paths.get(name)
+                .ok_or_else(|| BaseAppError::ModuleNotFound(
+                    format!("{name} module path not configured")
+                ))?;
+
+            let bytes = std::fs::read(wasm_path)
+                .map_err(|e| BaseAppError::ModuleNotFound(
+                    format!("failed to read {name}.wasm at {wasm_path}: {e}")
+                ))?;
+
+            // Store to VFS for future loads (genesis initialization)
+            if let Err(e) = self.store_wasm_to_vfs(name, &bytes) {
+                log::warn!("Failed to cache {name} WASM to VFS: {e}");
+            }
+
+            bytes
+        };
 
         // Validator needs more fuel for ed25519 crypto in WASM
         let gas_limit = match component_type {
@@ -357,9 +420,13 @@ impl BaseApp {
             _ => 10_000_000,
         };
 
+        let path = self.module_paths.get(name)
+            .map(|p| p.clone().into())
+            .unwrap_or_else(|| format!("vfs://system/wasm/{name}").into());
+
         let info = ComponentInfo {
             name: name.to_string(),
-            path: wasm_path.clone().into(),
+            path,
             component_type,
             gas_limit,
         };
@@ -626,20 +693,12 @@ impl BaseApp {
     pub fn execute_block(
         &mut self, height: u64, timestamp: u64, chain_id: &str, txs: &[Vec<u8>],
     ) -> Result<([u8; 32], Vec<TxResponse>)> {
-        // Idempotency
-        if self.executed_heights.contains(&height) {
-            let state_root = {
-                let store_arc = self.global_store.get_store();
-                let store = store_arc.lock()
-                    .map_err(|e| BaseAppError::Store(format!("Failed to lock store: {e}")))?;
-                store.root_hash()
-            };
-            return Ok((state_root, Vec::new()));
-        }
-
         self.context = Some(BlockContext {
             height, timestamp, chain_id: chain_id.to_string(),
         });
+
+        // Set deterministic block timestamp for module governance
+        self.module_governance.set_block_timestamp(timestamp);
 
         // 1. Pre-execute hook (WASM)
         let _pre_events = self.run_hook_pre(height, timestamp, chain_id)?;
@@ -675,7 +734,6 @@ impl BaseApp {
             store.root_hash()
         };
 
-        self.executed_heights.insert(height);
         self.context = None;
         Ok((state_root, responses))
     }
@@ -690,13 +748,28 @@ impl BaseApp {
         let mut total_gas_used = 0u64;
         let mut events = Vec::new();
 
-        // 2b. Dispatch each message via WASM modules
+        // 2b. Dispatch each message via WASM modules.
+        //     Checkpoint before dispatch so partial failures roll back
+        //     all state mutations for this TX (atomicity).
+        let tx_checkpoint = self.store_checkpoint()?;
+
         for msg in &validated.messages {
-            let (gas, msg_events) = self.dispatch_message(
+            match self.dispatch_message(
                 &validated.sender, msg, height, timestamp, chain_id,
-            )?;
-            total_gas_used += gas;
-            events.extend(msg_events);
+            ) {
+                Ok((gas, msg_events)) => {
+                    total_gas_used += gas;
+                    events.extend(msg_events);
+                }
+                Err(e) => {
+                    // Rollback all state changes for this TX
+                    self.store_restore(tx_checkpoint)
+                        .map_err(|re| BaseAppError::Store(
+                            format!("rollback after tx failure failed: {re} (original: {e})")
+                        ))?;
+                    return Err(e);
+                }
+            }
         }
 
         // 2c. Increment sequence
@@ -719,13 +792,60 @@ impl BaseApp {
                 .map_err(|e| BaseAppError::Store(format!("Commit failed: {e}")))?
         };
         self.last_state_root = root_hash;
+        // Save committed state checkpoint for future restore_to_committed() calls
+        self.committed_checkpoint = Some(self.store_checkpoint()?);
         log::info!("Committed state with root: {}", hex::encode(&root_hash));
         Ok(root_hash)
     }
 
     pub fn last_state_root(&self) -> &[u8; 32] { &self.last_state_root }
 
-    pub fn clear_executed_heights(&mut self) { self.executed_heights.clear(); }
+    // =========================================================================
+    // Store checkpoint/restore — overlay mechanism for consensus safety
+    // =========================================================================
+
+    /// Create a checkpoint of the current store state.
+    /// The checkpoint can later be passed to `store_restore()` to roll back.
+    pub fn store_checkpoint(&self) -> Result<gridway_store::MerkleCheckpoint> {
+        self.global_store.checkpoint()
+            .map_err(|e| BaseAppError::Store(format!("checkpoint failed: {e}")))
+    }
+
+    /// Restore store state from a checkpoint, discarding all changes since.
+    pub fn store_restore(&self, cp: gridway_store::MerkleCheckpoint) -> Result<()> {
+        self.global_store.restore(cp)
+            .map_err(|e| BaseAppError::Store(format!("restore failed: {e}")))
+    }
+
+    /// Restore to the last committed state.
+    ///
+    /// This is essential before propose/report to ensure execution starts
+    /// from a clean, committed baseline — not from leftover state of a
+    /// previously verified or proposed block.
+    pub fn restore_to_committed(&self) -> Result<()> {
+        if let Some(ref cp) = self.committed_checkpoint {
+            self.global_store.restore_from(cp)
+                .map_err(|e| BaseAppError::Store(format!("restore to committed failed: {e}")))?;
+        }
+        Ok(())
+    }
+
+    /// Execute a block ephemerally — state is restored after execution.
+    ///
+    /// Returns only the computed state root.  Used by `verify()` so that
+    /// verifying a block does NOT mutate the shared store state.
+    pub fn execute_block_ephemeral(
+        &mut self, height: u64, timestamp: u64, chain_id: &str, txs: &[Vec<u8>],
+    ) -> Result<[u8; 32]> {
+        // Start from committed state
+        self.restore_to_committed()?;
+        let cp = self.store_checkpoint()?;
+        let result = self.execute_block(height, timestamp, chain_id, txs);
+        // Always restore — ephemeral execution must not persist
+        self.store_restore(cp)
+            .map_err(|e| BaseAppError::Store(format!("ephemeral restore failed: {e}")))?;
+        result.map(|(root, _)| root)
+    }
 
     pub fn export_snapshot(&self) -> Result<gridway_store::merkle::StateSnapshot> {
         let store = self.global_store.get_store();
@@ -801,14 +921,53 @@ mod tests {
     }
 
     #[test]
-    fn test_clear_executed_heights() {
+    fn test_ephemeral_execution_does_not_mutate_state() {
         let mut app = BaseApp::new("test-app".to_string()).unwrap();
-        let _ = app.execute_block(1, 1000, "test", &[]).unwrap();
-        let _ = app.execute_block(2, 2000, "test", &[]).unwrap();
+        app.set_balance("alice", "ugridway", 1000).unwrap();
+        let root_before = app.commit().unwrap();
+
+        // Ephemeral execution: set a balance, get root, but state should restore
+        let ephemeral_root = app.execute_block_ephemeral(1, 1000, "test", &[]).unwrap();
+
+        // State should be unchanged after ephemeral execution
+        let store_arc = app.global_store().get_store();
+        let store = store_arc.lock().unwrap();
+        let root_after = store.root_hash();
+        assert_eq!(root_before, root_after, "ephemeral execution must not mutate state");
+    }
+
+    #[test]
+    fn test_restore_to_committed() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+        app.set_balance("alice", "ugridway", 1000).unwrap();
+        let committed_root = app.commit().unwrap();
+
+        // Modify state
+        app.set_balance("alice", "ugridway", 9999).unwrap();
+        let dirty_root = {
+            let store_arc = app.global_store().get_store();
+            let guard = store_arc.lock().unwrap();
+            guard.root_hash()
+        };
+        assert_ne!(committed_root, dirty_root);
+
+        // Restore to committed
+        app.restore_to_committed().unwrap();
+        let restored_root = {
+            let store_arc = app.global_store().get_store();
+            let guard = store_arc.lock().unwrap();
+            guard.root_hash()
+        };
+        assert_eq!(committed_root, restored_root, "restore_to_committed must revert state");
+    }
+
+    #[test]
+    fn test_re_execute_same_height_works() {
+        let mut app = BaseApp::new("test-app".to_string()).unwrap();
+        // Without executed_heights guard, re-executing at same height should work
         let (root1, _) = app.execute_block(1, 1000, "test", &[]).unwrap();
-        app.clear_executed_heights();
         let (root2, _) = app.execute_block(1, 1000, "test", &[]).unwrap();
-        assert_eq!(root1, root2);
+        assert_eq!(root1, root2, "re-executing same block should give same root");
     }
 
     #[test]

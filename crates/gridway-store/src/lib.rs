@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 
 pub use global::{GlobalAppStore, NamespacedStore};
-pub use merkle::MerkleStore;
+pub use merkle::{MerkleCheckpoint, MerkleStore};
 
 /// Store error types
 #[derive(Error, Debug)]

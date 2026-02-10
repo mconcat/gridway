@@ -79,6 +79,18 @@ pub struct StateSnapshot {
     pub version: u64,
 }
 
+/// A lightweight checkpoint of MerkleStore state.
+/// Used for snapshot/restore to support ephemeral block execution
+/// (verify without committing) and per-transaction atomicity.
+///
+/// Created via `MerkleStore::checkpoint()`. Restoring discards all
+/// changes made since the checkpoint was taken.
+pub struct MerkleCheckpoint {
+    db: GridwayMemoryDB,
+    root: Hash,
+    version: u64,
+}
+
 /// A Patricia Merkle Trie state store.
 ///
 /// Replaces the earlier flat-hash BTreeMap placeholder with a proper
@@ -246,6 +258,36 @@ impl MerkleStore {
             self.flush_to_disk()?;
         }
         Ok(())
+    }
+
+
+    /// Create a lightweight checkpoint of the current state.
+    ///
+    /// Clones the in-memory trie database so the store can be restored
+    /// to this point later.  Cheap compared to full export/import since
+    /// it only clones the `MemoryDB` HashMap — no trie re-building.
+    pub fn checkpoint(&self) -> MerkleCheckpoint {
+        MerkleCheckpoint {
+            db: self.db.clone(),
+            root: self.root,
+            version: self.version,
+        }
+    }
+
+    /// Restore state from a checkpoint, discarding all changes since.
+    /// Consumes the checkpoint.
+    pub fn restore(&mut self, cp: MerkleCheckpoint) {
+        self.db = cp.db;
+        self.root = cp.root;
+        self.version = cp.version;
+    }
+
+    /// Restore state from a checkpoint reference (clones the checkpoint data).
+    /// The checkpoint can be reused after this call.
+    pub fn restore_from(&mut self, cp: &MerkleCheckpoint) {
+        self.db = cp.db.clone();
+        self.root = cp.root;
+        self.version = cp.version;
     }
 
     /// Returns whether persistence is enabled.

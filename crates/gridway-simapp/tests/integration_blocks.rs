@@ -101,10 +101,16 @@ fn multi_block_transfer_chain() {
 fn empty_block_handling() {
     let (mut app, _accounts, _sim) = setup_genesis(2, 50_000);
 
-    let initial_root = *app.last_state_root();
+    // Execute first block to establish post-genesis baseline
+    // (hooks may write block metadata, changing root from genesis)
+    let (first_root, responses) = app
+        .execute_block(1, 1000, TEST_CHAIN_ID, &[])
+        .expect("empty block should succeed");
+    app.commit().unwrap();
+    assert!(responses.is_empty(), "empty block should produce no responses");
 
-    let mut prev_root = initial_root;
-    for height in 1..=10 {
+    let mut prev_root = first_root;
+    for height in 2..=10 {
         let (root, responses) = app
             .execute_block(height, height * 1000, TEST_CHAIN_ID, &[])
             .expect("empty block should succeed");
@@ -112,7 +118,8 @@ fn empty_block_handling() {
 
         assert!(responses.is_empty(), "empty block should produce no responses");
 
-        // State root should remain constant since no state changes
+        // State root should remain constant across empty blocks
+        // (after the first block establishes the post-genesis baseline)
         assert_eq!(root, prev_root,
             "state root should be stable across empty blocks (block {}): {:?} vs {:?}",
             height, hex::encode(root), hex::encode(prev_root));

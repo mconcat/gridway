@@ -113,11 +113,6 @@ impl GridwayApp {
     pub fn replay_blocks(&self, blocks: &[GridwayBlock]) -> std::result::Result<(), String> {
         let mut app = self.baseapp.lock().map_err(|e| format!("lock: {e}"))?;
 
-        // Clear executed_heights since we're replaying from scratch.
-        // BaseApp tracks these for idempotency within a session, but on
-        // replay we need to re-execute all blocks.
-        app.clear_executed_heights();
-
         for block in blocks {
             let height = block.height.get();
             match app.execute_block(height, block.timestamp, &self.chain_id, &block.transactions) {
@@ -181,7 +176,9 @@ where
         // Drain pending transactions
         let txs = self.drain_pending(1000); // Max 1000 txs per block
 
-        // Execute through BaseApp to get state root
+        // Execute through BaseApp to get state root.
+        // Restore to committed state first so we always execute from a
+        // clean baseline (not leftover state from a previous verify/propose).
         let mut app = match self.baseapp.lock() {
             Ok(app) => app,
             Err(e) => {
@@ -189,6 +186,10 @@ where
                 return None;
             }
         };
+        if let Err(e) = app.restore_to_committed() {
+            tracing::error!(height = new_height.get(), "failed to restore committed state in propose: {e}");
+            return None;
+        }
         match app.execute_block(
             new_height.get(),
             current,
@@ -206,8 +207,8 @@ where
             }
             Err(e) => {
                 tracing::error!(height = new_height.get(), "block execution failed: {e}");
-                // On failure, propose an empty block with the current (unchanged) state root.
-                // Do NOT include the failed transactions — their state root is undefined.
+                // On failure, restore to committed and propose an empty block.
+                let _ = app.restore_to_committed();
                 let stale_root = *app.last_state_root();
                 Some(GridwayBlock::new(
                     parent.digest(),
@@ -250,13 +251,12 @@ where
             return false;
         }
 
-        // Re-execute transactions and verify state root.
+        // Re-execute transactions ephemerally and verify state root.
         //
-        // NOTE: verify() mutates BaseApp state. This is safe because:
-        // 1. If this block wins, report() will commit the correct state
-        // 2. If another block wins, report() will re-execute the winning block
-        // 3. execute_block's height guard prevents double-execution
-        // TODO: Use snapshot/clone for proper isolation when BaseApp supports it
+        // execute_block_ephemeral() checkpoints the store, executes the
+        // block, reads the resulting state root, then restores the
+        // checkpoint.  This ensures verify() NEVER mutates shared state,
+        // so a verified-but-not-finalized block cannot pollute the trie.
         let verified = {
             let mut app = match self.baseapp.lock() {
                 Ok(app) => app,
@@ -265,13 +265,13 @@ where
                     return false;
                 }
             };
-            match app.execute_block(
+            match app.execute_block_ephemeral(
                 block.height.get(),
                 block.timestamp,
                 &self.chain_id,
                 &block.transactions,
             ) {
-                Ok((computed_root, _)) => computed_root == block.state_root,
+                Ok(computed_root) => computed_root == block.state_root,
                 Err(e) => {
                     tracing::error!("Block verification failed: {}", e);
                     false
@@ -298,7 +298,18 @@ impl Reporter for GridwayApp {
 
             let committed = match self.baseapp.lock() {
                 Ok(mut app) => {
-                    // Re-execute to ensure state is applied (idempotent if already executed)
+                    // Restore to committed state first so we always execute
+                    // the winning block from a clean baseline.
+                    if let Err(e) = app.restore_to_committed() {
+                        tracing::error!(
+                            height = %block.height(),
+                            error = %e,
+                            "CRITICAL: failed to restore committed state in report"
+                        );
+                        return;
+                    }
+
+                    // Execute the finalized block
                     match app.execute_block(
                         block.height().get(),
                         block.timestamp,

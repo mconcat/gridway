@@ -189,7 +189,6 @@ pub struct ModuleGovernance {
     /// Module router for managing modules
     router: Arc<ModuleRouter>,
     /// Virtual filesystem for storage
-    #[allow(dead_code)]
     vfs: Arc<VirtualFilesystem>,
     /// On-chain code registry
     code_registry: Arc<Mutex<HashMap<u64, StoredCode>>>,
@@ -199,6 +198,8 @@ pub struct ModuleGovernance {
     next_code_id: Arc<Mutex<u64>>,
     /// Governance authority (usually the governance module address)
     governance_authority: String,
+    /// Block timestamp for deterministic time (set by execute_block)
+    block_timestamp: Arc<Mutex<u64>>,
 }
 
 impl ModuleGovernance {
@@ -215,7 +216,55 @@ impl ModuleGovernance {
             module_registry: Arc::new(Mutex::new(HashMap::new())),
             next_code_id: Arc::new(Mutex::new(1)),
             governance_authority,
+            block_timestamp: Arc::new(Mutex::new(0)),
         }
+    }
+
+    /// Set the block timestamp (called by BaseApp before processing transactions)
+    pub fn set_block_timestamp(&self, ts: u64) {
+        if let Ok(mut timestamp) = self.block_timestamp.lock() {
+            *timestamp = ts;
+        }
+    }
+
+    /// Load registries from VFS (called during BaseApp initialization)
+    pub fn load_registries(&self) -> Result<()> {
+        // Load code registry
+        if let Ok(Some(data)) = self.vfs.read_key("system", b"code_registry") {
+            let registry: HashMap<u64, StoredCode> = serde_json::from_slice(&data)
+                .map_err(|e| GovernanceError::StorageError(
+                    format!("Failed to deserialize code registry: {e}")
+                ))?;
+            let max_id = registry.keys().copied().max().unwrap_or(0);
+            {
+                let mut code_reg = self.code_registry.lock()
+                    .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
+                *code_reg = registry;
+            }
+            {
+                let mut next_id = self.next_code_id.lock()
+                    .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
+                *next_id = max_id + 1;
+            }
+            info!("Loaded code registry, next code ID: {}", max_id + 1);
+        }
+
+        // Load module registry
+        if let Ok(Some(data)) = self.vfs.read_key("system", b"module_registry") {
+            let registry: HashMap<String, InstalledModule> = serde_json::from_slice(&data)
+                .map_err(|e| GovernanceError::StorageError(
+                    format!("Failed to deserialize module registry: {e}")
+                ))?;
+            let count = registry.len();
+            {
+                let mut mod_reg = self.module_registry.lock()
+                    .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
+                *mod_reg = registry;
+            }
+            info!("Loaded module registry with {} modules", count);
+        }
+
+        Ok(())
     }
 
     /// Handle MsgStoreCode - store WASM bytecode on-chain
@@ -485,12 +534,9 @@ impl ModuleGovernance {
         hex::encode(hash)
     }
 
-    /// Get current timestamp
+    /// Get current block timestamp (deterministic, set by execute_block)
     fn current_timestamp(&self) -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+        *self.block_timestamp.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Create ModuleConfig from install config and stored code
@@ -596,11 +642,15 @@ impl ModuleGovernance {
             .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned:: {e}")))?;
 
-        let _serialized = serde_json::to_vec(&*registry)
+        let serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed:: {e}")))?;
 
-        // TODO: Write to VFS at /system/code_registry
-        debug!("Persisting code registry with {} entries", registry.len());
+        self.vfs.write_key("system", b"code_registry", &serialized)
+            .map_err(|e| GovernanceError::StorageError(
+                format!("Failed to persist code registry to VFS: {e}")
+            ))?;
+
+        debug!("Persisted code registry with {} entries to VFS", registry.len());
         Ok(())
     }
 
@@ -611,11 +661,15 @@ impl ModuleGovernance {
             .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned:: {e}")))?;
 
-        let _serialized = serde_json::to_vec(&*registry)
+        let serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed:: {e}")))?;
 
-        // TODO: Write to VFS at /system/module_registry
-        debug!("Persisting module registry with {} entries", registry.len());
+        self.vfs.write_key("system", b"module_registry", &serialized)
+            .map_err(|e| GovernanceError::StorageError(
+                format!("Failed to persist module registry to VFS: {e}")
+            ))?;
+
+        debug!("Persisted module registry with {} entries to VFS", registry.len());
         Ok(())
     }
 
@@ -683,9 +737,22 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_test_governance() -> (ModuleGovernance, TempDir) {
+        use gridway_store::MemStore;
+        use crate::vfs::Capability;
+        use std::path::PathBuf;
+
         let temp_dir = TempDir::new().unwrap();
         let wasi_host = Arc::new(WasiHost::new().unwrap());
         let vfs = Arc::new(VirtualFilesystem::new());
+
+        // Mount "system" namespace for governance persistence
+        let system_store: Arc<std::sync::Mutex<dyn gridway_store::KVStore>> =
+            Arc::new(std::sync::Mutex::new(MemStore::new()));
+        vfs.mount_store("system".to_string(), system_store).unwrap();
+        let system_path = PathBuf::from("/system");
+        vfs.add_capability(Capability::Read(system_path.clone())).unwrap();
+        vfs.add_capability(Capability::Write(system_path)).unwrap();
+
         let router = Arc::new(ModuleRouter::new(wasi_host, vfs.clone()));
 
         let governance = ModuleGovernance::new(router, vfs, "governance_authority".to_string());

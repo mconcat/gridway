@@ -88,6 +88,30 @@ impl GlobalAppStore {
         prefixed.extend_from_slice(key);
         prefixed
     }
+
+    /// Create a checkpoint of the underlying MerkleStore state.
+    pub fn checkpoint(&self) -> Result<crate::merkle::MerkleCheckpoint> {
+        let store = self.store.lock()
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        Ok(store.checkpoint())
+    }
+
+    /// Restore the underlying MerkleStore from a checkpoint (consumes it).
+    pub fn restore(&self, cp: crate::merkle::MerkleCheckpoint) -> Result<()> {
+        let mut store = self.store.lock()
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        store.restore(cp);
+        Ok(())
+    }
+
+    /// Restore the underlying MerkleStore from a checkpoint reference (clones data).
+    pub fn restore_from(&self, cp: &crate::merkle::MerkleCheckpoint) -> Result<()> {
+        let mut store = self.store.lock()
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        store.restore_from(cp);
+        Ok(())
+    }
+
 }
 
 /// A namespaced view into the GlobalAppStore.
