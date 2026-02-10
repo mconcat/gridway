@@ -214,7 +214,10 @@ impl kvstore::HostStore for ComponentState {
         let vfs = self.vfs.as_ref()?;
         let vfs_handle =
             wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
-        let handle = self.table.get(&vfs_handle).ok()?;
+        let result = self.table.get(&vfs_handle).ok();
+        // Prevent drop from removing the resource — handle is owned by the caller
+        std::mem::forget(vfs_handle);
+        let handle = result?;
         let namespace = handle.namespace.clone();
         vfs.read_key(&namespace, &key).ok()?
     }
@@ -254,7 +257,10 @@ impl kvstore::HostStore for ComponentState {
         if let Some(vfs) = self.vfs.as_ref() {
             let vfs_handle =
                 wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
-            if let Ok(handle) = self.table.get(&vfs_handle) {
+            let result = self.table.get(&vfs_handle);
+            // Prevent drop from removing the resource — handle is owned by the caller
+            std::mem::forget(vfs_handle);
+            if let Ok(handle) = result {
                 let namespace = handle.namespace.clone();
                 if let Err(e) = vfs.delete_key(&namespace, &key) {
                     tracing::error!("kvstore delete failed for {namespace}:: {e}");
@@ -268,15 +274,19 @@ impl kvstore::HostStore for ComponentState {
         store_handle: wasmtime::component::Resource<kvstore::Store>,
         key: Vec<u8>,
     ) -> bool {
-        self.vfs
-            .as_ref()
-            .and_then(|vfs| {
-                let vfs_handle =
-                    wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
-                let handle = self.table.get(&vfs_handle).ok()?;
-                vfs.has_key(&handle.namespace, &key).ok()
-            })
-            .unwrap_or(false)
+        let vfs = match self.vfs.as_ref() {
+            Some(vfs) => vfs,
+            None => return false,
+        };
+        let vfs_handle =
+            wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+        let result = self.table.get(&vfs_handle).ok();
+        // Prevent drop from removing the resource — handle is owned by the caller
+        std::mem::forget(vfs_handle);
+        match result {
+            Some(handle) => vfs.has_key(&handle.namespace, &key).ok().unwrap_or(false),
+            None => false,
+        }
     }
 
     fn range(
@@ -286,21 +296,22 @@ impl kvstore::HostStore for ComponentState {
         end: Option<Vec<u8>>,
         limit: u32,
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        self.vfs
-            .as_ref()
-            .and_then(|vfs| {
-                let vfs_handle =
-                    wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
-                let handle = self.table.get(&vfs_handle).ok()?;
-                vfs.range_keys(
-                    &handle.namespace,
-                    start.as_deref(),
-                    end.as_deref(),
-                    limit,
-                )
+        let vfs = match self.vfs.as_ref() {
+            Some(vfs) => vfs,
+            None => return Vec::new(),
+        };
+        let vfs_handle =
+            wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+        let result = self.table.get(&vfs_handle).ok();
+        // Prevent drop from removing the resource — handle is owned by the caller
+        std::mem::forget(vfs_handle);
+        match result {
+            Some(handle) => vfs
+                .range_keys(&handle.namespace, start.as_deref(), end.as_deref(), limit)
                 .ok()
-            })
-            .unwrap_or_default()
+                .unwrap_or_default(),
+            None => Vec::new(),
+        }
     }
 
     fn drop(

@@ -242,7 +242,14 @@ fn main() {
         // For hostname patterns we still need IPs in peers.yaml (SocketAddr).
         // Use 172.28.0.{10+i} as convention for Docker bridge network.
         (0..n_peers)
-            .map(|i| IpAddr::V4(Ipv4Addr::new(172, 28, 0, 10 + i as u8)))
+            .map(|i| {
+                assert!(
+                    10 + i <= 254,
+                    "Too many peers ({n_peers}): IP 172.28.0.{} would overflow (max 244 peers with base offset 10)",
+                    10 + i
+                );
+                IpAddr::V4(Ipv4Addr::new(172, 28, 0, (10 + i) as u8))
+            })
             .collect()
     } else {
         vec![IpAddr::V4(Ipv4Addr::LOCALHOST); n_peers]

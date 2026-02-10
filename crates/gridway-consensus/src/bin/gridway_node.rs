@@ -159,6 +159,8 @@ fn error_response(status: StatusCode, msg: impl Into<String>) -> Response {
 }
 
 /// POST /tx — submit a transaction.
+// TODO: Add per-IP rate limiting here to prevent mempool spam attacks.
+// Without rate limiting, an attacker can flood the mempool with transactions.
 async fn handle_submit_tx(
     State(state): State<Arc<AppState>>,
     body: axum::body::Bytes,
@@ -168,9 +170,21 @@ async fn handle_submit_tx(
         return error_response(StatusCode::BAD_REQUEST, "empty body");
     }
 
-    // Validate JSON
-    if serde_json::from_slice::<serde_json::Value>(&body).is_err() {
-        return error_response(StatusCode::BAD_REQUEST, "invalid JSON");
+    // Validate JSON structure
+    let tx_json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid JSON"),
+    };
+
+    // Validate required TX fields before inserting into mempool
+    if !tx_json.get("body").is_some_and(|v| v.is_object()) {
+        return error_response(StatusCode::BAD_REQUEST, "missing or invalid 'body' field");
+    }
+    if !tx_json.get("signature").is_some_and(|v| v.is_string()) {
+        return error_response(StatusCode::BAD_REQUEST, "missing or invalid 'signature' field");
+    }
+    if !tx_json.get("public_key").is_some_and(|v| v.is_string()) {
+        return error_response(StatusCode::BAD_REQUEST, "missing or invalid 'public_key' field");
     }
 
     match app.submit_tx(body.to_vec()) {
@@ -352,16 +366,24 @@ async fn handle_health() -> impl IntoResponse {
 }
 
 /// Build the axum Router with all endpoints.
+// TODO: Add HTTP rate limiting (e.g., tower::limit::RateLimitLayer or governor)
+// to prevent abuse. Especially important for POST /tx to mitigate mempool spam.
+// Consider per-IP rate limits with a shared HashMap<IpAddr, (Instant, u32)> in AppState.
 fn build_router(app: GridwayApp, api_token: Option<String>) -> Router {
     let app_state = Arc::new(AppState {
         app: Arc::new(app),
         api_token,
     });
 
+    // SECURITY: CORS allows any origin for public blockchain query endpoints (GET).
+    // Methods are restricted to GET/POST only (no DELETE, PUT, PATCH).
+    // Headers restricted to Content-Type and Authorization.
+    // For production deployments with sensitive endpoints (e.g., /snapshot),
+    // consider using a reverse proxy with stricter CORS policies.
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
 
     Router::new()
         .route("/tx", post(handle_submit_tx))
@@ -710,16 +732,28 @@ fn main() {
         // Check if state was loaded from disk
         let loaded_from_disk = {
             let store = baseapp.global_store().get_store();
-            let store = store.lock().unwrap();
-            store.has_persistence() && store.version() > 0
+            let result = match store.lock() {
+                Ok(store) => store.has_persistence() && store.version() > 0,
+                Err(e) => {
+                    error!("Failed to lock store: {}", e);
+                    false
+                }
+            };
+            result
         };
 
         if loaded_from_disk {
             let state_root = baseapp.last_state_root();
             let version = {
                 let store = baseapp.global_store().get_store();
-                let store = store.lock().unwrap();
-                store.version()
+                let v = match store.lock() {
+                    Ok(store) => store.version(),
+                    Err(e) => {
+                        error!("Failed to lock store for version: {}", e);
+                        0
+                    }
+                };
+                v
             };
             info!(
                 state_root = hex::encode(state_root),
@@ -755,10 +789,13 @@ fn main() {
         // If a snapshot was provided, import it (overrides genesis state)
         let skip_replay = if let Some(ref snap_path) = snapshot_path {
             info!(path = %snap_path, "loading state snapshot for fast bootstrap");
+            // TODO: Replace tokio::process::Command("curl") with reqwest when added as a dependency.
+            // Using async subprocess to avoid blocking the runtime during snapshot download.
             let snapshot_data = if snap_path.starts_with("http://") || snap_path.starts_with("https://") {
-                match std::process::Command::new("curl")
-                    .args(["-s", "-f", snap_path])
+                match ::tokio::process::Command::new("curl")
+                    .args(["-s", "-f", "--max-time", "300", snap_path])
                     .output()
+                    .await
                 {
                     Ok(o) if o.status.success() => o.stdout,
                     Ok(o) => {

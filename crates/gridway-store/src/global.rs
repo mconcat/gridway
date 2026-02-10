@@ -155,7 +155,10 @@ impl KVStore for NamespacedStore {
     fn prefix_iterator(&self, prefix: &[u8]) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + '_> {
         let mut full_prefix = self.prefix.as_bytes().to_vec();
         full_prefix.extend_from_slice(prefix);
-        let store = self.store.lock().unwrap();
+        let store = match self.store.lock() {
+            Ok(s) => s,
+            Err(_) => return Box::new(std::iter::empty()),
+        };
         let items: Vec<_> = store
             .prefix_iterator(&full_prefix)
             .map(|(k, v)| {

@@ -505,16 +505,8 @@ impl ModuleRouter {
         context: &ExecutionContext,
     ) -> Result<Vec<u8>> {
         // Create a standardized message envelope for WASM modules
-        let exec_mode_str = match context.exec_mode {
-            crate::ExecMode::Check => "check",
-            crate::ExecMode::ReCheck => "recheck",
-            crate::ExecMode::Simulate => "simulate",
-            crate::ExecMode::PrepareProposal => "prepare_proposal",
-            crate::ExecMode::ProcessProposal => "process_proposal",
-            crate::ExecMode::VoteExtension => "vote_extension",
-            crate::ExecMode::VerifyVoteExtension => "verify_vote_extension",
-            crate::ExecMode::Finalize => "finalize",
-        };
+        #[allow(deprecated)]
+        let exec_mode_str = &context.exec_mode;
 
         let envelope = MessageEnvelope {
             type_url: message.type_url().to_string(),

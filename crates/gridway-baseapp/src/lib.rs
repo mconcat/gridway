@@ -783,8 +783,8 @@ impl BaseApp {
 
         Ok(TxResponse::success(
             "transaction executed successfully".to_string(),
-            (total_gas_used + 10000) as i64,
-            total_gas_used as i64,
+            (total_gas_used + 10000).min(i64::MAX as u64) as i64,
+            total_gas_used.min(i64::MAX as u64) as i64,
             events,
         ))
     }
@@ -1190,9 +1190,8 @@ mod tests {
     }
 }
 
-/// Execution mode (kept for compatibility with module_router)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExecMode {
-    Check, ReCheck, Simulate, PrepareProposal,
-    ProcessProposal, VoteExtension, VerifyVoteExtension, Finalize,
-}
+/// Execution mode — legacy from CometBFT migration.
+/// Now represented as a plain string; the typed enum was removed since
+/// all execution goes through WASM ComponentHost (no longer ABCI modes).
+#[deprecated(note = "CometBFT execution modes are no longer used; will be removed")]
+pub type ExecMode = String;
