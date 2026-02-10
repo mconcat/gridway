@@ -49,3 +49,4 @@ testnet_backup_*/
 tmp/
 temp/.cargo-local/
 .cargo-local/
+memory/
