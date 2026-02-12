@@ -5,6 +5,7 @@ on:
     branches: [ main, develop, experiment/commonware-migration ]
   pull_request:
     branches: [ main ]
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,6 +14,7 @@ jobs:
   wasm-test:
     name: Test WASM Modules
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
     - uses: actions/checkout@v4
@@ -41,25 +43,34 @@ jobs:
         echo "Pre-compiled WASM modules:"
         ls -lh modules/*.wasm
 
-    - name: Compile WASM modules with wasmtime
+    - name: Validate WASM modules with wasmtime
       run: |
-        echo "Testing that wasmtime can compile each module..."
+        echo "Validating that wasmtime can compile each module..."
+        FAILED=0
         for wasm in modules/*.wasm; do
-          echo "  Compiling: $wasm"
-          $HOME/.wasmtime/bin/wasmtime compile "$wasm" && echo "    ✓ OK" || echo "    ✗ FAILED"
+          echo -n "  $(basename $wasm): "
+          if $HOME/.wasmtime/bin/wasmtime compile "$wasm" 2>/dev/null; then
+            echo "✓ OK"
+          else
+            echo "✗ FAILED"
+            FAILED=1
+          fi
         done
+
+        if [ $FAILED -eq 1 ]; then
+          echo "ERROR: Some WASM modules failed validation!"
+          exit 1
+        fi
+
+    - name: Run WASM host integration tests
+      run: |
+        cargo test -p gridway-baseapp -- \
+          test_component_host \
+          test_kvstore_host \
+          test_wasi_host \
+          test_wasm_module
 
     - name: Check WASM module sizes
       run: |
         echo "WASM Module Sizes:"
         ls -lh modules/*.wasm
-
-    - name: Run WASM integration tests
-      run: |
-        cargo test --workspace \
-          --exclude ante-handler \
-          --exclude begin-blocker \
-          --exclude end-blocker \
-          --exclude tx-decoder \
-          -- test_wasi_modules test_minimal_wasi_module test_component || \
-          echo "No WASM-specific integration tests found (OK)"

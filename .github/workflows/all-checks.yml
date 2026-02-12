@@ -35,9 +35,14 @@ jobs:
     uses: ./.github/workflows/wasm-test.yml
     secrets: inherit
 
+  e2e-check:
+    name: End-to-End Tests
+    uses: ./.github/workflows/e2e-test.yml
+    secrets: inherit
+
   final-summary:
     name: Test Summary
-    needs: [ci-check, wasm-check, wasm-test-check]
+    needs: [ci-check, wasm-check, wasm-test-check, e2e-check]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -46,29 +51,27 @@ jobs:
           echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ "${{ needs.ci-check.result }}" == "success" ]; then
-            echo "### ✅ CI Build and Test: **Passed**" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ❌ CI Build and Test: **Failed**" >> $GITHUB_STEP_SUMMARY
-          fi
+          declare -A CHECKS=(
+            ["CI Build and Test"]="${{ needs.ci-check.result }}"
+            ["WASM Modules"]="${{ needs.wasm-check.result }}"
+            ["WASM Tests"]="${{ needs.wasm-test-check.result }}"
+            ["End-to-End Tests"]="${{ needs.e2e-check.result }}"
+          )
 
-          if [ "${{ needs.wasm-check.result }}" == "success" ]; then
-            echo "### ✅ WASM Modules: **Passed**" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ❌ WASM Modules: **Failed**" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ "${{ needs.wasm-test-check.result }}" == "success" ]; then
-            echo "### ✅ WASM Tests: **Passed**" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ❌ WASM Tests: **Failed**" >> $GITHUB_STEP_SUMMARY
-          fi
+          ALL_PASSED=true
+          for name in "CI Build and Test" "WASM Modules" "WASM Tests" "End-to-End Tests"; do
+            result="${CHECKS[$name]}"
+            if [ "$result" == "success" ]; then
+              echo "### ✅ ${name}: **Passed**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "### ❌ ${name}: **${result}**" >> $GITHUB_STEP_SUMMARY
+              ALL_PASSED=false
+            fi
+          done
 
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ "${{ needs.ci-check.result }}" == "success" ] && \
-             [ "${{ needs.wasm-check.result }}" == "success" ] && \
-             [ "${{ needs.wasm-test-check.result }}" == "success" ]; then
+          if [ "$ALL_PASSED" == "true" ]; then
             echo "## 🎉 Overall Status: **All Checks Passed**" >> $GITHUB_STEP_SUMMARY
           else
             echo "## ⚠️ Overall Status: **Some Checks Failed**" >> $GITHUB_STEP_SUMMARY

@@ -5,6 +5,7 @@ on:
     branches: [ main, develop, experiment/commonware-migration ]
   pull_request:
     branches: [ main ]
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
@@ -38,9 +39,13 @@ jobs:
           components: rustfmt
       - name: Format check (non-WASM crates)
         run: |
+          # WASM module crates (ante-handler, begin-blocker, end-blocker, tx-decoder)
+          # have auto-generated bindings.rs from cargo-component that aren't in the repo.
+          # cargo fmt --all fails on missing mod files, so we check per-package.
           for pkg in gridway gridway-baseapp gridway-client gridway-consensus \
                      gridway-crypto gridway-errors gridway-log gridway-math \
                      gridway-simapp gridway-store gridway-telemetry gridway-types; do
+            echo "Checking format: $pkg"
             cargo fmt -p "$pkg" -- --check
           done
 
