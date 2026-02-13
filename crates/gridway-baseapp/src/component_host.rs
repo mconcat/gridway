@@ -2,20 +2,24 @@
 //!
 //! This module provides the WASI component runtime host that enables dynamic loading
 //! and execution of WASM components using the component model and WIT interfaces.
+//!
+//! Supports three component types:
+//! - **Module**: Domain-specific logic (bank, staking, gov, etc.)
+//! - **Hook**: Block lifecycle hooks (pre/post execute)
+//! - **Validator**: Transaction validation pipeline
 
-use crate::component_bindings::ante_handler::AnteHandlerWorld;
-use crate::component_bindings::tx_decoder::TxDecoderWorld;
-use crate::component_bindings::SimpleKVStoreManager;
-// TODO: Remove kvstore interface (temporary implementation)
-// use crate::kvstore_resource::KVStoreResourceHost;
-use hex;
+use crate::component_bindings::hook::HookWorld;
+use crate::component_bindings::validator::ValidatorWorld;
+use crate::vfs::VirtualFilesystem;
+// VFS-backed kvstore interface — bridging WASI modules to JMT state
+use crate::component_bindings::module::gridway::framework::kvstore;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::{debug, error, info};
 use wasmtime::component::*;
-use wasmtime::{Config, Engine, Store};
+use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::p2::{WasiCtx, WasiCtxBuilder, WasiView};
 
 /// Component Host errors
@@ -48,6 +52,76 @@ pub enum ComponentHostError {
 
 type Result<T> = std::result::Result<T, ComponentHostError>;
 
+// ─── Resource Limits Configuration ───────────────────────────────────────────
+
+/// Maximum allowed WASM binary size (default: 10 MB)
+pub const DEFAULT_MAX_WASM_BINARY_SIZE: usize = 10 * 1024 * 1024;
+
+/// Default maximum memory size per linear memory (256 MB)
+pub const DEFAULT_MAX_MEMORY_SIZE: usize = 256 * 1024 * 1024;
+
+/// Default maximum table elements per table
+pub const DEFAULT_MAX_TABLE_ELEMENTS: usize = 10_000;
+
+/// Default maximum instances per store
+pub const DEFAULT_MAX_INSTANCES: usize = 10;
+
+/// Default maximum tables per store
+pub const DEFAULT_MAX_TABLES: usize = 10;
+
+/// Default maximum memories per store
+pub const DEFAULT_MAX_MEMORIES: usize = 10;
+
+/// Resource limits configuration for WASM component execution.
+///
+/// Controls memory, table, instance, and binary size limits.
+/// All values have production-safe defaults.
+#[derive(Debug, Clone)]
+pub struct ResourceConfig {
+    /// Maximum memory size per linear memory (bytes)
+    pub max_memory_size: usize,
+    /// Maximum number of table elements per table
+    pub max_table_elements: usize,
+    /// Maximum number of instances per store
+    pub max_instances: usize,
+    /// Maximum number of tables per store
+    pub max_tables: usize,
+    /// Maximum number of memories per store
+    pub max_memories: usize,
+    /// Maximum WASM binary size in bytes
+    pub max_wasm_binary_size: usize,
+    /// Whether to trap (instead of returning -1) on memory/table grow failure
+    pub trap_on_grow_failure: bool,
+}
+
+impl Default for ResourceConfig {
+    fn default() -> Self {
+        Self {
+            max_memory_size: DEFAULT_MAX_MEMORY_SIZE,
+            max_table_elements: DEFAULT_MAX_TABLE_ELEMENTS,
+            max_instances: DEFAULT_MAX_INSTANCES,
+            max_tables: DEFAULT_MAX_TABLES,
+            max_memories: DEFAULT_MAX_MEMORIES,
+            max_wasm_binary_size: DEFAULT_MAX_WASM_BINARY_SIZE,
+            trap_on_grow_failure: true,
+        }
+    }
+}
+
+impl ResourceConfig {
+    /// Build wasmtime StoreLimits from this configuration
+    fn to_store_limits(&self) -> StoreLimits {
+        StoreLimitsBuilder::new()
+            .memory_size(self.max_memory_size)
+            .table_elements(self.max_table_elements)
+            .instances(self.max_instances)
+            .tables(self.max_tables)
+            .memories(self.max_memories)
+            .trap_on_grow_failure(self.trap_on_grow_failure)
+            .build()
+    }
+}
+
 /// Component metadata
 #[derive(Clone, Debug)]
 pub struct ComponentInfo {
@@ -55,7 +129,7 @@ pub struct ComponentInfo {
     pub name: String,
     /// Component path
     pub path: PathBuf,
-    /// Component type (ante-handler, tx-decoder, etc.)
+    /// Component type
     pub component_type: ComponentType,
     /// Gas limit for execution
     pub gas_limit: u64,
@@ -64,11 +138,12 @@ pub struct ComponentInfo {
 /// Component types
 #[derive(Clone, Debug, PartialEq)]
 pub enum ComponentType {
-    AnteHandler,
-    BeginBlocker,
-    EndBlocker,
-    TxDecoder,
-    Module, // Generic application module
+    /// Domain module (bank, staking, gov, etc.)
+    Module,
+    /// Block execution hook (pre/post execute)
+    Hook,
+    /// Transaction validator (decode + validate + auth)
+    Validator,
 }
 
 /// Execution result from a component
@@ -90,16 +165,19 @@ pub struct ComponentResult {
     pub gas_used: u64,
 }
 
-/// Component host state that implements WasiView
+/// Component host state that implements WasiView.
+/// Provides VFS-backed kvstore access to WASI modules.
 pub struct ComponentState {
     table: wasmtime_wasi::ResourceTable,
     wasi: WasiCtx,
     #[allow(dead_code)]
     component_name: String,
-    #[allow(dead_code)]
-    kvstore_manager: SimpleKVStoreManager,
-    // TODO: Remove kvstore interface (temporary implementation)
-    // kvstore_host: KVStoreResourceHost,
+    /// VFS reference for state access from WASI modules.
+    /// When set, WASI modules can use the kvstore interface to access
+    /// JMT-backed state through VFS namespace stores.
+    vfs: Option<Arc<VirtualFilesystem>>,
+    /// Resource limits for memory, tables, instances
+    limits: StoreLimits,
 }
 
 impl wasmtime_wasi::p2::IoView for ComponentState {
@@ -114,28 +192,35 @@ impl WasiView for ComponentState {
     }
 }
 
-// Import the generated kvstore bindings
-// TODO: Remove kvstore interface (temporary implementation)
-// use crate::component_bindings::ante_handler::gridway::framework::kvstore;
+// ─── VFS-backed kvstore host implementation ──────────────────────────────────
+// This bridges the WIT kvstore interface to the VFS, allowing WASI modules
+// to access JMT-backed blockchain state through standard KVStore operations.
+// Path: WASM module → kvstore WIT interface → ComponentState → VFS → NamespacedStore → JMTStore
 
-/* Commenting out kvstore implementation - to be removed
+/// Host-side handle for a VFS-backed KVStore resource.
+/// Maps to the WIT `resource store` in the kvstore interface.
+/// Each handle represents access to a single namespace in the VFS.
+pub struct VfsStoreHandle {
+    /// The namespace this store provides access to (e.g., "bank", "auth")
+    pub namespace: String,
+}
+
 impl kvstore::HostStore for ComponentState {
     fn get(
         &mut self,
         store_handle: wasmtime::component::Resource<kvstore::Store>,
         key: Vec<u8>,
     ) -> Option<Vec<u8>> {
-        // Convert kvstore::Store to KVStoreResource
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        match self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            Ok(store) => store.get(&key).unwrap_or(None),
-            Err(_) => None,
-        }
+        let vfs = self.vfs.as_ref()?;
+        let vfs_handle =
+            wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+        let result = self.table.get(&vfs_handle).ok();
+        // Prevent drop from removing the resource — handle is owned by the caller
+        #[allow(clippy::forget_non_drop)]
+        std::mem::forget(vfs_handle);
+        let handle = result?;
+        let namespace = handle.namespace.clone();
+        vfs.read_key(&namespace, &key).ok()?
     }
 
     fn set(
@@ -144,14 +229,28 @@ impl kvstore::HostStore for ComponentState {
         key: Vec<u8>,
         value: Vec<u8>,
     ) {
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        if let Ok(store) = self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            let _ = store.set(&key, &value);
+        if let Some(vfs) = self.vfs.as_ref() {
+            let vfs_handle =
+                wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+            match self.table.get(&vfs_handle) {
+                Ok(handle) => {
+                    let namespace = handle.namespace.clone();
+                    if let Err(e) = vfs.write_key(&namespace, &key, &value) {
+                        error!("kvstore::set failed for {namespace}: {e}");
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        rep = store_handle.rep(),
+                        "kvstore::set table lookup failed: {e}"
+                    );
+                }
+            }
+            // Prevent drop from removing the resource
+            #[allow(clippy::forget_non_drop)]
+        std::mem::forget(vfs_handle);
+        } else {
+            error!("kvstore::set — VFS not available!");
         }
     }
 
@@ -160,14 +259,19 @@ impl kvstore::HostStore for ComponentState {
         store_handle: wasmtime::component::Resource<kvstore::Store>,
         key: Vec<u8>,
     ) {
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        if let Ok(store) = self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            let _ = store.delete(&key);
+        if let Some(vfs) = self.vfs.as_ref() {
+            let vfs_handle =
+                wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+            let result = self.table.get(&vfs_handle);
+            // Prevent drop from removing the resource — handle is owned by the caller
+            #[allow(clippy::forget_non_drop)]
+        std::mem::forget(vfs_handle);
+            if let Ok(handle) = result {
+                let namespace = handle.namespace.clone();
+                if let Err(e) = vfs.delete_key(&namespace, &key) {
+                    tracing::error!("kvstore delete failed for {namespace}:: {e}");
+                }
+            }
         }
     }
 
@@ -176,15 +280,19 @@ impl kvstore::HostStore for ComponentState {
         store_handle: wasmtime::component::Resource<kvstore::Store>,
         key: Vec<u8>,
     ) -> bool {
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        match self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            Ok(store) => store.has(&key).unwrap_or(false),
-            Err(_) => false,
+        let vfs = match self.vfs.as_ref() {
+            Some(vfs) => vfs,
+            None => return false,
+        };
+        let vfs_handle =
+            wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+        let result = self.table.get(&vfs_handle).ok();
+        // Prevent drop from removing the resource — handle is owned by the caller
+        #[allow(clippy::forget_non_drop)]
+        std::mem::forget(vfs_handle);
+        match result {
+            Some(handle) => vfs.has_key(&handle.namespace, &key).ok().unwrap_or(false),
+            None => false,
         }
     }
 
@@ -195,25 +303,28 @@ impl kvstore::HostStore for ComponentState {
         end: Option<Vec<u8>>,
         limit: u32,
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        let kvstore_resource = wasmtime::component::Resource::<
-            crate::kvstore_resource::KVStoreResource,
-        >::new_own(store_handle.rep());
-        match self
-            .kvstore_host
-            .get_resource(&mut self.table, kvstore_resource)
-        {
-            Ok(store) => store
-                .range(start.as_deref(), end.as_deref(), limit)
+        let vfs = match self.vfs.as_ref() {
+            Some(vfs) => vfs,
+            None => return Vec::new(),
+        };
+        let vfs_handle =
+            wasmtime::component::Resource::<VfsStoreHandle>::new_own(store_handle.rep());
+        let result = self.table.get(&vfs_handle).ok();
+        // Prevent drop from removing the resource — handle is owned by the caller
+        #[allow(clippy::forget_non_drop)]
+        std::mem::forget(vfs_handle);
+        match result {
+            Some(handle) => vfs
+                .range_keys(&handle.namespace, start.as_deref(), end.as_deref(), limit)
+                .ok()
                 .unwrap_or_default(),
-            Err(_) => Vec::new(),
+            None => Vec::new(),
         }
     }
 
-    fn drop(
-        &mut self,
-        _rep: wasmtime::component::Resource<kvstore::Store>,
-    ) -> wasmtime::Result<()> {
-        // Resource cleanup is handled by the resource table
+    fn drop(&mut self, rep: wasmtime::component::Resource<kvstore::Store>) -> wasmtime::Result<()> {
+        let vfs_handle = wasmtime::component::Resource::<VfsStoreHandle>::new_own(rep.rep());
+        let _ = self.table.delete(vfs_handle);
         Ok(())
     }
 }
@@ -223,19 +334,32 @@ impl kvstore::Host for ComponentState {
         &mut self,
         name: String,
     ) -> std::result::Result<wasmtime::component::Resource<kvstore::Store>, String> {
-        // Map the KVStoreResource to kvstore::Store resource
-        match self.kvstore_host.open_store(&mut self.table, &name) {
-            Ok(resource) => {
-                // Convert KVStoreResource to kvstore::Store
-                let store_resource =
-                    wasmtime::component::Resource::<kvstore::Store>::new_own(resource.rep());
-                Ok(store_resource)
-            }
-            Err(e) => Err(e),
+        let vfs = self
+            .vfs
+            .as_ref()
+            .ok_or_else(|| "VFS not available".to_string())?;
+
+        // Validate that the namespace exists in VFS
+        if !vfs.has_namespace(&name) {
+            return Err(format!("Store '{name}' not found"));
         }
+
+        // Create a VfsStoreHandle and push to resource table
+        let handle = VfsStoreHandle {
+            namespace: name.clone(),
+        };
+        let resource = self
+            .table
+            .push(handle)
+            .map_err(|e| format!("Failed to create store resource:: {e}"))?;
+
+        // Convert VfsStoreHandle resource to kvstore::Store resource
+        debug!(namespace = %name, rep = resource.rep(), "kvstore::open_store created handle");
+        Ok(wasmtime::component::Resource::<kvstore::Store>::new_own(
+            resource.rep(),
+        ))
     }
 }
-*/
 
 /// WASI Component Host
 pub struct ComponentHost {
@@ -247,27 +371,30 @@ pub struct ComponentHost {
     component_info: Arc<Mutex<HashMap<String, ComponentInfo>>>,
     /// Default gas limit
     default_gas_limit: u64,
-    /// KVStore manager (legacy)
-    kvstore_manager: SimpleKVStoreManager,
-    // KVStore resource host for prefix-based access
-    // TODO: Remove kvstore interface (temporary implementation)
-    // kvstore_host: KVStoreResourceHost,
+    /// Resource limits configuration
+    resource_config: ResourceConfig,
+    /// VFS reference for state access bridging.
+    /// When set, WASI components can access JMT-backed state through
+    /// the kvstore WIT interface via VFS namespace stores.
+    vfs: Option<Arc<VirtualFilesystem>>,
 }
 
 impl ComponentHost {
-    /// Create a new component host with default configuration and a base store
-    pub fn new(base_store: Arc<Mutex<dyn gridway_store::KVStore>>) -> Result<Self> {
+    /// Create a new component host with default configuration
+    pub fn new() -> Result<Self> {
+        Self::with_resource_config(ResourceConfig::default())
+    }
+
+    /// Create a new component host with custom resource configuration
+    pub fn with_resource_config(resource_config: ResourceConfig) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true);
         config.async_support(false);
-        Self::with_config_and_store(config, base_store)
+        Self::with_config(config, resource_config)
     }
 
-    /// Create a new component host with custom configuration and a base store
-    pub fn with_config_and_store(
-        mut config: Config,
-        _base_store: Arc<Mutex<dyn gridway_store::KVStore>>,
-    ) -> Result<Self> {
+    /// Create a new component host with custom wasmtime and resource configuration
+    pub fn with_config(mut config: Config, resource_config: ResourceConfig) -> Result<Self> {
         // Ensure component model is enabled
         config.wasm_component_model(true);
 
@@ -277,42 +404,55 @@ impl ComponentHost {
         config.wasm_memory64(false); // Disable 64-bit memory for security
         config.consume_fuel(true); // Enable fuel metering for gas tracking
 
+        // Stack size limit for WASM execution (1 MB)
+        config.max_wasm_stack(1024 * 1024);
+
         let engine =
             Engine::new(&config).map_err(|e| ComponentHostError::EngineConfig(e.to_string()))?;
 
-        info!("Component host initialized with secure configuration");
-
-        // TODO: Remove kvstore interface (temporary implementation)
-        // let kvstore_host = KVStoreResourceHost::new(base_store);
-        //
-        // // Register default component prefixes
-        // // These can be overridden by calling register_component_prefix
-        // kvstore_host
-        //     .register_component_prefix("ante-handler".to_string(), "/ante/".to_string())
-        //     .map_err(ComponentHostError::ResourceError)?;
-        // kvstore_host
-        //     .register_component_prefix("begin-blocker".to_string(), "/begin/".to_string())
-        //     .map_err(ComponentHostError::ResourceError)?;
-        // kvstore_host
-        //     .register_component_prefix("end-blocker".to_string(), "/end/".to_string())
-        //     .map_err(ComponentHostError::ResourceError)?;
-        // kvstore_host
-        //     .register_component_prefix("tx-decoder".to_string(), "/decoder/".to_string())
-        //     .map_err(ComponentHostError::ResourceError)?;
+        info!(
+            "Component host initialized with secure configuration              (memory_limit={}MB, max_binary={}MB, fuel=enabled)",
+            resource_config.max_memory_size / (1024 * 1024),
+            resource_config.max_wasm_binary_size / (1024 * 1024),
+        );
 
         Ok(Self {
             engine,
             components: Arc::new(Mutex::new(HashMap::new())),
             component_info: Arc::new(Mutex::new(HashMap::new())),
             default_gas_limit: 10_000_000, // 10 million units
-            kvstore_manager: SimpleKVStoreManager::new(),
-            // kvstore_host,
+            resource_config,
+            vfs: None,
         })
+    }
+
+    /// Get the current resource configuration
+    pub fn resource_config(&self) -> &ResourceConfig {
+        &self.resource_config
+    }
+
+    /// Set the VFS reference for state access bridging between WASI modules and the store
+    pub fn set_vfs(&mut self, vfs: Arc<VirtualFilesystem>) {
+        self.vfs = Some(vfs);
+    }
+
+    /// Get the VFS reference
+    pub fn vfs(&self) -> Option<&Arc<VirtualFilesystem>> {
+        self.vfs.as_ref()
     }
 
     /// Load a component from bytes
     pub fn load_component(&self, name: &str, bytes: &[u8], info: ComponentInfo) -> Result<()> {
-        debug!("Loading component: {}", name);
+        debug!("Loading component: {} ({} bytes)", name, bytes.len());
+
+        // Enforce WASM binary size limit
+        if bytes.len() > self.resource_config.max_wasm_binary_size {
+            return Err(ComponentHostError::ResourceError(format!(
+                "WASM binary size {} bytes exceeds maximum allowed {} bytes",
+                bytes.len(),
+                self.resource_config.max_wasm_binary_size,
+            )));
+        }
 
         // Compile the component
         let component = Component::new(&self.engine, bytes)
@@ -337,174 +477,21 @@ impl ComponentHost {
         Ok(())
     }
 
-    /// Execute an ante-handler component
-    #[allow(clippy::too_many_arguments)]
-    pub fn execute_ante_handler(
-        &self,
-        component_name: &str,
-        block_height: u64,
-        block_time: u64,
-        chain_id: &str,
-        gas_limit: u64,
-        sequence: u64,
-        tx_bytes: Vec<u8>,
-    ) -> Result<ComponentResult> {
-        debug!("Executing ante-handler component: {}", component_name);
-
-        // Get the component
-        let component = {
-            let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            components
-                .get(component_name)
-                .ok_or_else(|| ComponentHostError::ComponentNotFound(component_name.to_string()))?
-                .clone()
-        };
-
-        // Create WASI context
+    /// Create a store with WASI context, fuel limit, and resource limits for a component
+    fn create_store(&self, component_name: &str) -> Result<Store<ComponentState>> {
         let wasi = WasiCtxBuilder::new().build();
-
         let state = ComponentState {
             table: wasmtime_wasi::ResourceTable::new(),
             wasi,
             component_name: component_name.to_string(),
-            kvstore_manager: SimpleKVStoreManager::new(),
-            // kvstore_host: self.kvstore_host.clone(),
+            vfs: self.vfs.clone(),
+            limits: self.resource_config.to_store_limits(),
         };
-
         let mut store = Store::new(&self.engine, state);
 
-        // Set fuel limit
-        let component_gas_limit = {
-            let info = self.component_info.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            info.get(component_name)
-                .map(|i| i.gas_limit)
-                .unwrap_or(self.default_gas_limit)
-        };
-        store
-            .set_fuel(component_gas_limit)
-            .map_err(|e| ComponentHostError::ComponentExecution(e.to_string()))?;
+        // Apply resource limiter for memory, tables, instances
+        store.limiter(|state| &mut state.limits);
 
-        // Create linker and add WASI
-        let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
-
-        // Add module-state interface
-
-        // Add kvstore interface
-        // TODO: Remove kvstore interface (temporary implementation)
-        // self.add_kvstore_to_linker(&mut linker)?;
-
-        // Instantiate the component with bindings
-        let bindings = AnteHandlerWorld::instantiate(&mut store, &component, &linker)
-            .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
-
-        // Create the context
-        let context = crate::component_bindings::ante_handler::exports::gridway::framework::ante_handler::TxContext {
-            block_height,
-            block_time,
-            chain_id: chain_id.to_string(),
-            gas_limit,
-            sequence,
-            simulate: false,
-            is_check_tx: false,
-            is_recheck: false,
-        };
-
-        // Execute the component
-        let response = bindings
-            .gridway_framework_ante_handler()
-            .call_ante_handle(&mut store, &context, &tx_bytes)
-            .map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
-            })?;
-
-        // Get remaining fuel for gas tracking
-        let gas_used = component_gas_limit - store.get_fuel().unwrap_or(0);
-
-        // Convert events to JSON for stdout
-        let events_data: Vec<serde_json::Value> = response
-            .events
-            .iter()
-            .map(|event| {
-                let attributes: Vec<serde_json::Value> = event
-                    .attributes
-                    .iter()
-                    .map(|attr| {
-                        serde_json::json!({
-                            "key": attr.key,
-                            "value": attr.value
-                        })
-                    })
-                    .collect();
-                serde_json::json!({
-                    "event_type": event.event_type,
-                    "attributes": attributes
-                })
-            })
-            .collect();
-        let events_json = serde_json::to_string(&events_data).unwrap_or_default();
-
-        let error_stderr = if let Some(ref error) = response.error {
-            error.as_bytes().to_vec()
-        } else {
-            Vec::new()
-        };
-
-        Ok(ComponentResult {
-            success: response.success,
-            exit_code: if response.success { 0 } else { 1 },
-            data: Some(serde_json::json!({
-                "gas_used": response.gas_used,
-                "priority": response.priority,
-                "events": events_data
-            })),
-            error: response.error,
-            stdout: events_json.as_bytes().to_vec(),
-            stderr: error_stderr,
-            gas_used,
-        })
-    }
-
-    /// Execute a tx-decoder component
-    pub fn execute_tx_decoder(
-        &self,
-        component_name: &str,
-        tx_bytes: &str,
-        encoding: &str,
-        validate: bool,
-    ) -> Result<ComponentResult> {
-        debug!("Executing tx-decoder component: {}", component_name);
-
-        // Get the component
-        let component = {
-            let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            components
-                .get(component_name)
-                .ok_or_else(|| ComponentHostError::ComponentNotFound(component_name.to_string()))?
-                .clone()
-        };
-
-        // Create WASI context
-        let wasi = WasiCtxBuilder::new().build();
-
-        let state = ComponentState {
-            table: wasmtime_wasi::ResourceTable::new(),
-            wasi,
-            component_name: component_name.to_string(),
-            kvstore_manager: SimpleKVStoreManager::new(),
-            // kvstore_host: self.kvstore_host.clone(),
-        };
-
-        let mut store = Store::new(&self.engine, state);
-
-        // Set fuel limit
         let gas_limit = {
             let info = self.component_info.lock().map_err(|e| {
                 ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
@@ -517,139 +504,361 @@ impl ComponentHost {
             .set_fuel(gas_limit)
             .map_err(|e| ComponentHostError::ComponentExecution(e.to_string()))?;
 
-        // Create linker and add WASI
+        Ok(store)
+    }
+
+    /// Create a linker with WASI and kvstore bindings
+    fn create_linker(&self) -> Result<Linker<ComponentState>> {
         let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
             .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
+        kvstore::add_to_linker::<ComponentState, wasmtime::component::HasSelf<ComponentState>>(
+            &mut linker,
+            |state| state,
+        )
+        .map_err(|e| {
+            ComponentHostError::ComponentInstantiation(format!("Failed to add kvstore: {e}"))
+        })?;
+        Ok(linker)
+    }
 
-        // Add module-state interface
+    /// Check whether a component with the given name is already loaded.
+    pub fn has_component(&self, name: &str) -> bool {
+        self.components
+            .lock()
+            .map(|c| c.contains_key(name))
+            .unwrap_or(false)
+    }
 
-        // Add kvstore interface
-        // TODO: Remove kvstore interface (temporary implementation)
-        // self.add_kvstore_to_linker(&mut linker)?;
+    /// Get a loaded component by name
+    fn get_component(&self, name: &str) -> Result<Component> {
+        let components = self
+            .components
+            .lock()
+            .map_err(|e| ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}")))?;
+        components
+            .get(name)
+            .ok_or_else(|| ComponentHostError::ComponentNotFound(name.to_string()))
+            .cloned()
+    }
 
-        // Instantiate the component with bindings
-        let bindings = TxDecoderWorld::instantiate(&mut store, &component, &linker)
+    /// Get fuel-based gas consumption from a store
+    fn fuel_gas_used(&self, store: &mut Store<ComponentState>, component_name: &str) -> u64 {
+        let gas_limit = {
+            let info = self.component_info.lock().ok();
+            info.and_then(|i| i.get(component_name).map(|v| v.gas_limit))
+                .unwrap_or(self.default_gas_limit)
+        };
+        gas_limit.saturating_sub(store.get_fuel().unwrap_or(0))
+    }
+
+    /// Convert component events to JSON
+    fn events_to_json(events: &[(String, Vec<(String, String)>)]) -> Vec<serde_json::Value> {
+        events
+            .iter()
+            .map(|(event_type, attributes)| {
+                let attrs: Vec<serde_json::Value> = attributes
+                    .iter()
+                    .map(|(key, value)| serde_json::json!({ "key": key, "value": value }))
+                    .collect();
+                serde_json::json!({
+                    "event_type": event_type,
+                    "attributes": attrs
+                })
+            })
+            .collect()
+    }
+
+    // =========================================================================
+    // Hook execution (replaces begin-blocker / end-blocker)
+    // =========================================================================
+
+    /// Execute the pre-execute hook (called before TX processing).
+    pub fn execute_hook_pre(
+        &self,
+        component_name: &str,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+        proposer: Option<Vec<u8>>,
+    ) -> Result<ComponentResult> {
+        debug!("Executing hook pre-execute: {}", component_name);
+
+        let component = self.get_component(component_name)?;
+        let mut store = self.create_store(component_name)?;
+        let linker = self.create_linker()?;
+
+        let bindings = HookWorld::instantiate(&mut store, &component, &linker)
             .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
-        // Create decode request using the generated types
-        let request = crate::component_bindings::tx_decoder::exports::gridway::framework::tx_decoder::DecodeRequest {
-            tx_bytes: tx_bytes.to_string(),
-            encoding: encoding.to_string(),
-            validate,
-        };
+        let ctx =
+            crate::component_bindings::hook::exports::gridway::framework::hook::BlockContext {
+                height,
+                timestamp,
+                chain_id: chain_id.to_string(),
+                proposer,
+            };
 
-        // Call decode-tx function through the generated interface
         let response = bindings
-            .gridway_framework_tx_decoder()
-            .call_decode_tx(&mut store, &request)
-            .map_err(|e| ComponentHostError::ComponentExecution(e.to_string()))?;
+            .gridway_framework_hook()
+            .call_pre_execute(&mut store, &ctx)
+            .map_err(|e| {
+                ComponentHostError::ComponentExecution(format!("Hook pre-execute failed: {e}"))
+            })?;
 
-        // Get gas consumed
-        let gas_used = self.get_gas_consumed(&mut store);
+        let gas_used = self.fuel_gas_used(&mut store, component_name);
 
-        // Convert response to ComponentResult
-        let stdout_data = response.decoded_tx.clone().unwrap_or_default();
-        let data = response
-            .decoded_tx
-            .and_then(|s| serde_json::from_str(&s).ok());
+        let events: Vec<(String, Vec<(String, String)>)> = response
+            .events
+            .iter()
+            .map(|e| {
+                (
+                    e.event_type.clone(),
+                    e.attributes
+                        .iter()
+                        .map(|a| (a.key.clone(), a.value.clone()))
+                        .collect(),
+                )
+            })
+            .collect();
+        let events_data = Self::events_to_json(&events);
 
         Ok(ComponentResult {
             success: response.success,
             exit_code: if response.success { 0 } else { 1 },
-            data,
-            error: response.error.clone(),
-            stdout: stdout_data.as_bytes().to_vec(),
-            stderr: response.error.unwrap_or_default().as_bytes().to_vec(),
+            data: Some(serde_json::json!({ "events": events_data })),
+            error: response.error,
+            stdout: serde_json::to_string(&events_data)
+                .unwrap_or_default()
+                .into_bytes(),
+            stderr: Vec::new(),
             gas_used,
         })
     }
 
-    /// Execute a begin-blocker component
-    pub fn execute_begin_blocker(
+    /// Execute the post-execute hook (called after TX processing).
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_hook_post(
         &self,
+        component_name: &str,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+        proposer: Option<Vec<u8>>,
+        tx_count: u32,
+        total_gas: u64,
+    ) -> Result<ComponentResult> {
+        debug!("Executing hook post-execute: {}", component_name);
+
+        let component = self.get_component(component_name)?;
+        let mut store = self.create_store(component_name)?;
+        let linker = self.create_linker()?;
+
+        let bindings = HookWorld::instantiate(&mut store, &component, &linker)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
+
+        let ctx =
+            crate::component_bindings::hook::exports::gridway::framework::hook::BlockContext {
+                height,
+                timestamp,
+                chain_id: chain_id.to_string(),
+                proposer,
+            };
+
+        let response = bindings
+            .gridway_framework_hook()
+            .call_post_execute(&mut store, &ctx, tx_count, total_gas)
+            .map_err(|e| {
+                ComponentHostError::ComponentExecution(format!("Hook post-execute failed: {e}"))
+            })?;
+
+        let gas_used = self.fuel_gas_used(&mut store, component_name);
+
+        let events: Vec<(String, Vec<(String, String)>)> = response
+            .events
+            .iter()
+            .map(|e| {
+                (
+                    e.event_type.clone(),
+                    e.attributes
+                        .iter()
+                        .map(|a| (a.key.clone(), a.value.clone()))
+                        .collect(),
+                )
+            })
+            .collect();
+        let events_data = Self::events_to_json(&events);
+
+        Ok(ComponentResult {
+            success: response.success,
+            exit_code: if response.success { 0 } else { 1 },
+            data: Some(serde_json::json!({ "events": events_data })),
+            error: response.error,
+            stdout: serde_json::to_string(&events_data)
+                .unwrap_or_default()
+                .into_bytes(),
+            stderr: Vec::new(),
+            gas_used,
+        })
+    }
+
+    // =========================================================================
+    // Validator execution (replaces ante-handler + tx-decoder)
+    // =========================================================================
+
+    /// Validate a raw transaction through the WASM validator component.
+    pub fn execute_validator(
+        &self,
+        component_name: &str,
+        height: u64,
+        timestamp: u64,
+        chain_id: &str,
+        raw_tx: &[u8],
+    ) -> Result<ComponentResult> {
+        debug!("Executing validator: {}", component_name);
+
+        let component = self.get_component(component_name)?;
+        let mut store = self.create_store(component_name)?;
+        let linker = self.create_linker()?;
+
+        let bindings = ValidatorWorld::instantiate(&mut store, &component, &linker)
+            .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
+
+        let ctx = crate::component_bindings::validator::exports::gridway::framework::validator::TxContext {
+            height,
+            timestamp,
+            chain_id: chain_id.to_string(),
+        };
+
+        let response = bindings
+            .gridway_framework_validator()
+            .call_validate(&mut store, &ctx, raw_tx)
+            .map_err(|e| {
+                ComponentHostError::ComponentExecution(format!("Validator execution failed: {e}"))
+            })?;
+
+        let gas_used = self.fuel_gas_used(&mut store, component_name);
+
+        // Convert validated TX to JSON data
+        let tx_data = response.tx.as_ref().map(|tx| {
+            let messages: Vec<serde_json::Value> = tx
+                .messages
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "type_url": m.type_url,
+                        "data": m.data,
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "sender": tx.sender,
+                "messages": messages,
+                "sequence": tx.sequence,
+                "gas_limit": tx.gas_limit,
+            })
+        });
+
+        let events: Vec<(String, Vec<(String, String)>)> = response
+            .events
+            .iter()
+            .map(|e| {
+                (
+                    e.event_type.clone(),
+                    e.attributes
+                        .iter()
+                        .map(|a| (a.key.clone(), a.value.clone()))
+                        .collect(),
+                )
+            })
+            .collect();
+        let events_data = Self::events_to_json(&events);
+
+        Ok(ComponentResult {
+            success: response.valid,
+            exit_code: if response.valid { 0 } else { 1 },
+            data: Some(serde_json::json!({
+                "tx": tx_data,
+                "gas_used": response.gas_used,
+                "events": events_data,
+            })),
+            error: response.error,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            gas_used,
+        })
+    }
+
+    // =========================================================================
+    // Module execution (unchanged)
+    // =========================================================================
+
+    /// Execute a module component (e.g., bank, staking)
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_module(
+        &self,
+        module_name: &str,
         block_height: u64,
         block_time: u64,
         chain_id: &str,
+        msg_type_url: &str,
+        msg_data: &str,
+        msg_sender: &str,
         gas_limit: u64,
-        byzantine_validators: Vec<String>,
     ) -> Result<ComponentResult> {
-        debug!("Executing begin-blocker component");
+        debug!("Executing module component: {}", module_name);
 
-        // Get the component (assume "begin-blocker" as the component name)
-        let component = {
-            let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            components
-                .get("begin-blocker")
-                .ok_or_else(|| ComponentHostError::ComponentNotFound("begin-blocker".to_string()))?
-                .clone()
-        };
+        let component = self.get_component(module_name)?;
 
-        // Create store
-        let mut store = Store::new(
-            &self.engine,
-            ComponentState {
-                table: wasmtime_wasi::ResourceTable::new(),
-                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
-                component_name: "begin-blocker".to_string(),
-                kvstore_manager: self.kvstore_manager.clone(),
-                // kvstore_host: self.kvstore_host.clone(),
-            },
-        );
-
-        // Set fuel for gas limiting
+        // Use the standard create_store for consistent WASI sandboxing and resource limits,
+        // then override fuel with the caller-specified gas_limit.
+        let mut store = self.create_store(module_name)?;
         store.set_fuel(gas_limit).map_err(|e| {
             ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}"))
         })?;
 
-        // Create linker and add WASI
-        let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
+        let linker = self.create_linker()?;
 
-        // Add module-state interface
-
-        // Add kvstore interface
-        // TODO: Remove kvstore interface (temporary implementation)
-        // self.add_kvstore_to_linker(&mut linker)?;
-
-        // Instantiate the component with bindings
-        let bindings = crate::component_bindings::begin_blocker::BeginBlockerWorld::instantiate(
+        // Instantiate the component with module-world bindings
+        let bindings = crate::component_bindings::module::ModuleWorld::instantiate(
             &mut store, &component, &linker,
         )
         .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
 
-        // Create the request
-        let evidence_list: Vec<crate::component_bindings::begin_blocker::exports::gridway::framework::begin_blocker::Evidence> = byzantine_validators
-            .into_iter()
-            .map(|_| crate::component_bindings::begin_blocker::exports::gridway::framework::begin_blocker::Evidence {
-                validator_address: vec![],
-                evidence_type: "duplicate_vote".to_string(),
-                height: block_height,
-            })
-            .collect();
+        // Create module context and message
+        let context =
+            crate::component_bindings::module::exports::gridway::framework::module::ModuleContext {
+                block_height,
+                block_time,
+                chain_id: chain_id.to_string(),
+                simulate: false,
+            };
 
-        let request = crate::component_bindings::begin_blocker::exports::gridway::framework::begin_blocker::BeginBlockRequest {
-            height: block_height,
-            time: block_time,
-            chain_id: chain_id.to_string(),
-            byzantine_validators: evidence_list,
-        };
+        let message =
+            crate::component_bindings::module::exports::gridway::framework::module::Message {
+                type_url: msg_type_url.to_string(),
+                data: msg_data.to_string(),
+                sender: msg_sender.to_string(),
+            };
 
         // Execute the component
         let response = bindings
-            .gridway_framework_begin_blocker()
-            .call_begin_block(&mut store, &request)
+            .gridway_framework_module()
+            .call_handle(&mut store, &context, &message)
             .map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
+                ComponentHostError::ComponentExecution(format!("Module execution failed: {e}"))
             })?;
 
         // Get remaining fuel for gas tracking
         let gas_used = gas_limit - store.get_fuel().unwrap_or(0);
+        // Use the module-reported gas if available, otherwise use fuel-based measurement
+        let final_gas_used = if response.gas_used > 0 {
+            response.gas_used
+        } else {
+            gas_used
+        };
 
-        // Convert events to JSON for stdout
+        // Convert events to JSON for data field
         let events_data: Vec<serde_json::Value> = response
             .events
             .iter()
@@ -670,7 +879,6 @@ impl ComponentHost {
                 })
             })
             .collect();
-        let events_json = serde_json::to_string(&events_data).unwrap_or_default();
 
         let error_stderr = if let Some(ref error) = response.error {
             error.as_bytes().to_vec()
@@ -683,183 +891,25 @@ impl ComponentHost {
             exit_code: if response.success { 0 } else { 1 },
             data: Some(serde_json::json!({"events": events_data})),
             error: response.error,
-            stdout: events_json.as_bytes().to_vec(),
+            stdout: serde_json::to_string(&events_data)
+                .unwrap_or_default()
+                .as_bytes()
+                .to_vec(),
             stderr: error_stderr,
-            gas_used,
+            gas_used: final_gas_used,
         })
     }
 
-    /// Execute an end-blocker component  
-    pub fn execute_end_blocker(
-        &self,
-        block_height: u64,
-        _block_time: u64,
-        chain_id: &str,
-        gas_limit: u64,
-    ) -> Result<ComponentResult> {
-        debug!("Executing end-blocker component");
-
-        // Get the component (assume "end-blocker" as the component name)
-        let component = {
-            let components = self.components.lock().map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Lock poisoned: {e}"))
-            })?;
-            components
-                .get("end-blocker")
-                .ok_or_else(|| ComponentHostError::ComponentNotFound("end-blocker".to_string()))?
-                .clone()
-        };
-
-        // Create store
-        let mut store = Store::new(
-            &self.engine,
-            ComponentState {
-                table: wasmtime_wasi::ResourceTable::new(),
-                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
-                component_name: "end-blocker".to_string(),
-                kvstore_manager: self.kvstore_manager.clone(),
-                // kvstore_host: self.kvstore_host.clone(),
-            },
-        );
-
-        // Set fuel for gas limiting
-        store.set_fuel(gas_limit).map_err(|e| {
-            ComponentHostError::ComponentExecution(format!("Failed to set fuel: {e}"))
-        })?;
-
-        // Create linker and add WASI
-        let mut linker: Linker<ComponentState> = Linker::new(&self.engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)
-            .map_err(|e| ComponentHostError::WasiSetup(e.to_string()))?;
-
-        // Add module-state interface
-
-        // Add kvstore interface
-        // TODO: Remove kvstore interface (temporary implementation)
-        // self.add_kvstore_to_linker(&mut linker)?;
-
-        // Instantiate the component with bindings
-        let bindings = crate::component_bindings::end_blocker::EndBlockerWorld::instantiate(
-            &mut store, &component, &linker,
-        )
-        .map_err(|e| ComponentHostError::ComponentInstantiation(e.to_string()))?;
-
-        // Create the request
-        let request = crate::component_bindings::end_blocker::exports::gridway::framework::end_blocker::EndBlockRequest {
-            height: block_height,
-            chain_id: chain_id.to_string(),
-        };
-
-        // Execute the component
-        let response = bindings
-            .gridway_framework_end_blocker()
-            .call_end_block(&mut store, &request)
-            .map_err(|e| {
-                ComponentHostError::ComponentExecution(format!("Component execution failed: {e}"))
-            })?;
-
-        // Get remaining fuel for gas tracking
-        let gas_used = gas_limit - store.get_fuel().unwrap_or(0);
-
-        // Convert events and validator updates to JSON for stdout
-        let events_data: Vec<serde_json::Value> = response
-            .events
-            .iter()
-            .map(|event| {
-                let attributes: Vec<serde_json::Value> = event
-                    .attributes
-                    .iter()
-                    .map(|attr| {
-                        serde_json::json!({
-                            "key": attr.key,
-                            "value": attr.value
-                        })
-                    })
-                    .collect();
-                serde_json::json!({
-                    "event_type": event.event_type,
-                    "attributes": attributes
-                })
-            })
-            .collect();
-        let validator_updates_data: Vec<serde_json::Value> = response
-            .validator_updates
-            .iter()
-            .map(|update| {
-                serde_json::json!({
-                    "pub_key": {
-                        "type_url": update.pub_key.key_type,
-                        "value": hex::encode(&update.pub_key.value)
-                    },
-                    "power": update.power
-                })
-            })
-            .collect();
-        let output_data = serde_json::json!({
-            "events": events_data,
-            "validator_updates": validator_updates_data
-        });
-        let output_json = serde_json::to_string(&output_data).unwrap_or_default();
-
-        let error_stderr = if let Some(ref error) = response.error {
-            error.as_bytes().to_vec()
-        } else {
-            Vec::new()
-        };
-
-        Ok(ComponentResult {
-            success: response.success,
-            exit_code: if response.success { 0 } else { 1 },
-            data: Some(output_data),
-            error: response.error,
-            stdout: output_json.as_bytes().to_vec(),
-            stderr: error_stderr,
-            gas_used,
-        })
-    }
-
-    /// Mount a KVStore for component access (legacy)
-    pub fn mount_kvstore(
-        &self,
-        name: String,
-        store: Arc<Mutex<dyn gridway_store::KVStore>>,
-    ) -> Result<()> {
-        self.kvstore_manager
-            .mount_store(name, store)
-            .map_err(ComponentHostError::ResourceError)
-    }
-
-    /* TODO: Remove kvstore interface (temporary implementation)
-    /// Register a component with its allowed KVStore prefix
-    pub fn register_component_prefix(&self, component_name: &str, prefix: &str) -> Result<()> {
-        self.kvstore_host
-            .register_component_prefix(component_name.to_string(), prefix.to_string())
-            .map_err(ComponentHostError::ResourceError)
-    }
-    */
-
-    /* TODO: Remove kvstore interface (temporary implementation)
-    /// Add kvstore interface to the component linker
-    fn add_kvstore_to_linker(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
-        // Use the generated kvstore bindings
-        kvstore::add_to_linker(linker, |state| state).map_err(|e| {
-            ComponentHostError::ComponentInstantiation(format!(
-                "Failed to add kvstore interface: {e}"
-            ))
-        })?;
-        info!("KVStore interface added to linker");
-        Ok(())
-    }
-    */
-
-    /// Get the gas consumed from the last execution
+    /// Get the gas consumed from the last execution.
+    ///
+    /// Returns `gas_limit - remaining_fuel`, i.e. actual fuel burned.
+    /// Uses `default_gas_limit` as the baseline; callers needing per-component
+    /// accuracy should use `fuel_gas_used()` instead.
     pub fn get_gas_consumed(&self, store: &mut Store<ComponentState>) -> u64 {
-        store.get_fuel().unwrap_or(0)
+        let remaining = store.get_fuel().unwrap_or(0);
+        self.default_gas_limit.saturating_sub(remaining)
     }
 }
-
-// Component interface bindings would go here
-// For now, we're using a simplified approach
 
 #[cfg(test)]
 mod tests {
@@ -867,8 +917,279 @@ mod tests {
 
     #[test]
     fn test_component_host_creation() {
-        let base_store = Arc::new(Mutex::new(gridway_store::MemStore::new()));
-        let host = ComponentHost::new(base_store).unwrap();
+        let host = ComponentHost::new().unwrap();
         assert!(host.components.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_component_host_with_vfs() {
+        let mut host = ComponentHost::new().unwrap();
+
+        let vfs = Arc::new(crate::vfs::VirtualFilesystem::new());
+        host.set_vfs(vfs.clone());
+
+        assert!(host.vfs().is_some());
+    }
+
+    #[test]
+    fn test_kvstore_host_via_vfs() {
+        use crate::vfs::{Capability, VirtualFilesystem};
+        use std::path::PathBuf;
+
+        // Set up VFS with a mounted MemStore
+        let vfs = Arc::new(VirtualFilesystem::new());
+        let bank_store: Arc<Mutex<dyn gridway_store::KVStore>> =
+            Arc::new(Mutex::new(gridway_store::MemStore::new()));
+        vfs.mount_store("bank".to_string(), bank_store).unwrap();
+        vfs.add_capability(Capability::Read(PathBuf::from("/bank")))
+            .unwrap();
+        vfs.add_capability(Capability::Write(PathBuf::from("/bank")))
+            .unwrap();
+
+        // Create ComponentState with VFS
+        let wasi = WasiCtxBuilder::new().build();
+        let mut state = ComponentState {
+            table: wasmtime_wasi::ResourceTable::new(),
+            wasi,
+            component_name: "test".to_string(),
+            vfs: Some(vfs),
+            limits: StoreLimitsBuilder::new().build(),
+        };
+
+        // Test open_store
+        let store_resource = kvstore::Host::open_store(&mut state, "bank".to_string()).unwrap();
+        let rep = store_resource.rep();
+
+        // Test set
+        kvstore::HostStore::set(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+            b"1000".to_vec(),
+        );
+
+        // Test get
+        let value = kvstore::HostStore::get(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+        );
+        assert_eq!(value, Some(b"1000".to_vec()));
+
+        // Test has
+        let exists = kvstore::HostStore::has(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+        );
+        assert!(exists);
+
+        // Test get nonexistent key
+        let value = kvstore::HostStore::get(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"nonexistent".to_vec(),
+        );
+        assert_eq!(value, None);
+
+        // Test has nonexistent key
+        let exists = kvstore::HostStore::has(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"nonexistent".to_vec(),
+        );
+        assert!(!exists);
+
+        // Test delete
+        kvstore::HostStore::delete(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+        );
+        let value = kvstore::HostStore::get(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            b"balance_alice".to_vec(),
+        );
+        assert_eq!(value, None);
+
+        // Test drop (cleanup)
+        kvstore::HostStore::drop(&mut state, wasmtime::component::Resource::new_own(rep)).unwrap();
+    }
+
+    #[test]
+    fn test_kvstore_host_range_query() {
+        use crate::vfs::{Capability, VirtualFilesystem};
+        use std::path::PathBuf;
+
+        let vfs = Arc::new(VirtualFilesystem::new());
+        let bank_store: Arc<Mutex<dyn gridway_store::KVStore>> =
+            Arc::new(Mutex::new(gridway_store::MemStore::new()));
+        vfs.mount_store("bank".to_string(), bank_store).unwrap();
+        vfs.add_capability(Capability::Read(PathBuf::from("/bank")))
+            .unwrap();
+        vfs.add_capability(Capability::Write(PathBuf::from("/bank")))
+            .unwrap();
+
+        let wasi = WasiCtxBuilder::new().build();
+        let mut state = ComponentState {
+            table: wasmtime_wasi::ResourceTable::new(),
+            wasi,
+            component_name: "test".to_string(),
+            vfs: Some(vfs),
+            limits: StoreLimitsBuilder::new().build(),
+        };
+
+        let store_resource = kvstore::Host::open_store(&mut state, "bank".to_string()).unwrap();
+        let rep = store_resource.rep();
+
+        // Write multiple keys
+        for (key, val) in [
+            ("balance_alice", "1000"),
+            ("balance_bob", "2000"),
+            ("balance_carol", "3000"),
+            ("supply_ugridway", "6000"),
+        ] {
+            kvstore::HostStore::set(
+                &mut state,
+                wasmtime::component::Resource::new_own(rep),
+                key.as_bytes().to_vec(),
+                val.as_bytes().to_vec(),
+            );
+        }
+
+        // Range query with prefix
+        let results = kvstore::HostStore::range(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            Some(b"balance_".to_vec()),
+            None,
+            10,
+        );
+        assert_eq!(results.len(), 3, "expected 3 balance_ entries");
+
+        // Range query with limit
+        let results = kvstore::HostStore::range(
+            &mut state,
+            wasmtime::component::Resource::new_own(rep),
+            Some(b"balance_".to_vec()),
+            None,
+            2,
+        );
+        assert_eq!(results.len(), 2, "expected 2 entries with limit=2");
+    }
+
+    #[test]
+    fn test_kvstore_host_open_nonexistent_store() {
+        use crate::vfs::VirtualFilesystem;
+
+        let vfs = Arc::new(VirtualFilesystem::new());
+        // No stores mounted
+
+        let wasi = WasiCtxBuilder::new().build();
+        let mut state = ComponentState {
+            table: wasmtime_wasi::ResourceTable::new(),
+            wasi,
+            component_name: "test".to_string(),
+            vfs: Some(vfs),
+            limits: StoreLimitsBuilder::new().build(),
+        };
+
+        // Opening a nonexistent store should fail
+        let result = kvstore::Host::open_store(&mut state, "nonexistent".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_kvstore_host_no_vfs() {
+        let wasi = WasiCtxBuilder::new().build();
+        let mut state = ComponentState {
+            table: wasmtime_wasi::ResourceTable::new(),
+            wasi,
+            component_name: "test".to_string(),
+            vfs: None, // No VFS
+            limits: StoreLimitsBuilder::new().build(),
+        };
+
+        // Opening a store without VFS should fail
+        let result = kvstore::Host::open_store(&mut state, "bank".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("VFS not available"));
+    }
+
+    // ─── Resource Limit Tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_default_resource_config() {
+        let config = ResourceConfig::default();
+        assert_eq!(config.max_memory_size, DEFAULT_MAX_MEMORY_SIZE);
+        assert_eq!(config.max_wasm_binary_size, DEFAULT_MAX_WASM_BINARY_SIZE);
+        assert_eq!(config.max_instances, DEFAULT_MAX_INSTANCES);
+        assert_eq!(config.max_tables, DEFAULT_MAX_TABLES);
+        assert_eq!(config.max_memories, DEFAULT_MAX_MEMORIES);
+        assert_eq!(config.max_table_elements, DEFAULT_MAX_TABLE_ELEMENTS);
+        assert!(config.trap_on_grow_failure);
+    }
+
+    #[test]
+    fn test_custom_resource_config() {
+        let config = ResourceConfig {
+            max_memory_size: 128 * 1024 * 1024,
+            max_wasm_binary_size: 5 * 1024 * 1024,
+            max_instances: 5,
+            max_tables: 5,
+            max_memories: 5,
+            max_table_elements: 5000,
+            trap_on_grow_failure: false,
+        };
+        let host = ComponentHost::with_resource_config(config.clone()).unwrap();
+        assert_eq!(host.resource_config().max_memory_size, 128 * 1024 * 1024);
+        assert_eq!(host.resource_config().max_wasm_binary_size, 5 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_component_host_rejects_oversized_binary() {
+        let config = ResourceConfig {
+            max_wasm_binary_size: 100, // Very small limit
+            ..ResourceConfig::default()
+        };
+        let host = ComponentHost::with_resource_config(config).unwrap();
+
+        // Create a binary larger than the limit
+        let oversized_bytes = vec![0u8; 200];
+        let info = ComponentInfo {
+            name: "oversized".to_string(),
+            path: std::path::PathBuf::from("/tmp/oversized.wasm"),
+            component_type: ComponentType::Module,
+            gas_limit: 1_000_000,
+        };
+
+        let result = host.load_component("oversized", &oversized_bytes, info);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("exceeds maximum"),
+            "Expected 'exceeds maximum' in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_resource_config_to_store_limits() {
+        // Verify that ResourceConfig properly creates StoreLimits
+        let config = ResourceConfig::default();
+        let _limits = config.to_store_limits();
+        // StoreLimits doesn't expose fields, but construction should succeed
+    }
+
+    #[test]
+    fn test_component_host_with_resource_config() {
+        let config = ResourceConfig {
+            max_memory_size: 64 * 1024 * 1024, // 64MB
+            ..ResourceConfig::default()
+        };
+        let host = ComponentHost::with_resource_config(config).unwrap();
+        assert!(host.components.lock().unwrap().is_empty());
+        assert_eq!(host.resource_config().max_memory_size, 64 * 1024 * 1024);
     }
 }

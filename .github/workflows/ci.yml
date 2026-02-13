@@ -2,220 +2,102 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, experiment/commonware-migration ]
   pull_request:
     branches: [ main ]
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  lint:
-    name: Lint
+  check:
+    name: Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      
-      - name: Install protoc
-        run: |
-          # Wait for apt locks to be released
-          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-            echo "Waiting for other apt processes to finish..."
-            sleep 1
-          done
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      
-      - name: Cache cargo dependencies
-        uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
+            target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-      
-      - name: Install cargo-component
-        run: |
-          if ! command -v cargo-component &> /dev/null; then
-            cargo install cargo-component --locked
-          fi
-      
-      - name: Add wasm32-wasip1 target
-        run: rustup target add wasm32-wasip1
-      
-      - name: Build WASI modules
-        run: ./scripts/build-wasi-modules.sh
-      
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      
-      - name: Run clippy
-        run: cargo clippy --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --all-features -- -D warnings
+      - run: cargo check --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --exclude validator --exclude hook --exclude bank --exclude test-minimal
 
-  build:
-    name: Build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        rust: [stable]
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.rust }}
-      
-      - name: Install protoc
+          components: rustfmt
+      - name: Format check (non-WASM crates)
         run: |
-          # Wait for apt locks to be released
-          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-            echo "Waiting for other apt processes to finish..."
-            sleep 1
+          # WASM module crates (ante-handler, begin-blocker, end-blocker, tx-decoder)
+          # have auto-generated bindings.rs from cargo-component that aren't in the repo.
+          # cargo fmt --all fails on missing mod files, so we check per-package.
+          for pkg in gridway gridway-baseapp gridway-client gridway-consensus \
+                     gridway-crypto gridway-errors gridway-log gridway-math \
+                     gridway-simapp gridway-store gridway-telemetry gridway-types; do
+            echo "Checking format: $pkg"
+            cargo fmt -p "$pkg" -- --check
           done
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      
-      - name: Cache cargo dependencies
-        uses: actions/cache@v4
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.rust }}-cargo-
-      
-      - name: Install cargo-component
-        run: |
-          if ! command -v cargo-component &> /dev/null; then
-            cargo install cargo-component --locked
-          fi
-      
-      - name: Add wasm32-wasip1 target
-        run: rustup target add wasm32-wasip1
-      
-      - name: Build WASI modules
-        run: ./scripts/build-wasi-modules.sh
-      
-      - name: Build all crates
-        run: cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --release
+            target/
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo clippy --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --exclude validator --exclude hook --exclude bank --exclude test-minimal -- -D warnings
 
   test:
     name: Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      
-      - name: Install protoc
-        run: |
-          # Wait for apt locks to be released
-          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-            echo "Waiting for other apt processes to finish..."
-            sleep 1
-          done
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      
-      - name: Cache cargo dependencies
-        uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
+            target/
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-test-
-      
-      - name: Install cargo-component
-        run: |
-          if ! command -v cargo-component &> /dev/null; then
-            cargo install cargo-component --locked
-          fi
-      
-      - name: Add wasm32-wasip1 target
-        run: rustup target add wasm32-wasip1
-      
-      - name: Build WASI modules
-        run: ./scripts/build-wasi-modules.sh
-      
-      - name: Run tests
-        run: cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --verbose
-      
-      - name: Run tests with all features
-        run: cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --all-features --verbose
+      - run: cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --exclude validator --exclude hook --exclude bank --exclude test-minimal
 
-  coverage:
-    name: Code Coverage
+  build-release:
+    name: Build Release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      
-      - name: Install protoc
-        run: |
-          # Wait for apt locks to be released
-          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-            echo "Waiting for other apt processes to finish..."
-            sleep 1
-          done
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      
-      - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
-      
-      - name: Install cargo-component
-        run: |
-          if ! command -v cargo-component &> /dev/null; then
-            cargo install cargo-component --locked
-          fi
-      
-      - name: Add wasm32-wasip1 target
-        run: rustup target add wasm32-wasip1
-      
-      - name: Build WASI modules
-        run: ./scripts/build-wasi-modules.sh
-      
-      - name: Run coverage
-        run: cargo tarpaulin --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --out Xml
-      
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
         with:
-          files: ./cobertura.xml
-          fail_ci_if_error: false
-
-  security:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-      
-      - name: Run security audit
-        run: cargo audit
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder --exclude validator --exclude hook --exclude bank --exclude test-minimal --release

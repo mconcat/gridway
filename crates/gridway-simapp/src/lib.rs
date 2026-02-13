@@ -1,363 +1,192 @@
-//! Simulation application framework for the gridway blockchain.
+//! Simulation and property-based testing framework for gridway.
 //!
-//! This crate provides a simulation environment for testing and benchmarking
-//! gridway blockchain applications.
+//! Provides helper utilities for constructing test scenarios:
+//! - `SimState` — expected-state tracker for verifying invariants
+//! - `random_keypair` — deterministic keypair generation from seed
+//! - `build_transfer_tx` — build a signed bank.MsgSend transaction
+//! - `setup_genesis` — create a BaseApp with N genesis accounts
 
-use clap::{Parser, Subcommand};
-use gridway_types::Config;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
-use thiserror::Error;
-use tracing::{debug, info};
 
-/// Simulation error types
-#[derive(Error, Debug)]
-pub enum SimError {
-    /// Configuration error
-    #[error("configuration error:: {0}")]
-    Config(String),
+use commonware_cryptography::ed25519::PrivateKey;
+use commonware_cryptography::Signer as _;
+use gridway_baseapp::{Account, BaseApp};
+use gridway_client::{Coin, TxBuilder};
+use gridway_crypto::Address;
 
-    /// Simulation error
-    #[error("simulation error:: {0}")]
-    Simulation(String),
+/// Default denomination used in tests.
+pub const TEST_DENOM: &str = "ugridway";
 
-    /// IO error
-    #[error("io error:: {0}")]
-    Io(#[from] std::io::Error),
+/// Default chain ID used in tests.
+pub const TEST_CHAIN_ID: &str = "gridway-simtest";
 
-    /// JSON error
-    #[error("json error:: {0}")]
-    Json(#[from] serde_json::Error),
-}
+// ─── SimState ────────────────────────────────────────────────────────────────
 
-/// Result type for simulation operations
-pub type Result<T> = std::result::Result<T, SimError>;
-
-/// Simulation configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimConfig {
-    /// Number of accounts to simulate
-    pub num_accounts: usize,
-    /// Number of transactions per block
-    pub txs_per_block: usize,
-    /// Number of blocks to simulate
-    pub num_blocks: usize,
-    /// Block time in milliseconds
-    pub block_time_ms: u64,
-    /// Transaction types and their weights
-    pub tx_weights: HashMap<String, u32>,
-}
-
-impl Default for SimConfig {
-    fn default() -> Self {
-        let mut tx_weights = HashMap::new();
-        tx_weights.insert("transfer".to_string(), 80);
-        tx_weights.insert("delegate".to_string(), 15);
-        tx_weights.insert("vote".to_string(), 5);
-
-        Self {
-            num_accounts: 100,
-            txs_per_block: 50,
-            num_blocks: 1000,
-            block_time_ms: 5000,
-            tx_weights,
-        }
-    }
-}
-
-/// Simulation account
+/// Tracks expected state (balances, sequences) alongside the real BaseApp,
+/// so tests can assert invariants after executing transactions.
 #[derive(Debug, Clone)]
-pub struct Account {
-    /// Account address
-    pub address: String,
-    /// Account balance
-    pub balance: u64,
-    /// Account sequence number
-    pub sequence: u64,
+pub struct SimState {
+    /// Expected balances: address → denom → amount
+    pub balances: HashMap<String, HashMap<String, u64>>,
+    /// Expected sequences: address → next sequence
+    pub sequences: HashMap<String, u64>,
 }
 
-impl Account {
-    /// Create a new account
-    pub fn new(address: String, balance: u64) -> Self {
+impl SimState {
+    /// Create a new empty SimState.
+    pub fn new() -> Self {
         Self {
-            address,
-            balance,
-            sequence: 0,
-        }
-    }
-}
-
-/// Transaction type
-#[derive(Debug, Clone, Serialize)]
-pub enum Transaction {
-    /// Transfer transaction
-    Transfer {
-        from: String,
-        to: String,
-        amount: u64,
-    },
-    /// Delegate transaction
-    Delegate {
-        delegator: String,
-        validator: String,
-        amount: u64,
-    },
-    /// Vote transaction
-    Vote {
-        voter: String,
-        proposal_id: u64,
-        option: String,
-    },
-}
-
-/// Block containing transactions
-#[derive(Debug, Clone)]
-pub struct Block {
-    /// Block height
-    pub height: u64,
-    /// Block timestamp
-    pub timestamp: Instant,
-    /// Transactions in the block
-    pub transactions: Vec<Transaction>,
-}
-
-/// Simulation statistics
-#[derive(Clone, Debug, Serialize)]
-pub struct SimStats {
-    /// Total blocks processed
-    pub blocks_processed: u64,
-    /// Total transactions processed
-    pub txs_processed: u64,
-    /// Average transactions per second
-    pub avg_tps: f64,
-    /// Simulation duration
-    pub duration_ms: u64,
-    /// Transaction type counts
-    pub tx_type_counts: HashMap<String, u64>,
-}
-
-/// Simulation engine
-pub struct Simulator {
-    config: SimConfig,
-    app_config: Config,
-    accounts: Vec<Account>,
-    stats: SimStats,
-    start_time: Option<Instant>,
-}
-
-impl Simulator {
-    /// Create a new simulator
-    pub fn new(config: SimConfig) -> Self {
-        Self::with_app_config(config, Config::default())
-    }
-
-    /// Create a new simulator with app config
-    pub fn with_app_config(config: SimConfig, app_config: Config) -> Self {
-        let accounts = (0..config.num_accounts)
-            .map(|i| {
-                Account::new(
-                    format!("account_{i}"),
-                    app_config.simulation.default_balance,
-                )
-            })
-            .collect();
-
-        Self {
-            config,
-            app_config,
-            accounts,
-            stats: SimStats {
-                blocks_processed: 0,
-                txs_processed: 0,
-                avg_tps: 0.0,
-                duration_ms: 0,
-                tx_type_counts: HashMap::new(),
-            },
-            start_time: None,
+            balances: HashMap::new(),
+            sequences: HashMap::new(),
         }
     }
 
-    /// Generate a random transaction
-    fn generate_transaction(&self, rng: &mut fastrand::Rng) -> Transaction {
-        let total_weight: u32 = self.config.tx_weights.values().sum();
-        let mut random_value = rng.u32(0..total_weight);
+    /// Set balance for an address/denom pair.
+    pub fn set_balance(&mut self, address: &str, denom: &str, amount: u64) {
+        self.balances
+            .entry(address.to_string())
+            .or_default()
+            .insert(denom.to_string(), amount);
+    }
 
-        for (tx_type, weight) in &self.config.tx_weights {
-            if random_value < *weight {
-                return match tx_type.as_str() {
-                    "transfer" => {
-                        let from_idx = rng.usize(0..self.accounts.len());
-                        let to_idx = rng.usize(0..self.accounts.len());
-                        let amount = rng.u64(1..1000);
+    /// Get balance for an address/denom pair (defaults to 0).
+    pub fn get_balance(&self, address: &str, denom: &str) -> u64 {
+        self.balances
+            .get(address)
+            .and_then(|denoms| denoms.get(denom))
+            .copied()
+            .unwrap_or(0)
+    }
 
-                        Transaction::Transfer {
-                            from: self.accounts[from_idx].address.clone(),
-                            to: self.accounts[to_idx].address.clone(),
-                            amount,
-                        }
-                    }
-                    "delegate" => {
-                        let delegator_idx = rng.usize(0..self.accounts.len());
-                        let amount = rng.u64(1000..10000);
+    /// Compute total supply for a given denom across all tracked accounts.
+    pub fn total_supply(&self, denom: &str) -> u64 {
+        self.balances
+            .values()
+            .filter_map(|denoms| denoms.get(denom))
+            .sum()
+    }
 
-                        Transaction::Delegate {
-                            delegator: self.accounts[delegator_idx].address.clone(),
-                            validator: self.app_config.simulation.default_validator.clone(),
-                            amount,
-                        }
-                    }
-                    "vote" => {
-                        let voter_idx = rng.usize(0..self.accounts.len());
-                        let proposal_id = rng.u64(1..100);
-                        let options = ["yes", "no", "abstain", "no_with_veto"];
-                        let option = options[rng.usize(0..options.len())];
+    /// Apply a successful transfer: debit sender, credit receiver, bump sequence.
+    pub fn apply_transfer(&mut self, from: &str, to: &str, denom: &str, amount: u64) {
+        let from_bal = self.get_balance(from, denom);
+        let to_bal = self.get_balance(to, denom);
+        self.set_balance(from, denom, from_bal - amount);
+        self.set_balance(to, denom, to_bal + amount);
+    }
 
-                        Transaction::Vote {
-                            voter: self.accounts[voter_idx].address.clone(),
-                            proposal_id,
-                            option: option.to_string(),
-                        }
-                    }
-                    _ => unreachable!(),
-                };
+    /// Increment the expected sequence for an address.
+    pub fn increment_sequence(&mut self, address: &str) {
+        let seq = self.sequences.entry(address.to_string()).or_insert(0);
+        *seq += 1;
+    }
+
+    /// Get the expected next sequence for an address.
+    pub fn get_sequence(&self, address: &str) -> u64 {
+        self.sequences.get(address).copied().unwrap_or(0)
+    }
+
+    /// Verify that on-chain balances (from BaseApp) match expected state
+    /// for all tracked accounts and denoms.
+    pub fn verify_balances(&self, app: &BaseApp) -> Result<(), String> {
+        for (address, denoms) in &self.balances {
+            for (denom, &expected) in denoms {
+                let actual = app
+                    .get_balance(address, denom)
+                    .map_err(|e| format!("get_balance({address}, {denom}): {e}"))?;
+                if actual != expected {
+                    return Err(format!(
+                        "balance mismatch for {address}/{denom}: expected {expected}, got {actual}"
+                    ));
+                }
             }
-            random_value -= weight;
         }
-
-        unreachable!()
-    }
-
-    /// Generate a block of transactions
-    fn generate_block(&self, height: u64, rng: &mut fastrand::Rng) -> Block {
-        let transactions = (0..self.config.txs_per_block)
-            .map(|_| self.generate_transaction(rng))
-            .collect();
-
-        Block {
-            height,
-            timestamp: Instant::now(),
-            transactions,
-        }
-    }
-
-    /// Process a block
-    fn process_block(&mut self, block: Block) {
-        for tx in &block.transactions {
-            let tx_type = match tx {
-                Transaction::Transfer { .. } => "transfer",
-                Transaction::Delegate { .. } => "delegate",
-                Transaction::Vote { .. } => "vote",
-            };
-
-            *self
-                .stats
-                .tx_type_counts
-                .entry(tx_type.to_string())
-                .or_insert(0) += 1;
-        }
-
-        self.stats.blocks_processed += 1;
-        self.stats.txs_processed += block.transactions.len() as u64;
-    }
-
-    /// Run the simulation
-    pub async fn run(&mut self) -> Result<SimStats> {
-        info!(blocks = %self.config.num_blocks, "Starting simulation");
-
-        self.start_time = Some(Instant::now());
-        let mut rng = fastrand::Rng::new();
-
-        for height in 1..=self.config.num_blocks {
-            let block = self.generate_block(height as u64, &mut rng);
-            self.process_block(block);
-
-            if height.is_multiple_of(100) {
-                debug!(height = %height, "Processed blocks");
-            }
-
-            // Simulate block time
-            tokio::time::sleep(Duration::from_millis(self.config.block_time_ms)).await;
-        }
-
-        let duration = self.start_time.unwrap().elapsed();
-        self.stats.duration_ms = duration.as_millis() as u64;
-        self.stats.avg_tps = self.stats.txs_processed as f64 / duration.as_secs_f64();
-
-        info!("Simulation completed!");
-        info!(blocks = %self.stats.blocks_processed, txs = %self.stats.txs_processed,
-              avg_tps = %self.stats.avg_tps, "Simulation results");
-
-        Ok(self.stats.clone())
-    }
-
-    /// Export simulation results
-    pub fn export_results(&self, path: &str) -> Result<()> {
-        let json = serde_json::to_string_pretty(&self.stats)?;
-        std::fs::write(path, json)?;
         Ok(())
     }
 }
 
-/// CLI for running simulations
-#[derive(Parser)]
-#[command(name = "gridway-sim")]
-#[command(about = "Gridway blockchain simulation tool")]
-pub struct Cli {
-    #[command(subcommand)]
-    pub command: Commands,
-}
-
-/// CLI commands
-#[derive(Subcommand)]
-pub enum Commands {
-    /// Run a simulation
-    Run {
-        /// Configuration file path
-        #[arg(short, long)]
-        config: Option<String>,
-        /// Output file for results
-        #[arg(short, long)]
-        output: Option<String>,
-    },
-    /// Generate a default configuration file
-    Config {
-        /// Output path for config file
-        #[arg(short, long, default_value = "sim_config.json")]
-        output: String,
-    },
-}
-
-/// Run the CLI
-pub async fn run_cli() -> Result<()> {
-    let cli = Cli::parse();
-
-    match cli.command {
-        Commands::Run { config, output } => {
-            let sim_config = if let Some(config_path) = config {
-                let config_data = std::fs::read_to_string(config_path)?;
-                serde_json::from_str(&config_data)?
-            } else {
-                SimConfig::default()
-            };
-
-            let mut simulator = Simulator::new(sim_config);
-            let _stats = simulator.run().await?;
-            if let Some(output_path) = output {
-                simulator.export_results(&output_path)?;
-                info!(path = %output_path, "Results exported");
-            }
-
-            Ok(())
-        }
-        Commands::Config { output } => {
-            let default_config = SimConfig::default();
-            let json = serde_json::to_string_pretty(&default_config)?;
-            std::fs::write(&output, json)?;
-            info!(path = %output, "Default configuration written");
-            Ok(())
-        }
+impl Default for SimState {
+    fn default() -> Self {
+        Self::new()
     }
+}
+
+// ─── Key generation ──────────────────────────────────────────────────────────
+
+/// Generate a deterministic ed25519 keypair from a seed.
+///
+/// Returns `(PrivateKey, hex-encoded public key, hex address)`.
+pub fn random_keypair(seed: u64) -> (PrivateKey, String, String) {
+    let private_key = PrivateKey::from_seed(seed);
+    let public_key = private_key.public_key();
+    let pk_hex = hex::encode(public_key.as_ref());
+    let address = Address::from_public_key(&public_key).to_hex();
+    (private_key, pk_hex, address)
+}
+
+// ─── TX building ─────────────────────────────────────────────────────────────
+
+/// Build a signed bank.MsgSend transaction as raw bytes (JSON).
+///
+/// This produces the exact format consumed by `BaseApp::execute_block`.
+pub fn build_transfer_tx(
+    from_key: &PrivateKey,
+    to_addr: &str,
+    amount: u64,
+    denom: &str,
+    sequence: u64,
+) -> Vec<u8> {
+    let tx = TxBuilder::new(from_key.clone())
+        .chain_id(TEST_CHAIN_ID)
+        .sequence(sequence)
+        .bank_send(to_addr, vec![Coin::new(denom, amount)])
+        .build()
+        .expect("TxBuilder::build should not fail with valid inputs");
+
+    serde_json::to_vec(&tx).expect("SignedTx serialization should not fail")
+}
+
+// ─── Genesis setup ───────────────────────────────────────────────────────────
+
+/// Create a fresh BaseApp with `n_accounts` genesis accounts, each holding
+/// `initial_balance` of `TEST_DENOM`.
+///
+/// Returns `(BaseApp, Vec<(PrivateKey, address)>)` and a `SimState` that
+/// mirrors the genesis state.
+pub fn setup_genesis(
+    n_accounts: usize,
+    initial_balance: u64,
+) -> (BaseApp, Vec<(PrivateKey, String)>, SimState) {
+    let mut app = BaseApp::new("simapp".to_string()).expect("BaseApp::new should succeed");
+    let mut accounts = Vec::with_capacity(n_accounts);
+    let mut sim = SimState::new();
+
+    for i in 0..n_accounts {
+        let (private_key, pk_hex, address) = random_keypair(i as u64 + 100);
+
+        // Register account in auth store
+        app.set_account(
+            &address,
+            &Account {
+                public_key: pk_hex,
+                sequence: 0,
+            },
+        )
+        .expect("set_account should succeed");
+
+        // Set initial balance
+        app.set_balance(&address, TEST_DENOM, initial_balance)
+            .expect("set_balance should succeed");
+
+        // Mirror in SimState
+        sim.set_balance(&address, TEST_DENOM, initial_balance);
+
+        accounts.push((private_key, address));
+    }
+
+    // Commit genesis state
+    app.commit().expect("genesis commit should succeed");
+
+    (app, accounts, sim)
 }
 
 #[cfg(test)]
@@ -365,27 +194,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_account_creation() {
-        let account = Account::new("test_account".to_string(), 1000);
-        assert_eq!(account.address, "test_account");
-        assert_eq!(account.balance, 1000);
-        assert_eq!(account.sequence, 0);
+    fn test_random_keypair_deterministic() {
+        let (_, pk1, addr1) = random_keypair(42);
+        let (_, pk2, addr2) = random_keypair(42);
+        assert_eq!(pk1, pk2);
+        assert_eq!(addr1, addr2);
+
+        let (_, pk3, addr3) = random_keypair(43);
+        assert_ne!(pk1, pk3);
+        assert_ne!(addr1, addr3);
     }
 
     #[test]
-    fn test_sim_config_default() {
-        let config = SimConfig::default();
-        assert_eq!(config.num_accounts, 100);
-        assert_eq!(config.txs_per_block, 50);
-        assert_eq!(config.num_blocks, 1000);
-        assert!(config.tx_weights.contains_key("transfer"));
+    fn test_setup_genesis() {
+        let (app, accounts, sim) = setup_genesis(3, 1_000_000);
+        assert_eq!(accounts.len(), 3);
+
+        for (_, addr) in &accounts {
+            assert_eq!(app.get_balance(addr, TEST_DENOM).unwrap(), 1_000_000);
+            assert_eq!(sim.get_balance(addr, TEST_DENOM), 1_000_000);
+        }
+
+        assert_eq!(sim.total_supply(TEST_DENOM), 3_000_000);
     }
 
-    #[tokio::test]
-    async fn test_simulator_creation() {
-        let config = SimConfig::default();
-        let simulator = Simulator::new(config);
-        assert_eq!(simulator.accounts.len(), 100);
-        assert_eq!(simulator.stats.blocks_processed, 0);
+    #[test]
+    fn test_build_transfer_tx_produces_valid_json() {
+        let (key, _, _) = random_keypair(1);
+        let tx_bytes = build_transfer_tx(&key, "deadbeef", 500, TEST_DENOM, 0);
+        let parsed: serde_json::Value = serde_json::from_slice(&tx_bytes).unwrap();
+        assert!(parsed["body"]["messages"][0]["@type"] == "bank.MsgSend");
+    }
+
+    #[test]
+    fn test_sim_state_apply_transfer() {
+        let mut sim = SimState::new();
+        sim.set_balance("alice", "ugridway", 1000);
+        sim.set_balance("bob", "ugridway", 500);
+
+        sim.apply_transfer("alice", "bob", "ugridway", 200);
+        assert_eq!(sim.get_balance("alice", "ugridway"), 800);
+        assert_eq!(sim.get_balance("bob", "ugridway"), 700);
+        assert_eq!(sim.total_supply("ugridway"), 1500);
+    }
+
+    #[test]
+    fn test_sim_state_verify_balances() {
+        let (app, accounts, sim) = setup_genesis(2, 5000);
+        // SimState should match BaseApp at genesis
+        sim.verify_balances(&app)
+            .expect("balances should match at genesis");
     }
 }

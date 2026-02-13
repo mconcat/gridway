@@ -1,5 +1,6 @@
 # Build artifacts
 /target/
+/target2/
 **/*.rs.bk
 /modules/
 
@@ -46,4 +47,6 @@ testnet_backup_*/
 *.tmp
 *.temp
 tmp/
-temp/
+temp/.cargo-local/
+.cargo-local/
+memory/

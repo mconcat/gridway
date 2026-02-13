@@ -2,22 +2,23 @@
 members = [
     "crates/gridway-types",
     "crates/gridway-math",
-    "crates/gridway-crypto", 
-    "crates/gridway-keyring",
+    "crates/gridway-crypto",
     "crates/gridway-errors",
     "crates/gridway-log",
     "crates/gridway-store",
-    "crates/gridway-proto",
     "crates/gridway-baseapp",
-    "crates/gridway-server",
-    "crates/gridway-client",
-    "crates/gridway-simapp",
+    "crates/gridway-consensus",
     "crates/gridway-telemetry",
     "crates/wasi-modules/ante-handler",
     "crates/wasi-modules/begin-blocker",
     "crates/wasi-modules/end-blocker",
     "crates/wasi-modules/tx-decoder",
     "crates/wasi-modules/test-minimal",
+    "crates/wasi-modules/bank",
+    "crates/wasi-modules/hook",
+    "crates/wasi-modules/validator",
+    "crates/gridway-client",
+    "crates/gridway-simapp",
 ]
 
 [workspace.package]
@@ -31,55 +32,55 @@ repository = "https://github.com/mconcat/gridway"
 gridway-types = { path = "crates/gridway-types" }
 gridway-math = { path = "crates/gridway-math" }
 gridway-crypto = { path = "crates/gridway-crypto" }
-gridway-keyring = { path = "crates/gridway-keyring" }
 gridway-errors = { path = "crates/gridway-errors" }
 gridway-log = { path = "crates/gridway-log" }
 gridway-store = { path = "crates/gridway-store" }
-gridway-proto = { path = "crates/gridway-proto" }
 gridway-baseapp = { path = "crates/gridway-baseapp" }
-gridway-server = { path = "crates/gridway-server" }
-gridway-client = { path = "crates/gridway-client" }
-gridway-simapp = { path = "crates/gridway-simapp" }
+gridway-consensus = { path = "crates/gridway-consensus" }
 gridway-telemetry = { path = "crates/gridway-telemetry" }
+gridway-client = { path = "crates/gridway-client" }
+
+# Commonware Library dependencies
+commonware-broadcast = "0.0.65"
+commonware-codec = "0.0.65"
+commonware-consensus = "0.0.65"
+commonware-cryptography = "0.0.65"
+commonware-p2p = "0.0.65"
+commonware-resolver = "0.0.65"
+commonware-runtime = "0.0.65"
+commonware-storage = "0.0.65"
+commonware-stream = "0.0.65"
+commonware-utils = "0.0.65"
+commonware-macros = "0.0.65"
+commonware-parallel = "0.0.65"
 
 # External dependencies
-thiserror = "1.0"
+thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-prost = "0.13"
 tokio = { version = "1.40", features = ["full"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
+bytes = "1.7"
+futures = "0.3"
+rand = "0.8"
+hex = "0.4"
+sha2 = "0.10"
+log = "0.4"
+anyhow = "1.0"
 
 # Math dependencies
 num-bigint = "0.4"
 num-traits = "0.2"
 rust_decimal = "1.35"
 
-# Crypto dependencies
-k256 = { version = "0.13", features = ["ecdsa"] }
-ed25519-dalek = "2.1"
-sha2 = "0.10"
-ripemd = "0.1"
-signature = "2.2"
-bech32 = "0.11"
-
-# HD wallet
-bip39 = "2.0"
-
-# HTTP/RPC
-reqwest = "0.12"
-hyper = "1.4"
-
 # CLI
 clap = { version = "4.5", features = ["derive"] }
 
-# Config
-figment = "0.10"
-
 # WASM runtime
-wasmtime = "25.0"
+wasmtime = "34.0"
+wasmtime-wasi = "34.0"
 
 # Testing
 proptest = "1.5"
@@ -87,72 +88,61 @@ proptest = "1.5"
 # Workspace-wide profiles
 [profile.wasi]
 inherits = "release"
-opt-level = "z"     # Optimize for size
-lto = true          # Enable Link Time Optimization
-codegen-units = 1   # Single codegen unit for better optimization
-strip = true        # Strip debug symbols
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
 
 [profile.release]
 opt-level = 3
 lto = true
+overflow-checks = true
 
 [profile.dev]
 opt-level = 0
 debug = true
+overflow-checks = true
 
 [package]
 name = "gridway"
 version = "0.1.0"
 edition = "2021"
 authors = ["mconcat"]
-description = "Minimal Rust implementation of gridway BaseApp"
+description = "WASM microkernel blockchain built on Commonware Library"
 license = "AGPL-3.0"
 repository = "https://github.com/mconcat/gridway"
-build = "build.rs"
 
 [dependencies]
-# Use workspace dependencies
 gridway-types = { workspace = true }
 gridway-math = { workspace = true }
 gridway-crypto = { workspace = true }
-gridway-keyring = { workspace = true }
 gridway-errors = { workspace = true }
 gridway-log = { workspace = true }
 gridway-store = { workspace = true }
 gridway-baseapp = { workspace = true }
-gridway-server = { workspace = true }
-gridway-client = { workspace = true }
-gridway-simapp = { workspace = true }
+gridway-consensus = { workspace = true }
 gridway-telemetry = { workspace = true }
 
-# ABCI interface
-cometbft = "0.1.0-alpha.2"
-cometbft-proto = "0.1.0-alpha.2"
+# Commonware
+commonware-consensus = { workspace = true }
+commonware-cryptography = { workspace = true }
+commonware-runtime = { workspace = true }
+commonware-storage = { workspace = true }
+commonware-codec = { workspace = true }
+commonware-p2p = { workspace = true }
+commonware-broadcast = { workspace = true }
 
-# External dependencies from workspace
+# External
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-
-# Storage
-rocksdb = "0.21"
-
-# Other
-bytes = "1.5"
-hex = "0.4"
-anyhow = "1.0"
+bytes = { workspace = true }
+hex = { workspace = true }
+anyhow = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.8"
-rand = "0.8"
-
-[[example]]
-name = "counter_module"
-path = "examples/counter_module.rs"
-
-[[example]]
-name = "counter_client"
-path = "examples/counter_client.rs"
+rand = { workspace = true }

@@ -1,270 +1,214 @@
 # Claude Agent Guidelines for Gridway Project
 
-This document provides essential guidelines and best practices for AI agents working on the Gridway blockchain project. Follow these guidelines to avoid common pitfalls and ensure smooth CI/CD operations.
+**Last Updated:** 2025-02-10
+
+This document provides guidelines for AI agents working on the Gridway blockchain project. Follow these to avoid common pitfalls and ensure smooth development.
 
 ## MANDATORY: Read Architecture Documentation First
 
-**CRITICAL**: Before starting ANY task, you MUST:
+Before starting any task:
 
-1. **Always read the root PLAN.md** (`/PLAN.md`) to understand the overall architecture and design philosophy
-2. **When working on a specific crate**, also read that crate's PLAN.md (e.g., `/crates/gridway-baseapp/PLAN.md`)
-3. **These documents contain critical architectural decisions** that affect all implementation work
+1. Read the root `PLAN.md` for overall architecture and design philosophy
+2. When working on a specific crate, read its `PLAN.md` if one exists (e.g., `crates/gridway-baseapp/PLAN.md`)
+3. These documents contain architectural decisions that affect all implementation work
 
-The PLAN.md files contain:
-- Core architectural vision (WASI microkernel, VFS, dynamic component loading)
-- Component types and execution models  
-- Design patterns and conventions
-- Critical implementation details for each crate
+## Project Overview
 
-Failure to read these documents will likely result in implementing code that conflicts with the architectural vision.
+Gridway is a WASM microkernel blockchain using Commonware Simplex consensus. Key facts:
 
-## Critical Commands to Run Before Committing
+- **Branch:** `experiment/commonware-migration`
+- **Consensus:** Commonware Library v0.0.65 (Simplex BFT), not CometBFT/ABCI
+- **All application logic runs in WASM** — no Rust-native fallback for modules
+- **State access:** WASM → kvstore WIT → VFS → NamespacedStore → MerkleStore (Patricia Merkle Trie)
+- **TX signing:** Ed25519 (commonware-cryptography)
+- **Consensus signing:** BLS12-381 threshold signatures
+- **No Cosmos SDK compatibility** — Gridway defines its own formats and APIs
 
-Always run these commands in order before committing any changes:
+## Crate Structure
+
+```
+gridway (root)
+├── crates/
+│   ├── gridway-consensus/     — Commonware Application/Engine/node binary
+│   ├── gridway-baseapp/       — WASM microkernel host (ComponentHost, VFS, capabilities)
+│   ├── gridway-store/         — MerkleStore (trie-db), GlobalAppStore, NamespacedStore
+│   ├── gridway-types/         — GridwayBlock, SignedTx, TxResponse, Event
+│   ├── gridway-crypto/        — Ed25519 signing, SHA-256, address derivation
+│   ├── gridway-errors/        — Error types
+│   ├── gridway-log/           — Logging/tracing
+│   ├── gridway-math/          — Numeric types (Dec, Int)
+│   ├── gridway-telemetry/     — Metrics
+│   └── wasi-modules/          — WASM component source code
+│       ├── bank/              — Bank module (MsgSend)
+│       ├── validator/         — TX validation (ed25519, sequence)
+│       ├── hook/              — Block lifecycle hooks
+│       ├── ante-handler/      — Legacy (superseded by validator)
+│       ├── begin-blocker/     — Legacy (superseded by hook)
+│       ├── end-blocker/       — Legacy (superseded by hook)
+│       ├── tx-decoder/        — Legacy (superseded by validator)
+│       └── test-minimal/      — Test component
+├── wit/                       — WIT interface definitions (module, kvstore, validator, hook)
+└── modules/                   — Compiled .wasm binaries
+```
+
+### Dependency Order (build from leaves up)
+
+```
+gridway-math, gridway-errors, gridway-log, gridway-telemetry  (no workspace deps)
+  ↓
+gridway-crypto  (commonware-cryptography)
+  ↓
+gridway-store  (trie-db, no workspace deps)
+  ↓
+gridway-types  (gridway-math, gridway-crypto, commonware-codec/consensus)
+  ↓
+gridway-baseapp  (gridway-store, gridway-types, gridway-crypto, gridway-telemetry, wasmtime)
+  ↓
+gridway-consensus  (gridway-baseapp, gridway-types, gridway-crypto, gridway-store, commonware-*)
+```
+
+## Build Commands
+
+### Build WASI modules (must be done first if modules changed)
 
 ```bash
-# 1. Build WASI modules (required before building other crates)
+# Build WASM components (requires cargo-component)
 ./scripts/build-wasi-modules.sh
 
-# 2. Build all other crates
-cargo build --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
+# Or build individual new-generation modules:
+cd crates/wasi-modules/bank && cargo component build --release
+cd crates/wasi-modules/hook && cargo component build --release
+cd crates/wasi-modules/validator && cargo component build --release
+```
 
-# 3. Run all tests
-cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder
+### Build workspace (excluding WASM modules)
 
-# 4. Check formatting 
+```bash
+cargo build --workspace \
+  --exclude ante-handler --exclude begin-blocker --exclude end-blocker \
+  --exclude tx-decoder --exclude test-minimal --exclude bank \
+  --exclude hook --exclude validator
+```
+
+### Run tests
+
+```bash
+cargo test --workspace \
+  --exclude ante-handler --exclude begin-blocker --exclude end-blocker \
+  --exclude tx-decoder --exclude test-minimal --exclude bank \
+  --exclude hook --exclude validator
+```
+
+### Full pre-commit sequence
+
+```bash
+# 1. Build WASI modules (if changed)
+./scripts/build-wasi-modules.sh
+
+# 2. Build workspace
+cargo build --workspace \
+  --exclude ante-handler --exclude begin-blocker --exclude end-blocker \
+  --exclude tx-decoder --exclude test-minimal --exclude bank \
+  --exclude hook --exclude validator
+
+# 3. Run tests
+cargo test --workspace \
+  --exclude ante-handler --exclude begin-blocker --exclude end-blocker \
+  --exclude tx-decoder --exclude test-minimal --exclude bank \
+  --exclude hook --exclude validator
+
+# 4. Format
 cargo fmt --all
 
-# 5. Run clippy
-cargo clippy --fix --all --allow-dirty
+# 5. Clippy
+cargo clippy --fix --all --allow-dirty \
+  --exclude ante-handler --exclude begin-blocker --exclude end-blocker \
+  --exclude tx-decoder --exclude test-minimal --exclude bank \
+  --exclude hook --exclude validator
 
-# 6. If you fixed formatting issues, run formatter again
+# 6. Re-format after clippy fixes
 cargo fmt --all
 ```
 
-If you have encountered any issues in one of these commands, and you have fixed them, run the commands again from the first to the last to ensure they new changes have not introduced any new issues.
+**Note:** WASM module crates (wasi-modules/*) must be excluded from `cargo build/test/clippy` because they target `wasm32-wasip1` and will fail with linking errors under the host target. Use `cargo component build` for these.
 
-### Building WASI Modules
+### Build node binary
 
-The project contains WASI (WebAssembly System Interface) modules that must be built using `cargo-component` instead of regular `cargo build`. These modules are:
-- `ante-handler` - Transaction validation
-- `begin-blocker` - Block initialization  
-- `end-blocker` - Block finalization
-- `tx-decoder` - Transaction decoding
-
-**Important**: Always use `./scripts/build-wasi-modules.sh` to build WASI modules. This script:
-1. Installs the `wasm32-wasip1` target if needed
-2. Builds all WASI modules using `cargo component build --release`
-3. Copies the compiled `.wasm` files to the `modules/` directory
-
-**Note**: Regular `cargo build --all` will fail on WASI modules with linking errors. This is expected - use the exclusion flags shown above.
-
-## Environment-Specific Considerations
-
-### Operating System Differences
-
-- **Local Development**: macOS, Linux, or Windows
-- **CI Environment**: Linux (Ubuntu on GitHub Actions)
-- **Key Differences**:
-  - Keychain/keyring access methods
-  - File system behavior (case sensitivity, path separators)
-  - System library availability
-
-### Tests Requiring System Resources
-
-When tests fail due to system resources, mark them appropriately:
-
-```rust
-#[test]
-#[ignore = "OS keyring tests require system keychain access"]
-async fn test_os_keyring_operations() {
-    // test code
-}
+```bash
+cargo build --release -p gridway-consensus --bin gridway-node
+cargo build --release -p gridway-consensus --bin gridway-setup
+cargo build --release -p gridway-consensus --bin gridway-keygen
 ```
 
-## Common CI Failure Patterns and Solutions
+## Key Files to Know
 
-### 1. Format String Linting Errors
+| File | Purpose |
+|------|---------|
+| `crates/gridway-baseapp/src/lib.rs` | BaseApp — WASM microkernel host, execution pipeline |
+| `crates/gridway-baseapp/src/component_host.rs` | ComponentHost — wasmtime WASM component runtime |
+| `crates/gridway-baseapp/src/vfs.rs` | VFS — virtual filesystem for state access |
+| `crates/gridway-consensus/src/application.rs` | GridwayApp — Commonware Application trait impl |
+| `crates/gridway-consensus/src/engine.rs` | Consensus engine wiring (broadcast, marshal, simplex) |
+| `crates/gridway-consensus/src/bin/gridway_node.rs` | Validator node binary |
+| `crates/gridway-store/src/merkle.rs` | MerkleStore — Patricia Merkle Trie |
+| `crates/gridway-store/src/global.rs` | GlobalAppStore — namespaced store views |
+| `crates/gridway-types/src/block.rs` | GridwayBlock — consensus block type |
+| `crates/gridway-types/src/tx.rs` | SignedTx, MsgSend, TxResponse |
+| `crates/wasi-modules/bank/src/lib.rs` | WASM bank module |
+| `crates/wasi-modules/validator/src/lib.rs` | WASM TX validator |
+| `crates/wasi-modules/hook/src/lib.rs` | WASM block hooks |
+| `wit/*.wit` | WIT interface definitions |
 
-**Symptom**: "variables can be used directly in the `format!` string"
+## Architecture Principles
 
-**Fix**:
+1. **WASM-only module execution:** All application logic (validation, bank, hooks) runs in WASM. No Rust-native fallback. If a WASM module fails to load, the operation errors.
 
-```rust
-// BAD
-format!("Error: {}", msg)
+2. **State through VFS:** WASM modules access state only through the kvstore WIT interface → VFS → MerkleStore pipeline. Direct state access from WASM is not allowed.
 
-// GOOD
-format!("Error: {msg}")
+3. **Deterministic execution:** Same block with same TXs must produce the same state root. The Patricia Merkle Trie ensures this. All WASM execution must be deterministic.
 
-// Field access is supported from Rust 1.58+
-format!("Value: {obj.field}")
-```
+4. **Microkernel boundary:** BaseApp is the kernel. It loads modules, routes messages, manages state. Modules are isolated — they can only access the namespaces granted to them.
 
-### 2. Test Expectation Mismatches
+5. **Commonware integration:** Follow Alto's patterns for consensus engine wiring. Use the same component structure (broadcast, marshal, simplex, resolver).
 
-**Symptom**: Tests expecting success but getting errors
+## Common Pitfalls
 
-**Fix**: Update test expectations to match actual behavior:
+1. **Don't build WASM modules with `cargo build`** — they need `cargo component build` targeting wasm32-wasip1
+2. **Don't add Cosmos/CometBFT dependencies** — the project has migrated away from Cosmos SDK
+3. **Don't create Rust-native module fallbacks** — the architecture requires WASM modules
+4. **Don't skip WASM module rebuild** — if you change a .wit file or WASM module source, rebuild with `./scripts/build-wasi-modules.sh`
+5. **Remember to exclude WASM crates** from workspace cargo commands
 
-```rust
-// Instead of assuming success
-assert_eq!(result.code, 0);
+## Testing Tips
 
-// Check for actual behavior
-assert_eq!(result.code, 1);
-assert!(result.log.contains("expected error message"));
-```
-
-## Best Practices for Testing
-
-### 1. Environment-Aware Tests
-
-```rust
-fn should_skip_in_ci() -> bool {
-    std::env::var("CI").is_ok()
-}
-
-#[test]
-fn test_with_system_dependency() {
-    if should_skip_in_ci() {
-        println!("Skipping test in CI environment");
-        return;
-    }
-    // actual test
-}
-```
-
-### 2. Detailed Error Messages
-
-```rust
-// Provide context in assertions
-assert_eq!(
-    result.code, 
-    expected_code,
-    "Transaction failed with code {} (expected {}). Log: {}. Context: processing {}",
-    result.code,
-    expected_code,
-    result.log,
-    tx_type
-);
-```
-
-### 3. Concurrent Code Testing
-
-- Use shorter timeouts in tests
-- Add explicit deadlock detection
-- Test with different thread counts
-
-## Workspace Configuration
-
-### Profile Warnings
-
-WASI modules may show profile warnings. These are expected but should ideally be fixed by moving profiles to workspace root:
-
-```toml
-# In workspace Cargo.toml, not individual crates
-[profile.release]
-opt-level = 3
-```
-
-## Merge Conflict Resolution Guidelines
-
-### 1. Check Definitions and Usages First
-
-**Principle**: Before resolving any conflict, always check the relevant definitions (traits, interfaces, types) and their usages across the codebase.
-
-**Why**: Conflicts often arise from changes to fundamental definitions. Resolving implementation conflicts without checking the underlying definitions leads to compilation errors.
-
-**How**:
-- For method conflicts, check the trait/interface definition first
-- For type conflicts, check where the type is defined and used
-- For import conflicts, verify what's actually exported from the module
-
-### 2. Resolve by Dependency Order
-
-**Principle**: Understand the dependency graph of your crates/modules and resolve conflicts starting from the most foundational (least dependent) components.
-
-**Why**: Higher-level crates depend on lower-level ones. Fixing conflicts in dependency order prevents cascading errors and repeated work.
-
-**How**:
-1. Identify crate dependencies (check `Cargo.toml` files)
-2. Start with leaf crates (those that don't depend on other workspace crates)
-3. After resolving conflicts in each crate, run `cargo build -p <crate-name>` to verify
-4. Only move to dependent crates after dependencies compile successfully
-
-**Example Order**:
-```
-gridway-store (no workspace dependencies)
-  ↓
-gridway-types (depends on store)
-  ↓
-gridway-crypto (depends on types)
-  ↓
-gridway-baseapp (depends on all above)
-```
-
-### 3. Ask When Uncertain
-
-**Principle**: When multiple valid resolutions exist, ask for clarification rather than guessing.
-
-**Why**: Architecture decisions, performance considerations, or project conventions often dictate the "correct" choice, which may not be obvious from the code alone.
-
-**When to Ask**:
-- Two approaches both work but have different implications
-- The conflict involves architectural decisions
-- You're unsure about project conventions or future direction
-
-### 4. Maintain Consistency
-
-**Principle**: When both conflicting approaches are valid, choose the one that maintains consistency with the existing codebase patterns.
-
-**Why**: Consistency makes code more maintainable and reduces cognitive load for developers.
-
-**How**:
-- Check similar code in the project for patterns
-- Prefer the approach used elsewhere in the codebase
-- If introducing a new pattern, apply it consistently across all affected files
+- Tests that use WASM modules need the compiled `.wasm` files in the `modules/` directory
+- `test_full_wasm_tx_pipeline` is the comprehensive end-to-end test
+- `test_deterministic_hash` verifies state root determinism
+- `test_export_import_snapshot` verifies state sync capability
+- Run individual crate tests: `cargo test -p gridway-baseapp`
 
 ## Writing Style and Tone Guidelines
 
-When writing documentation, proposals, or technical explanations, maintain a neutral, professional tone that focuses on technical substance rather than dramatic language.
+When writing documentation, proposals, or technical explanations:
 
-### Language to Avoid
-
-**Avoid overly dramatic or hyperbolic language**:
-- "revolutionary" 
-- "fundamentally changes"
-- "groundbreaking"
-- "paradigm shift"
-- "transforms everything"
-- "game-changing"
-
-**Instead, use neutral, descriptive language**:
-- "introduces"
-- "enables"
-- "provides"
-- "implements"
-- "allows"
-- "supports"
-
-### Writing Principles
-
-**Keep it chill and neutral**:
-- Focus on technical facts and benefits
-- Avoid marketing-style language
-- Use precise, descriptive terms
+**Keep it neutral and technical:**
+- Focus on technical facts and implementation details
+- Use precise, descriptive language
 - Let the technical merit speak for itself
 
-**Be concise**:
-- Get to the point quickly
-- Use clear, direct language
-- Remove redundant phrasing
-- However be sure not to oversimplify
+**Avoid:**
+- Dramatic language ("revolutionary", "groundbreaking", "paradigm shift")
+- Marketing-style superlatives
+- Vague claims without evidence
 
+**Prefer:**
+- Concrete descriptions ("implements", "enables", "provides")
+- Specific references to code, tests, and measurements
+- Honest assessment of what works and what doesn't
 
-**Stay technical**:
-- Emphasize implementation details over grand visions
-- Discuss concrete benefits rather than abstract concepts
-- Focus on how things work, not how amazing they are
-- Include all technical details and implicit context
+## Merge Conflict Resolution
+
+1. Check definitions (traits, interfaces, types) before resolving implementation conflicts
+2. Resolve in dependency order (store → types → baseapp → consensus)
+3. After each crate fix, run `cargo build -p <crate>` to verify
+4. When uncertain about which approach to take, ask

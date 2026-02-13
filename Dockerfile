@@ -1,23 +1,18 @@
 # Build stage
 FROM rustlang/rust:nightly-slim AS builder
 
-# Install dependencies
+# Install dependencies (no protobuf needed — pure Rust consensus)
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
-    protobuf-compiler \
     curl \
     build-essential \
     clang \
     libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install cargo-component
-RUN cargo install cargo-component --locked
-
-# Add wasm32-wasip1 target and rustfmt component
-RUN rustup target add wasm32-wasip1 && \
-    rustup component add rustfmt
+# Add rustfmt component
+RUN rustup component add rustfmt
 
 # Create app directory
 WORKDIR /usr/src/gridway
@@ -25,11 +20,11 @@ WORKDIR /usr/src/gridway
 # Copy workspace files
 COPY . ./
 
-# Build WASI modules first using cargo-component
-RUN ./scripts/build-wasi-modules.sh
-
-# Build the application (now that WASI bindings exist)
-RUN cargo build --release -p gridway-server --bin gridway-server
+# Build all three binaries from gridway-consensus crate
+RUN cargo build --release -p gridway-consensus \
+    --bin gridway-node \
+    --bin gridway-setup \
+    --bin gridway-keygen
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -38,18 +33,20 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
-    netcat-traditional \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create gridway user
 RUN useradd -m -u 1000 -s /bin/bash gridway
 
-# Copy binary from builder
-COPY --from=builder /usr/src/gridway/target/release/gridway-server /usr/local/bin/gridway-server
+# Copy binaries from builder
+COPY --from=builder /usr/src/gridway/target/release/gridway-node /usr/local/bin/gridway-node
+COPY --from=builder /usr/src/gridway/target/release/gridway-setup /usr/local/bin/gridway-setup
+COPY --from=builder /usr/src/gridway/target/release/gridway-keygen /usr/local/bin/gridway-keygen
 
-# Copy WASI modules
+# Copy pre-compiled WASM modules
 RUN mkdir -p /usr/local/lib/gridway/wasi-modules
-COPY --from=builder /usr/src/gridway/modules/*.wasm /usr/local/lib/gridway/wasi-modules/
+COPY modules/*.wasm /usr/local/lib/gridway/wasi-modules/
 
 # Create data directory
 RUN mkdir -p /gridway && chown gridway:gridway /gridway
@@ -60,13 +57,13 @@ USER gridway
 # Set working directory
 WORKDIR /gridway
 
-# Expose ports
-EXPOSE 26658 9090 1317
+# Expose ports: P2P, metrics, HTTP API
+EXPOSE 4545 4546 4547
 
 # Set environment variables
 ENV RUST_LOG=info
-ENV GRIDWAY_HOME=/gridway
 ENV WASI_MODULE_PATH=/usr/local/lib/gridway/wasi-modules
 
-# Default command
-CMD ["gridway-server", "start", "--home", "/gridway"]
+# Entrypoint
+ENTRYPOINT ["gridway-node"]
+CMD ["--peers=/gridway/peers.yaml", "--config=/gridway/config.yaml", "--genesis=/gridway/genesis.yaml"]

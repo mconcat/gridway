@@ -1,221 +1,191 @@
-//! Global application store with namespace-based key prefixing
+//! Global application store with namespace isolation.
 //!
-//! This module implements a single global store that replaces the MultiStore pattern.
-//! It provides namespace isolation through key prefixing, allowing different modules
-//! to have isolated storage spaces while using a single underlying JMT store.
+//! Provides a multi-namespace store backed by a single MerkleStore.
+//! Each module (bank, auth, staking, etc.) gets its own isolated namespace.
 
-use crate::{JMTStore, KVStore, Result, StoreError};
+use crate::{KVStore, MerkleStore, Result, StoreError};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-/// Global application store that provides namespace isolation
+/// Global application store that manages namespaced sub-stores.
+/// All namespaces share a single underlying MerkleStore for
+/// unified state root computation.
 pub struct GlobalAppStore {
-    /// The underlying JMT store
-    store: Arc<Mutex<JMTStore>>,
+    /// The underlying MerkleStore that computes unified state roots
+    store: Arc<Mutex<MerkleStore>>,
     /// Registered namespaces
-    namespaces: Arc<Mutex<HashMap<String, StoreConfig>>>,
-}
-
-/// Configuration for a namespace
-#[derive(Clone, Debug)]
-pub struct StoreConfig {
-    /// The namespace name (e.g., "auth", "bank")
-    pub namespace: String,
-    /// Whether this namespace is read-only
-    pub read_only: bool,
+    namespaces: Mutex<HashMap<String, bool>>,
 }
 
 impl GlobalAppStore {
-    /// Create a new global app store
-    pub fn new(store: JMTStore) -> Self {
+    /// Create a new GlobalAppStore with a MerkleStore backend
+    pub fn new(store: MerkleStore) -> Self {
         Self {
             store: Arc::new(Mutex::new(store)),
-            namespaces: Arc::new(Mutex::new(HashMap::new())),
+            namespaces: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Register a namespace
-    pub fn register_namespace(&self, namespace: &str, read_only: bool) -> Result<()> {
-        let mut namespaces = self
-            .namespaces
-            .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock namespaces:: {e}")))?;
-
-        if namespaces.contains_key(namespace) {
-            return Err(StoreError::BackendError(format!(
-                "Namespace {namespace} already registered"
-            )));
-        }
-
-        namespaces.insert(
-            namespace.to_string(),
-            StoreConfig {
-                namespace: namespace.to_string(),
-                read_only,
-            },
-        );
-
-        Ok(())
-    }
-
-    /// Get a namespaced view of the store
-    pub fn get_namespace(&self, namespace: &str) -> Result<NamespacedStore> {
-        let namespaces = self
-            .namespaces
-            .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock namespaces:: {e}")))?;
-
-        let config = namespaces
-            .get(namespace)
-            .ok_or_else(|| StoreError::StoreNotFound(namespace.to_string()))?
-            .clone();
-
-        Ok(NamespacedStore {
-            store: self.store.clone(),
-            config,
+    /// Create a new GlobalAppStore with sled persistence at the given path.
+    ///
+    /// The underlying MerkleStore will automatically flush to sled on commit
+    /// and load from sled on startup.
+    pub fn with_persistence(path: &Path) -> Result<Self> {
+        let store = MerkleStore::with_persistence("state".to_string(), path)?;
+        Ok(Self {
+            store: Arc::new(Mutex::new(store)),
+            namespaces: Mutex::new(HashMap::new()),
         })
     }
 
-    /// Get a value from a specific namespace
-    pub fn get_namespaced(&self, namespace: &str, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let ns_store = self.get_namespace(namespace)?;
-        ns_store.get(key)
-    }
-
-    /// Set a value in a specific namespace
-    pub fn set_namespaced(&self, namespace: &str, key: &[u8], value: &[u8]) -> Result<()> {
-        let mut ns_store = self.get_namespace(namespace)?;
-        ns_store.set(key, value)
-    }
-
-    /// Delete a value from a specific namespace
-    pub fn delete_namespaced(&self, namespace: &str, key: &[u8]) -> Result<()> {
-        let mut ns_store = self.get_namespace(namespace)?;
-        ns_store.delete(key)
-    }
-
-    /// Check if a key exists in a specific namespace
-    pub fn has_namespaced(&self, namespace: &str, key: &[u8]) -> Result<bool> {
-        let ns_store = self.get_namespace(namespace)?;
-        ns_store.has(key)
-    }
-
-    /// List all registered namespaces
-    pub fn list_namespaces(&self) -> Result<Vec<String>> {
-        let namespaces = self
+    /// Register a namespace
+    pub fn register_namespace(&self, name: &str, _read_only: bool) -> Result<()> {
+        let mut ns = self
             .namespaces
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock namespaces:: {e}")))?;
-        Ok(namespaces.keys().cloned().collect())
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        ns.insert(name.to_string(), _read_only);
+        Ok(())
     }
 
-    /// Get the underlying store for direct access (use with caution)
-    pub fn get_store(&self) -> Arc<Mutex<JMTStore>> {
+    /// Get a namespaced store view
+    pub fn get_namespace(&self, name: &str) -> Result<NamespacedStore> {
+        let ns = self
+            .namespaces
+            .lock()
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        if !ns.contains_key(name) {
+            return Err(StoreError::StoreNotFound(name.to_string()));
+        }
+        Ok(NamespacedStore {
+            store: self.store.clone(),
+            prefix: format!("{name}:"),
+        })
+    }
+
+    /// Get reference to underlying store
+    pub fn get_store(&self) -> Arc<Mutex<MerkleStore>> {
         self.store.clone()
     }
-}
 
-/// A namespaced view of the global store
-pub struct NamespacedStore {
-    store: Arc<Mutex<JMTStore>>,
-    config: StoreConfig,
-}
+    /// Set a value in a namespace (convenience method)
+    pub fn set_namespaced(&self, namespace: &str, key: &[u8], value: &[u8]) -> Result<()> {
+        let prefixed_key = Self::make_key(namespace, key);
+        let mut store = self
+            .store
+            .lock()
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        store.set(&prefixed_key, value)
+    }
 
-impl NamespacedStore {
-    /// Create a prefixed key for this namespace
-    fn prefix_key(&self, key: &[u8]) -> Vec<u8> {
-        let mut prefixed = Vec::with_capacity(self.config.namespace.len() + 1 + key.len());
-        prefixed.extend_from_slice(self.config.namespace.as_bytes());
-        prefixed.push(b'/');
+    /// Get a value from a namespace (convenience method)
+    pub fn get_namespaced(&self, namespace: &str, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        let prefixed_key = Self::make_key(namespace, key);
+        let store = self
+            .store
+            .lock()
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        store.get(&prefixed_key)
+    }
+
+    fn make_key(namespace: &str, key: &[u8]) -> Vec<u8> {
+        let mut prefixed = Vec::with_capacity(namespace.len() + 1 + key.len());
+        prefixed.extend_from_slice(namespace.as_bytes());
+        prefixed.push(b':');
         prefixed.extend_from_slice(key);
         prefixed
     }
 
-    /// Remove the namespace prefix from a key
-    #[allow(dead_code)]
-    fn strip_prefix(&self, key: &[u8]) -> Option<Vec<u8>> {
-        let prefix_len = self.config.namespace.len() + 1;
-        if key.len() > prefix_len
-            && key.starts_with(self.config.namespace.as_bytes())
-            && key[self.config.namespace.len()] == b'/'
-        {
-            Some(key[prefix_len..].to_vec())
-        } else {
-            None
-        }
+    /// Create a checkpoint of the underlying MerkleStore state.
+    pub fn checkpoint(&self) -> Result<crate::merkle::MerkleCheckpoint> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        Ok(store.checkpoint())
+    }
+
+    /// Restore the underlying MerkleStore from a checkpoint (consumes it).
+    pub fn restore(&self, cp: crate::merkle::MerkleCheckpoint) -> Result<()> {
+        let mut store = self
+            .store
+            .lock()
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        store.restore(cp);
+        Ok(())
+    }
+
+    /// Restore the underlying MerkleStore from a checkpoint reference (clones data).
+    pub fn restore_from(&self, cp: &crate::merkle::MerkleCheckpoint) -> Result<()> {
+        let mut store = self
+            .store
+            .lock()
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        store.restore_from(cp);
+        Ok(())
+    }
+}
+
+/// A namespaced view into the GlobalAppStore.
+/// All keys are automatically prefixed with the namespace.
+pub struct NamespacedStore {
+    store: Arc<Mutex<MerkleStore>>,
+    prefix: String,
+}
+
+impl NamespacedStore {
+    fn prefixed_key(&self, key: &[u8]) -> Vec<u8> {
+        let mut prefixed = Vec::with_capacity(self.prefix.len() + key.len());
+        prefixed.extend_from_slice(self.prefix.as_bytes());
+        prefixed.extend_from_slice(key);
+        prefixed
     }
 }
 
 impl KVStore for NamespacedStore {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let prefixed_key = self.prefix_key(key);
+        let prefixed = self.prefixed_key(key);
         let store = self
             .store
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock store:: {e}")))?;
-        store.get(&prefixed_key)
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        store.get(&prefixed)
     }
 
     fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
-        if self.config.read_only {
-            return Err(StoreError::WriteFailed(
-                "Namespace is read-only".to_string(),
-            ));
-        }
-
-        let prefixed_key = self.prefix_key(key);
+        let prefixed = self.prefixed_key(key);
         let mut store = self
             .store
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock store:: {e}")))?;
-        store.set(&prefixed_key, value)
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        store.set(&prefixed, value)
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<()> {
-        if self.config.read_only {
-            return Err(StoreError::WriteFailed(
-                "Namespace is read-only".to_string(),
-            ));
-        }
-
-        let prefixed_key = self.prefix_key(key);
+        let prefixed = self.prefixed_key(key);
         let mut store = self
             .store
             .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock store:: {e}")))?;
-        store.delete(&prefixed_key)
-    }
-
-    fn has(&self, key: &[u8]) -> Result<bool> {
-        let prefixed_key = self.prefix_key(key);
-        let store = self
-            .store
-            .lock()
-            .map_err(|e| StoreError::BackendError(format!("Failed to lock store:: {e}")))?;
-        store.has(&prefixed_key)
+            .map_err(|e| StoreError::BackendError(format!("lock failed: {e}")))?;
+        store.delete(&prefixed)
     }
 
     fn prefix_iterator(&self, prefix: &[u8]) -> Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + '_> {
-        let full_prefix = self.prefix_key(prefix);
+        let mut full_prefix = self.prefix.as_bytes().to_vec();
+        full_prefix.extend_from_slice(prefix);
         let store = match self.store.lock() {
             Ok(s) => s,
             Err(_) => return Box::new(std::iter::empty()),
         };
-
-        // Get iterator from underlying store and strip namespace prefix from keys
-        let namespace = self.config.namespace.clone();
         let items: Vec<_> = store
             .prefix_iterator(&full_prefix)
-            .filter_map(move |(k, v)| {
-                let prefix_len = namespace.len() + 1;
-                if k.len() > prefix_len {
-                    Some((k[prefix_len..].to_vec(), v))
-                } else {
-                    None
-                }
+            .map(|(k, v)| {
+                // Strip namespace prefix from returned keys
+                let stripped = k[self.prefix.len()..].to_vec();
+                (stripped, v)
             })
             .collect();
-
         Box::new(items.into_iter())
     }
 }
@@ -223,103 +193,63 @@ impl KVStore for NamespacedStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
-    fn create_test_store() -> (GlobalAppStore, TempDir) {
-        let temp_dir = TempDir::new().unwrap();
-        let jmt_store = JMTStore::new("test".to_string(), temp_dir.path()).unwrap();
-        let global_store = GlobalAppStore::new(jmt_store);
-        (global_store, temp_dir)
+    #[test]
+    fn test_global_store_namespaces() {
+        let store = MerkleStore::new("state".to_string());
+        let global = GlobalAppStore::new(store);
+
+        global.register_namespace("bank", false).unwrap();
+        global.register_namespace("auth", false).unwrap();
+
+        global.set_namespaced("bank", b"alice", b"1000").unwrap();
+        global.set_namespaced("auth", b"alice", b"nonce:1").unwrap();
+
+        assert_eq!(
+            global.get_namespaced("bank", b"alice").unwrap(),
+            Some(b"1000".to_vec())
+        );
+        assert_eq!(
+            global.get_namespaced("auth", b"alice").unwrap(),
+            Some(b"nonce:1".to_vec())
+        );
     }
 
     #[test]
-    fn test_namespace_registration() {
-        let (store, _temp) = create_test_store();
+    fn test_namespaced_store() {
+        let store = MerkleStore::new("state".to_string());
+        let global = GlobalAppStore::new(store);
+        global.register_namespace("bank", false).unwrap();
 
-        // Register namespaces
-        assert!(store.register_namespace("auth", false).is_ok());
-        assert!(store.register_namespace("bank", false).is_ok());
-        assert!(store.register_namespace("readonly", true).is_ok());
+        let mut ns = global.get_namespace("bank").unwrap();
+        ns.set(b"bob", b"500").unwrap();
 
-        // Duplicate registration should fail
-        assert!(store.register_namespace("auth", false).is_err());
+        assert_eq!(ns.get(b"bob").unwrap(), Some(b"500".to_vec()));
 
-        // List namespaces
-        let namespaces = store.list_namespaces().unwrap();
-        assert_eq!(namespaces.len(), 3);
-        assert!(namespaces.contains(&"auth".to_string()));
-        assert!(namespaces.contains(&"bank".to_string()));
-        assert!(namespaces.contains(&"readonly".to_string()));
+        // Also accessible through global
+        assert_eq!(
+            global.get_namespaced("bank", b"bob").unwrap(),
+            Some(b"500".to_vec())
+        );
     }
 
     #[test]
     fn test_namespace_isolation() {
-        let (store, _temp) = create_test_store();
+        let store = MerkleStore::new("state".to_string());
+        let global = GlobalAppStore::new(store);
+        global.register_namespace("bank", false).unwrap();
+        global.register_namespace("auth", false).unwrap();
 
-        store.register_namespace("auth", false).unwrap();
-        store.register_namespace("bank", false).unwrap();
+        global.set_namespaced("bank", b"key1", b"bank_val").unwrap();
+        global.set_namespaced("auth", b"key1", b"auth_val").unwrap();
 
-        // Set values in different namespaces
-        store
-            .set_namespaced("auth", b"key1", b"auth_value")
-            .unwrap();
-        store
-            .set_namespaced("bank", b"key1", b"bank_value")
-            .unwrap();
-
-        // Get values - should be isolated
-        let auth_value = store.get_namespaced("auth", b"key1").unwrap().unwrap();
-        let bank_value = store.get_namespaced("bank", b"key1").unwrap().unwrap();
-
-        assert_eq!(auth_value, b"auth_value");
-        assert_eq!(bank_value, b"bank_value");
-    }
-
-    #[test]
-    fn test_namespaced_store_operations() {
-        let (store, _temp) = create_test_store();
-
-        store.register_namespace("test", false).unwrap();
-        let mut ns_store = store.get_namespace("test").unwrap();
-
-        // Test KVStore operations
-        assert!(ns_store.get(b"nonexistent").unwrap().is_none());
-        assert!(!ns_store.has(b"nonexistent").unwrap());
-
-        ns_store.set(b"key", b"value").unwrap();
-        assert!(ns_store.has(b"key").unwrap());
-        assert_eq!(ns_store.get(b"key").unwrap().unwrap(), b"value");
-
-        ns_store.delete(b"key").unwrap();
-        assert!(!ns_store.has(b"key").unwrap());
-        assert!(ns_store.get(b"key").unwrap().is_none());
-    }
-
-    #[test]
-    fn test_read_only_namespace() {
-        let (store, _temp) = create_test_store();
-
-        store.register_namespace("readonly", true).unwrap();
-        let mut ns_store = store.get_namespace("readonly").unwrap();
-
-        // Read operations should work
-        assert!(ns_store.get(b"key").unwrap().is_none());
-        assert!(!ns_store.has(b"key").unwrap());
-
-        // Write operations should fail
-        assert!(ns_store.set(b"key", b"value").is_err());
-        assert!(ns_store.delete(b"key").is_err());
-    }
-
-    #[test]
-    fn test_unregistered_namespace() {
-        let (store, _temp) = create_test_store();
-
-        // Operations on unregistered namespace should fail
-        assert!(store.get_namespace("unregistered").is_err());
-        assert!(store.get_namespaced("unregistered", b"key").is_err());
-        assert!(store
-            .set_namespaced("unregistered", b"key", b"value")
-            .is_err());
+        assert_eq!(
+            global.get_namespaced("bank", b"key1").unwrap(),
+            Some(b"bank_val".to_vec())
+        );
+        assert_eq!(
+            global.get_namespaced("auth", b"key1").unwrap(),
+            Some(b"auth_val".to_vec())
+        );
     }
 }

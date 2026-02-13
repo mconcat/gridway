@@ -8,11 +8,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use gridway_types::{AccAddress, SdkError, SdkMsg};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
+use crate::component_host::DEFAULT_MAX_WASM_BINARY_SIZE;
 use crate::module_router::{ModuleConfig, ModuleRouter, RouterError};
 use crate::vfs::VirtualFilesystem;
 
@@ -54,6 +54,10 @@ pub enum GovernanceError {
     /// Version compatibility error
     #[error("version incompatible:: {0}")]
     IncompatibleVersion(String),
+
+    /// Resource limit exceeded
+    #[error("resource limit exceeded:: {0}")]
+    ResourceLimitExceeded(String),
 }
 
 pub type Result<T> = std::result::Result<T, GovernanceError>;
@@ -69,47 +73,6 @@ pub struct MsgStoreCode {
     pub metadata: CodeMetadata,
 }
 
-impl SdkMsg for MsgStoreCode {
-    fn type_url(&self) -> &'static str {
-        "/gridway.baseapp.v1.MsgStoreCode"
-    }
-
-    fn validate_basic(&self) -> std::result::Result<(), SdkError> {
-        if self.authority.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "authority cannot be empty".to_string(),
-            ));
-        }
-        if self.wasm_code.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "wasm_code cannot be empty".to_string(),
-            ));
-        }
-        if self.metadata.name.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "metadata name cannot be empty".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn get_signers(&self) -> std::result::Result<Vec<AccAddress>, SdkError> {
-        // Parse authority as AccAddress
-        let (_hrp, addr) = AccAddress::from_bech32(&self.authority)
-            .map_err(|_| SdkError::InvalidAddress(self.authority.clone()))?;
-        Ok(vec![addr])
-    }
-
-    fn encode(&self) -> Vec<u8> {
-        // In a real implementation, this would use protobuf encoding
-        serde_json::to_vec(self).unwrap_or_default()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
 /// Message to install a new module
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MsgInstallModule {
@@ -121,45 +84,6 @@ pub struct MsgInstallModule {
     pub config: ModuleInstallConfig,
     /// Initial migration data (if needed)
     pub init_data: Option<Vec<u8>>,
-}
-
-impl SdkMsg for MsgInstallModule {
-    fn type_url(&self) -> &'static str {
-        "/gridway.baseapp.v1.MsgInstallModule"
-    }
-
-    fn validate_basic(&self) -> std::result::Result<(), SdkError> {
-        if self.authority.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "authority cannot be empty".to_string(),
-            ));
-        }
-        if self.code_id == 0 {
-            return Err(SdkError::InvalidRequest(
-                "code_id must be greater than 0".to_string(),
-            ));
-        }
-        if self.config.name.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "module name cannot be empty".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn get_signers(&self) -> std::result::Result<Vec<AccAddress>, SdkError> {
-        let (_hrp, addr) = AccAddress::from_bech32(&self.authority)
-            .map_err(|_| SdkError::InvalidAddress(self.authority.clone()))?;
-        Ok(vec![addr])
-    }
-
-    fn encode(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
 
 /// Message to upgrade an existing module
@@ -175,45 +99,6 @@ pub struct MsgUpgradeModule {
     pub migration_data: Option<Vec<u8>>,
     /// Whether to force upgrade (skip compatibility checks)
     pub force: bool,
-}
-
-impl SdkMsg for MsgUpgradeModule {
-    fn type_url(&self) -> &'static str {
-        "/gridway.baseapp.v1.MsgUpgradeModule"
-    }
-
-    fn validate_basic(&self) -> std::result::Result<(), SdkError> {
-        if self.authority.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "authority cannot be empty".to_string(),
-            ));
-        }
-        if self.module_name.is_empty() {
-            return Err(SdkError::InvalidRequest(
-                "module_name cannot be empty".to_string(),
-            ));
-        }
-        if self.new_code_id == 0 {
-            return Err(SdkError::InvalidRequest(
-                "new_code_id must be greater than 0".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn get_signers(&self) -> std::result::Result<Vec<AccAddress>, SdkError> {
-        let (_hrp, addr) = AccAddress::from_bech32(&self.authority)
-            .map_err(|_| SdkError::InvalidAddress(self.authority.clone()))?;
-        Ok(vec![addr])
-    }
-
-    fn encode(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
 
 /// WASM code metadata
@@ -297,7 +182,6 @@ pub struct ModuleGovernance {
     /// Module router for managing modules
     router: Arc<ModuleRouter>,
     /// Virtual filesystem for storage
-    #[allow(dead_code)]
     vfs: Arc<VirtualFilesystem>,
     /// On-chain code registry
     code_registry: Arc<Mutex<HashMap<u64, StoredCode>>>,
@@ -307,6 +191,8 @@ pub struct ModuleGovernance {
     next_code_id: Arc<Mutex<u64>>,
     /// Governance authority (usually the governance module address)
     governance_authority: String,
+    /// Block timestamp for deterministic time (set by execute_block)
+    block_timestamp: Arc<Mutex<u64>>,
 }
 
 impl ModuleGovernance {
@@ -323,7 +209,65 @@ impl ModuleGovernance {
             module_registry: Arc::new(Mutex::new(HashMap::new())),
             next_code_id: Arc::new(Mutex::new(1)),
             governance_authority,
+            block_timestamp: Arc::new(Mutex::new(0)),
         }
+    }
+
+    /// Set the block timestamp (called by BaseApp before processing transactions)
+    pub fn set_block_timestamp(&self, ts: u64) {
+        if let Ok(mut timestamp) = self.block_timestamp.lock() {
+            *timestamp = ts;
+        }
+    }
+
+    /// Load registries from VFS (called during BaseApp initialization)
+    pub fn load_registries(&self) -> Result<()> {
+        // Load code registry
+        if let Ok(Some(data)) = self.vfs.read_key("system", b"code_registry") {
+            let registry: HashMap<u64, StoredCode> =
+                serde_json::from_slice(&data).map_err(|e| {
+                    GovernanceError::StorageError(format!(
+                        "Failed to deserialize code registry: {e}"
+                    ))
+                })?;
+            let max_id = registry.keys().copied().max().unwrap_or(0);
+            {
+                let mut code_reg = self
+                    .code_registry
+                    .lock()
+                    .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
+                *code_reg = registry;
+            }
+            {
+                let mut next_id = self
+                    .next_code_id
+                    .lock()
+                    .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
+                *next_id = max_id + 1;
+            }
+            info!("Loaded code registry, next code ID: {}", max_id + 1);
+        }
+
+        // Load module registry
+        if let Ok(Some(data)) = self.vfs.read_key("system", b"module_registry") {
+            let registry: HashMap<String, InstalledModule> = serde_json::from_slice(&data)
+                .map_err(|e| {
+                    GovernanceError::StorageError(format!(
+                        "Failed to deserialize module registry: {e}"
+                    ))
+                })?;
+            let count = registry.len();
+            {
+                let mut mod_reg = self
+                    .module_registry
+                    .lock()
+                    .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned: {e}")))?;
+                *mod_reg = registry;
+            }
+            info!("Loaded module registry with {} modules", count);
+        }
+
+        Ok(())
     }
 
     /// Handle MsgStoreCode - store WASM bytecode on-chain
@@ -335,6 +279,16 @@ impl ModuleGovernance {
             return Err(GovernanceError::Unauthorized(format!(
                 "only governance authority can store code, got:: {}",
                 msg.authority
+            )));
+        }
+
+        // Enforce WASM binary size limit
+        if msg.wasm_code.len() > DEFAULT_MAX_WASM_BINARY_SIZE {
+            return Err(GovernanceError::ResourceLimitExceeded(format!(
+                "WASM binary size {} bytes exceeds maximum allowed {} bytes ({}MB)",
+                msg.wasm_code.len(),
+                DEFAULT_MAX_WASM_BINARY_SIZE,
+                DEFAULT_MAX_WASM_BINARY_SIZE / (1024 * 1024),
             )));
         }
 
@@ -583,12 +537,12 @@ impl ModuleGovernance {
         hex::encode(hash)
     }
 
-    /// Get current timestamp
+    /// Get current block timestamp (deterministic, set by execute_block)
     fn current_timestamp(&self) -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+        *self
+            .block_timestamp
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// Create ModuleConfig from install config and stored code
@@ -694,11 +648,21 @@ impl ModuleGovernance {
             .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned:: {e}")))?;
 
-        let _serialized = serde_json::to_vec(&*registry)
+        let serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed:: {e}")))?;
 
-        // TODO: Write to VFS at /system/code_registry
-        debug!("Persisting code registry with {} entries", registry.len());
+        self.vfs
+            .write_key("system", b"code_registry", &serialized)
+            .map_err(|e| {
+                GovernanceError::StorageError(format!(
+                    "Failed to persist code registry to VFS: {e}"
+                ))
+            })?;
+
+        debug!(
+            "Persisted code registry with {} entries to VFS",
+            registry.len()
+        );
         Ok(())
     }
 
@@ -709,11 +673,21 @@ impl ModuleGovernance {
             .lock()
             .map_err(|e| GovernanceError::StorageError(format!("Lock poisoned:: {e}")))?;
 
-        let _serialized = serde_json::to_vec(&*registry)
+        let serialized = serde_json::to_vec(&*registry)
             .map_err(|e| GovernanceError::StorageError(format!("Serialization failed:: {e}")))?;
 
-        // TODO: Write to VFS at /system/module_registry
-        debug!("Persisting module registry with {} entries", registry.len());
+        self.vfs
+            .write_key("system", b"module_registry", &serialized)
+            .map_err(|e| {
+                GovernanceError::StorageError(format!(
+                    "Failed to persist module registry to VFS: {e}"
+                ))
+            })?;
+
+        debug!(
+            "Persisted module registry with {} entries to VFS",
+            registry.len()
+        );
         Ok(())
     }
 
@@ -781,9 +755,23 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_test_governance() -> (ModuleGovernance, TempDir) {
+        use crate::vfs::Capability;
+        use gridway_store::MemStore;
+        use std::path::PathBuf;
+
         let temp_dir = TempDir::new().unwrap();
         let wasi_host = Arc::new(WasiHost::new().unwrap());
         let vfs = Arc::new(VirtualFilesystem::new());
+
+        // Mount "system" namespace for governance persistence
+        let system_store: Arc<std::sync::Mutex<dyn gridway_store::KVStore>> =
+            Arc::new(std::sync::Mutex::new(MemStore::new()));
+        vfs.mount_store("system".to_string(), system_store).unwrap();
+        let system_path = PathBuf::from("/system");
+        vfs.add_capability(Capability::Read(system_path.clone()))
+            .unwrap();
+        vfs.add_capability(Capability::Write(system_path)).unwrap();
+
         let router = Arc::new(ModuleRouter::new(wasi_host, vfs.clone()));
 
         let governance = ModuleGovernance::new(router, vfs, "governance_authority".to_string());
@@ -841,6 +829,41 @@ mod tests {
 
         let result = governance.handle_store_code(msg);
         assert!(matches!(result, Err(GovernanceError::Unauthorized(_))));
+    }
+
+    #[test]
+    fn test_store_code_rejects_oversized_binary() {
+        let (governance, _temp_dir) = create_test_governance();
+
+        // Create a WASM binary exceeding the size limit
+        let mut oversized = vec![0x00, 0x61, 0x73, 0x6d]; // WASM magic number
+        oversized.extend_from_slice(&1u32.to_le_bytes()); // WASM version 1
+        oversized.resize(DEFAULT_MAX_WASM_BINARY_SIZE + 1, 0); // Exceed limit
+
+        let checksum = governance.calculate_checksum(&oversized);
+
+        let msg = MsgStoreCode {
+            authority: "governance_authority".to_string(),
+            wasm_code: oversized,
+            metadata: CodeMetadata {
+                name: "oversized_module".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Oversized module".to_string(),
+                repository: None,
+                license: None,
+                api_version: "1.0".to_string(),
+                checksum,
+            },
+        };
+
+        let result = governance.handle_store_code(msg);
+        assert!(result.is_err());
+        match result {
+            Err(GovernanceError::ResourceLimitExceeded(msg)) => {
+                assert!(msg.contains("exceeds maximum"), "Error: {msg}");
+            }
+            other => panic!("Expected ResourceLimitExceeded, got: {other:?}"),
+        }
     }
 
     #[test]

@@ -1,16 +1,14 @@
 //! Component bindings modules
 
-pub mod ante_handler;
-pub mod begin_blocker;
-pub mod end_blocker;
+pub mod hook;
 pub mod kvstore;
 pub mod kvstore_simple;
-pub mod tx_decoder;
+pub mod module;
+pub mod validator;
 
 // Re-export commonly used types
-pub use ante_handler::AnteHandlerWorld;
-pub use begin_blocker::BeginBlockerWorld;
-pub use end_blocker::EndBlockerWorld;
+pub use hook::HookWorld;
 pub use kvstore::KVStoreResourceBindings;
 pub use kvstore_simple::{SimpleKVStoreManager, SimpleKVStoreResource};
-pub use tx_decoder::TxDecoderWorld;
+pub use module::ModuleWorld;
+pub use validator::ValidatorWorld;

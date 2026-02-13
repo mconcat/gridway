@@ -1,0 +1,83 @@
+package gridway:framework@0.1.0;
+
+/// Transaction validation interface.
+///
+/// Replaces the Cosmos ABCI AnteHandler + TxDecoder pattern.
+/// Combines decoding, signature verification, and validation into a single
+/// pipeline: raw TX bytes → validated, decoded transaction.
+///
+/// The host calls validate() for each raw TX before dispatching messages
+/// to domain modules. The validator is responsible for:
+///   1. Decoding the TX envelope (format is validator-defined)
+///   2. Verifying signatures
+///   3. Checking sequence numbers / replay protection
+///   4. Extracting typed messages for module dispatch
+interface validator {
+    /// Transaction context provided by the host
+    record tx-context {
+        /// Current block height
+        height: u64,
+        /// Block timestamp (Unix seconds)
+        timestamp: u64,
+        /// Chain identifier
+        chain-id: string,
+    }
+
+    /// A decoded message extracted from a validated transaction.
+    /// These are dispatched to the appropriate module's handle() function.
+    record message {
+        /// Message type identifier (e.g., "bank.MsgSend")
+        type-url: string,
+        /// Message payload as JSON
+        data: string,
+    }
+
+    /// A successfully validated and decoded transaction
+    record validated-tx {
+        /// Authenticated sender address
+        sender: string,
+        /// Messages to be dispatched to modules
+        messages: list<message>,
+        /// Sequence number (for replay protection tracking)
+        sequence: u64,
+        /// Gas limit declared by the transaction
+        gas-limit: u64,
+    }
+
+    /// Event attribute key-value pair
+    record event-attribute {
+        key: string,
+        value: string,
+    }
+
+    /// Event emitted during validation
+    record event {
+        /// Event type
+        event-type: string,
+        /// Event attributes
+        attributes: list<event-attribute>,
+    }
+
+    /// Result of transaction validation
+    record validation-result {
+        /// Whether the transaction is valid
+        valid: bool,
+        /// The validated transaction (present only if valid)
+        tx: option<validated-tx>,
+        /// Error description if invalid
+        error: option<string>,
+        /// Gas consumed during validation
+        gas-used: u64,
+        /// Events emitted during validation
+        events: list<event>,
+    }
+
+    /// Validate and decode a raw transaction.
+    /// Returns a validated-tx with extracted messages on success.
+    validate: func(ctx: tx-context, raw-tx: list<u8>) -> validation-result;
+}
+
+world validator-world {
+    import kvstore;
+    export validator;
+}

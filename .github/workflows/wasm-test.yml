@@ -2,9 +2,10 @@ name: WASM Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, experiment/commonware-migration ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,71 +14,63 @@ jobs:
   wasm-test:
     name: Test WASM Modules
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 20
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: wasm32-wasip1
-    
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
-    
+
     - name: Install wasmtime
       run: |
         curl https://wasmtime.dev/install.sh -sSf | bash
         echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
-    
-    - name: Cache cargo registry
+
+    - name: Cache cargo
       uses: actions/cache@v4
       with:
         path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-registry-wasm-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-registry-wasm-
-    
-    - name: Install cargo-component
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-wasm-test-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Verify WASM modules exist
       run: |
-        if ! command -v cargo-component &> /dev/null; then
-          cargo install cargo-component --locked
-        fi
-    
-    - name: Build WASM modules
+        echo "Pre-compiled WASM modules:"
+        ls -lh modules/*.wasm
+
+    - name: Validate WASM modules with wasmtime
       run: |
-        # Use the build script to build WASI modules with cargo-component
-        ./scripts/build-wasi-modules.sh
-    
-    - name: Test WASM module loading
-      run: |
-        # Test that WASM modules can be loaded
+        echo "Validating that wasmtime can compile each module..."
+        FAILED=0
         for wasm in modules/*.wasm; do
-          if [ -f "$wasm" ]; then
-            echo "Testing WASM module: $wasm"
-            $HOME/.wasmtime/bin/wasmtime compile "$wasm"
+          echo -n "  $(basename $wasm): "
+          if $HOME/.wasmtime/bin/wasmtime compile "$wasm" 2>/dev/null; then
+            echo "✓ OK"
+          else
+            echo "✗ FAILED"
+            FAILED=1
           fi
         done
-    
-    - name: Validate WASM modules
+
+        if [ $FAILED -eq 1 ]; then
+          echo "ERROR: Some WASM modules failed validation!"
+          exit 1
+        fi
+
+    - name: Run WASM host integration tests
       run: |
-        # Validate WASM module structure
-        # Note: wasmtime doesn't have a built-in validation command for components
-        # The compile step above already validates the modules
-        echo "WASM modules validated during compile step"
-    
+        cargo test -p gridway-baseapp -- \
+          test_component_host \
+          test_kvstore_host \
+          test_wasi_host \
+          test_wasm_module
+
     - name: Check WASM module sizes
       run: |
-        # Report WASM module sizes
         echo "WASM Module Sizes:"
-        ls -lh modules/*.wasm 2>/dev/null || echo "No WASM modules found"
-    
-    - name: Run WASM integration tests
-      run: |
-        # Run integration tests that test WASM module loading
-        # These tests run on the host, not in WASM
-        cargo test --workspace --exclude ante-handler --exclude begin-blocker --exclude end-blocker --exclude tx-decoder -- test_wasi_modules test_minimal_wasi_module test_component
+        ls -lh modules/*.wasm

@@ -2,9 +2,18 @@ name: Build WASM
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, experiment/commonware-migration ]
+    paths:
+      - 'crates/wasi-modules/**'
+      - 'wit/**'
+      - '.github/workflows/wasm-build.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
+    paths:
+      - 'crates/wasi-modules/**'
+      - 'wit/**'
+      - '.github/workflows/wasm-build.yml'
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,58 +22,96 @@ jobs:
   wasm-build:
     name: Build WASM Modules
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 30
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
         targets: wasm32-wasip1
-    
-    - name: Cache cargo registry
+
+    - name: Install cargo-component
+      run: cargo install cargo-component --locked
+
+    - name: Cache cargo
       uses: actions/cache@v4
       with:
         path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-registry-wasm-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-registry-wasm-
-    
-    - name: Cache target directory
-      uses: actions/cache@v4
-      with:
-        path: target
-        key: ${{ runner.os }}-target-wasm-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-target-wasm-
-    
-    - name: Install cargo-component
-      run: |
-        if ! command -v cargo-component &> /dev/null; then
-          cargo install cargo-component --locked
-        fi
-    
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-wasm-build-${{ hashFiles('**/Cargo.lock') }}
+
     - name: Build WASM modules
       run: |
-        # Use the build script to build WASI modules with cargo-component
-        ./scripts/build-wasi-modules.sh
-    
-    - name: Verify WASM artifacts
+        echo "Building WASM component modules..."
+        cargo component build --release -p bank -p hook -p validator
+
+    - name: Verify build outputs
       run: |
-        # Check if WASM files were built in modules directory
-        echo "Checking for WASM artifacts in modules directory..."
-        ls -la modules/*.wasm || echo "No WASM files found in modules/"
-        
-        # Also check target directories
-        echo "Checking target directories..."
-        find target/wasm32-wasip1/release -name "*.wasm" -type f | head -20
-    
+        echo "Checking built WASM component outputs..."
+        FAILED=0
+        for module in bank hook validator; do
+          WASM="target/wasm32-wasip1/release/${module}.wasm"
+          if [ -f "$WASM" ]; then
+            SIZE=$(stat -c%s "$WASM")
+            echo "  ✓ ${module}.wasm ($SIZE bytes)"
+          else
+            echo "  ✗ MISSING: ${module}.wasm"
+            FAILED=1
+          fi
+        done
+
+        if [ $FAILED -eq 1 ]; then
+          echo "ERROR: WASM module build failed!"
+          exit 1
+        fi
+
+    - name: Compare with committed modules
+      run: |
+        echo "Comparing built modules with committed pre-compiled modules..."
+        MISMATCH=0
+        declare -A MODULE_MAP=(
+          ["bank"]="bank_component.wasm"
+          ["hook"]="hook_component.wasm"
+          ["validator"]="validator_component.wasm"
+        )
+
+        for module in bank hook validator; do
+          BUILT="target/wasm32-wasip1/release/${module}.wasm"
+          COMMITTED="modules/${MODULE_MAP[$module]}"
+
+          if [ ! -f "$COMMITTED" ]; then
+            echo "  ⚠ $COMMITTED not in repo (new module?)"
+            continue
+          fi
+
+          BUILT_SIZE=$(stat -c%s "$BUILT")
+          COMMITTED_SIZE=$(stat -c%s "$COMMITTED")
+
+          if cmp -s "$BUILT" "$COMMITTED"; then
+            echo "  ✓ ${module}: matches committed ($BUILT_SIZE bytes)"
+          else
+            echo "  ⚠ ${module}: DIFFERS (built: $BUILT_SIZE, committed: $COMMITTED_SIZE)"
+            MISMATCH=1
+          fi
+        done
+
+        if [ $MISMATCH -eq 1 ]; then
+          echo ""
+          echo "WARNING: Built WASM modules differ from committed ones."
+          echo "This may be expected if source was changed without rebuilding."
+          echo "Run 'cargo component build --release -p bank -p hook -p validator'"
+          echo "and copy outputs to modules/ before committing."
+        fi
+
     - name: Upload WASM artifacts
       uses: actions/upload-artifact@v4
       with:
         name: wasm-modules
-        path: |
-          modules/*.wasm
+        path: target/wasm32-wasip1/release/*.wasm
         retention-days: 7
