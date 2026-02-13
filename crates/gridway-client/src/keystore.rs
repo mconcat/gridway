@@ -161,8 +161,7 @@ impl Keystore {
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
         {
             return Err(KeystoreError::InvalidKeyName(format!(
-                "name '{}' contains invalid characters (use alphanumeric, -, _)",
-                name
+                "name '{name}' contains invalid characters (use alphanumeric, -, _)"
             )));
         }
         Ok(())
@@ -170,7 +169,7 @@ impl Keystore {
 
     /// Path to the key file for a given name.
     fn key_path(&self, name: &str) -> PathBuf {
-        self.dir.join(format!("{}.json", name))
+        self.dir.join(format!("{name}.json"))
     }
 
     /// Store a private key encrypted with the given password.

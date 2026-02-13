@@ -305,7 +305,7 @@ where
             ) {
                 Ok(computed_root) => computed_root == block.state_root,
                 Err(e) => {
-                    tracing::error!("Block verification failed: {}", e);
+                    tracing::error!("Block verification failed: {e}");
                     false
                 }
             }

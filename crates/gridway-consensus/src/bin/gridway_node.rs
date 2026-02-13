@@ -198,15 +198,15 @@ async fn handle_submit_tx(State(state): State<Arc<AppState>>, body: axum::body::
             .into_response(),
         Err(MempoolError::TxTooLarge { size, max }) => error_response(
             StatusCode::BAD_REQUEST,
-            format!("transaction too large: {} bytes (max {})", size, max),
+            format!("transaction too large: {size} bytes (max {max})"),
         ),
         Err(MempoolError::DuplicateTx { tx_hash }) => error_response(
             StatusCode::BAD_REQUEST,
-            format!("duplicate transaction: {}", tx_hash),
+            format!("duplicate transaction: {tx_hash}"),
         ),
         Err(MempoolError::MempoolFull { reason }) => error_response(
             StatusCode::TOO_MANY_REQUESTS,
-            format!("mempool full: {}", reason),
+            format!("mempool full: {reason}"),
         ),
         Err(MempoolError::LockPoisoned) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -270,7 +270,7 @@ async fn handle_account_query(
             .into_response(),
         None => error_response(
             StatusCode::NOT_FOUND,
-            format!("account not found: {}", address),
+            format!("account not found: {address}"),
         ),
     }
 }
@@ -410,7 +410,7 @@ fn start_http_server(addr: SocketAddr, app: GridwayApp, api_token: Option<String
         let rt = match ::tokio::runtime::Runtime::new() {
             Ok(rt) => rt,
             Err(e) => {
-                eprintln!("Failed to create tokio runtime for HTTP server: {}", e);
+                eprintln!("Failed to create tokio runtime for HTTP server: {e}");
                 return;
             }
         };
@@ -421,12 +421,12 @@ fn start_http_server(addr: SocketAddr, app: GridwayApp, api_token: Option<String
             let listener = match ::tokio::net::TcpListener::bind(addr).await {
                 Ok(l) => l,
                 Err(e) => {
-                    eprintln!("Failed to bind HTTP server on {}: {}", addr, e);
+                    eprintln!("Failed to bind HTTP server on {addr}: {e}");
                     return;
                 }
             };
 
-            println!("HTTP API listening on http://{}", addr);
+            println!("HTTP API listening on http://{addr}");
             println!("  POST /tx                        — submit transaction");
             println!("  GET  /balance/{{address}}/{{denom}}  — query balance");
             println!("  GET  /account/{{address}}           — query account info");
@@ -435,7 +435,7 @@ fn start_http_server(addr: SocketAddr, app: GridwayApp, api_token: Option<String
             println!("  GET  /health                       — health check");
 
             if let Err(e) = axum::serve(listener, router).await {
-                eprintln!("HTTP server error: {}", e);
+                eprintln!("HTTP server error: {e}");
             }
         });
     });
@@ -475,14 +475,14 @@ fn main() {
     let peers_content = match std::fs::read_to_string(peers_file) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Could not read peers file '{}': {}", peers_file, e);
+            eprintln!("Could not read peers file '{peers_file}': {e}");
             std::process::exit(1);
         }
     };
     let peers: Peers = match serde_yaml::from_str(&peers_content) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("Could not parse peers file: {}", e);
+            eprintln!("Could not parse peers file: {e}");
             std::process::exit(1);
         }
     };
@@ -500,7 +500,7 @@ fn main() {
             let key = match PublicKey::decode(key.as_ref()) {
                 Ok(k) => k,
                 Err(e) => {
-                    eprintln!("Peer key is invalid '{}': {}", peer.0, e);
+                    eprintln!("Peer key is invalid '{}': {e}", peer.0);
                     std::process::exit(1);
                 }
             };
@@ -519,14 +519,14 @@ fn main() {
     let config_content = match std::fs::read_to_string(config_file) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Could not read config file '{}': {}", config_file, e);
+            eprintln!("Could not read config file '{config_file}': {e}");
             std::process::exit(1);
         }
     };
     let config: NodeConfig = match serde_yaml::from_str(&config_content) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Could not parse config file: {}", e);
+            eprintln!("Could not parse config file: {e}");
             std::process::exit(1);
         }
     };
@@ -540,7 +540,7 @@ fn main() {
             Ok(pw) => pw,
             Err(_) => {
                 eprintln!("GRIDWAY_KEYSTORE_PASSWORD environment variable not set.");
-                eprintln!("Set it to the keystore password for key '{}'.", key_name);
+                eprintln!("Set it to the keystore password for key '{key_name}'.");
                 std::process::exit(1);
             }
         };
@@ -549,23 +549,20 @@ fn main() {
             Ok(key_bytes) => match PrivateKey::decode(key_bytes.as_ref()) {
                 Ok(s) => {
                     eprintln!(
-                        "Loaded private key from keystore: {}/{}.json",
-                        ks_path, key_name
+                        "Loaded private key from keystore: {ks_path}/{key_name}.json"
                     );
                     s
                 }
                 Err(e) => {
                     eprintln!(
-                        "Keystore key '{}' is not a valid ed25519 private key: {}",
-                        key_name, e
+                        "Keystore key '{key_name}' is not a valid ed25519 private key: {e}"
                     );
                     std::process::exit(1);
                 }
             },
             Err(e) => {
                 eprintln!(
-                    "Failed to load key '{}' from keystore at '{}': {}",
-                    key_name, ks_path, e
+                    "Failed to load key '{key_name}' from keystore at '{ks_path}': {e}"
                 );
                 std::process::exit(1);
             }
@@ -582,7 +579,7 @@ fn main() {
         match PrivateKey::decode(key.as_ref()) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Private key is invalid: {}", e);
+                eprintln!("Private key is invalid: {e}");
                 std::process::exit(1);
             }
         }
@@ -600,14 +597,14 @@ fn main() {
     let genesis_content = match std::fs::read_to_string(genesis_file) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Could not read genesis file '{}': {}", genesis_file, e);
+            eprintln!("Could not read genesis file '{genesis_file}': {e}");
             std::process::exit(1);
         }
     };
     let genesis: GenesisConfig = match serde_yaml::from_str(&genesis_content) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("Could not parse genesis file: {}", e);
+            eprintln!("Could not parse genesis file: {e}");
             std::process::exit(1);
         }
     };
@@ -630,7 +627,7 @@ fn main() {
         let log_level = match Level::from_str(&config.log_level) {
             Ok(l) => l,
             Err(e) => {
-                error!("Invalid log level '{}': {}", config.log_level, e);
+                error!("Invalid log level '{}': {e}", config.log_level);
                 return;
             }
         };
@@ -657,21 +654,21 @@ fn main() {
             let key = match from_hex_formatted(bootstrapper_hex) {
                 Some(k) => k,
                 None => {
-                    error!("Could not parse bootstrapper key '{}'", bootstrapper_hex);
+                    error!("Could not parse bootstrapper key '{bootstrapper_hex}'");
                     return;
                 }
             };
             let key = match PublicKey::decode(key.as_ref()) {
                 Ok(k) => k,
                 Err(e) => {
-                    error!("Bootstrapper key is invalid '{}': {}", bootstrapper_hex, e);
+                    error!("Bootstrapper key is invalid '{bootstrapper_hex}': {e}");
                     return;
                 }
             };
             let socket = match peer_map.get(&key) {
                 Some(s) => s,
                 None => {
-                    error!("Could not find bootstrapper in peers: {}", bootstrapper_hex);
+                    error!("Could not find bootstrapper in peers: {bootstrapper_hex}");
                     return;
                 }
             };
@@ -698,7 +695,7 @@ fn main() {
         let share = match group::Share::decode(share.as_ref()) {
             Ok(s) => s,
             Err(e) => {
-                error!("Share is invalid: {}", e);
+                error!("Share is invalid: {e}");
                 return;
             }
         };
@@ -713,7 +710,7 @@ fn main() {
             match Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(peers_u32)) {
                 Ok(p) => p,
                 Err(e) => {
-                    error!("Polynomial is invalid: {}", e);
+                    error!("Polynomial is invalid: {e}");
                     return;
                 }
             };
@@ -738,15 +735,14 @@ fn main() {
             }
             Err(e) => {
                 error!(
-                    "Failed to create persistent BaseApp at {}: {}",
-                    state_db_path.display(),
-                    e
+                    "Failed to create persistent BaseApp at {}: {e}",
+                    state_db_path.display()
                 );
                 info!("Falling back to in-memory BaseApp");
                 match BaseApp::new("gridway".to_string()) {
                     Ok(b) => b,
                     Err(e2) => {
-                        error!("Failed to create in-memory BaseApp: {}", e2);
+                        error!("Failed to create in-memory BaseApp: {e2}");
                         return;
                     }
                 }
@@ -759,7 +755,7 @@ fn main() {
             let result = match store.lock() {
                 Ok(store) => store.has_persistence() && store.version() > 0,
                 Err(e) => {
-                    error!("Failed to lock store: {}", e);
+                    error!("Failed to lock store: {e}");
                     false
                 }
             };
@@ -773,7 +769,7 @@ fn main() {
                 let v = match store.lock() {
                     Ok(store) => store.version(),
                     Err(e) => {
-                        error!("Failed to lock store for version: {}", e);
+                        error!("Failed to lock store for version: {e}");
                         0
                     }
                 };
@@ -792,7 +788,7 @@ fn main() {
             let genesis_root = match apply_genesis(&mut baseapp, &genesis) {
                 Ok(r) => r,
                 Err(e) => {
-                    error!("Failed to apply genesis state: {}", e);
+                    error!("Failed to apply genesis state: {e}");
                     return;
                 }
             };
@@ -831,7 +827,7 @@ fn main() {
                             return;
                         }
                         Err(e) => {
-                            error!("Failed to download snapshot: curl error: {}", e);
+                            error!("Failed to download snapshot: curl error: {e}");
                             return;
                         }
                     }
@@ -839,7 +835,7 @@ fn main() {
                     match std::fs::read(snap_path) {
                         Ok(data) => data,
                         Err(e) => {
-                            error!("Failed to read snapshot file '{}': {}", snap_path, e);
+                            error!("Failed to read snapshot file '{snap_path}': {e}");
                             return;
                         }
                     }
@@ -849,7 +845,7 @@ fn main() {
                 match serde_json::from_slice(&snapshot_data) {
                     Ok(s) => s,
                     Err(e) => {
-                        error!("Failed to parse snapshot JSON: {}", e);
+                        error!("Failed to parse snapshot JSON: {e}");
                         return;
                     }
                 };
@@ -860,7 +856,7 @@ fn main() {
                 "importing snapshot"
             );
             if let Err(e) = baseapp.import_snapshot(&snapshot) {
-                error!("Failed to import snapshot: {}", e);
+                error!("Failed to import snapshot: {e}");
                 return;
             }
             info!(
@@ -984,7 +980,7 @@ fn main() {
         {
             Ok(e) => e,
             Err(e) => {
-                error!("Failed to create consensus engine: {}", e);
+                error!("Failed to create consensus engine: {e}");
                 return;
             }
         };
@@ -1015,7 +1011,7 @@ fn main() {
         info!("  Execution: gridway-baseapp (WASM microkernel + native bank)");
         info!("  TX Auth: ed25519 signatures with sequence numbers");
         if tx_port > 0 {
-            info!("  HTTP API: http://0.0.0.0:{}", tx_port);
+            info!("  HTTP API: http://0.0.0.0:{tx_port}");
         }
 
         // Wait for any task to error

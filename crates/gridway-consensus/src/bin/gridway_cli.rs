@@ -31,13 +31,7 @@ fn read_password(prompt: &str) -> String {
     if let Ok(pw) = std::env::var("GRIDWAY_KEY_PASSWORD") {
         return pw;
     }
-    eprint!("{}", prompt);
-    let mut password = String::new();
-    std::io::stdin()
-        .read_line(&mut password)
-        .expect("Failed to read password from stdin");
-    // Trim trailing newline
-    password.trim_end().to_string()
+    rpassword::prompt_password(prompt).expect("Failed to read password")
 }
 
 /// Get the keystore directory from `GRIDWAY_KEYSTORE_DIR` env var, or None for default.
@@ -349,10 +343,10 @@ fn cmd_keys_store(matches: &clap::ArgMatches) {
     let ks = Keystore::new(keystore_dir());
     match ks.import_key(name, key_hex, &password) {
         Ok(()) => {
-            eprintln!("Key '{}' stored successfully.", name);
+            eprintln!("Key '{name}' stored successfully.");
         }
         Err(e) => {
-            eprintln!("Error storing key: {}", e);
+            eprintln!("Error storing key: {e}");
             std::process::exit(1);
         }
     }
@@ -367,12 +361,12 @@ fn cmd_keys_list() {
             } else {
                 println!("Stored keys:");
                 for name in &names {
-                    println!("  - {}", name);
+                    println!("  - {name}");
                 }
             }
         }
         Err(e) => {
-            eprintln!("Error listing keys: {}", e);
+            eprintln!("Error listing keys: {e}");
             std::process::exit(1);
         }
     }
@@ -388,7 +382,7 @@ fn cmd_keys_export(matches: &clap::ArgMatches) {
             println!("{}", hex_key);
         }
         Err(e) => {
-            eprintln!("Error exporting key: {}", e);
+            eprintln!("Error exporting key: {e}");
             std::process::exit(1);
         }
     }
@@ -400,10 +394,10 @@ fn cmd_keys_delete(matches: &clap::ArgMatches) {
     let ks = Keystore::new(keystore_dir());
     match ks.delete_key(name) {
         Ok(()) => {
-            eprintln!("Key '{}' deleted.", name);
+            eprintln!("Key '{name}' deleted.");
         }
         Err(e) => {
-            eprintln!("Error deleting key: {}", e);
+            eprintln!("Error deleting key: {e}");
             std::process::exit(1);
         }
     }
@@ -425,7 +419,7 @@ fn resolve_private_key_hex(matches: &clap::ArgMatches) -> String {
         match ks.export_key(keyname, &password) {
             Ok(hex_key) => return hex_key,
             Err(e) => {
-                eprintln!("Error loading key '{}': {}", keyname, e);
+                eprintln!("Error loading key '{keyname}': {e}");
                 std::process::exit(1);
             }
         }
@@ -448,7 +442,7 @@ async fn cmd_tx_send(matches: &clap::ArgMatches) {
     let builder = match TxBuilder::from_hex_key(&key_hex) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             std::process::exit(1);
         }
     };
@@ -462,7 +456,7 @@ async fn cmd_tx_send(matches: &clap::ArgMatches) {
             builder.sequence(account.sequence)
         }
         Err(e) => {
-            eprintln!("Warning: could not fetch account sequence ({}), using 0", e);
+            eprintln!("Warning: could not fetch account sequence ({e}), using 0");
             builder
         }
     };
@@ -475,7 +469,7 @@ async fn cmd_tx_send(matches: &clap::ArgMatches) {
     let signed_tx = match builder.build() {
         Ok(tx) => tx,
         Err(e) => {
-            eprintln!("Error building transaction: {}", e);
+            eprintln!("Error building transaction: {e}");
             std::process::exit(1);
         }
     };
@@ -485,7 +479,7 @@ async fn cmd_tx_send(matches: &clap::ArgMatches) {
             "{}",
             signed_tx
                 .to_json_pretty()
-                .unwrap_or_else(|e| format!("JSON error: {}", e))
+                .unwrap_or_else(|e| format!("JSON error: {e}"))
         );
         return;
     }
@@ -496,12 +490,12 @@ async fn cmd_tx_send(matches: &clap::ArgMatches) {
                 "tx_hash": resp.tx_hash,
                 "from": signed_tx.body.messages[0]["from_address"],
                 "to": to_address,
-                "amount": format!("{}{}", amount, denom),
+                "amount": format!("{amount}{denom}"),
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
         }
         Err(e) => {
-            eprintln!("Error submitting transaction: {}", e);
+            eprintln!("Error submitting transaction: {e}");
             std::process::exit(1);
         }
     }
@@ -527,7 +521,7 @@ async fn cmd_query_balance(matches: &clap::ArgMatches) {
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
         }
         Err(e) => {
-            eprintln!("Error querying balance: {}", e);
+            eprintln!("Error querying balance: {e}");
             std::process::exit(1);
         }
     }
@@ -548,7 +542,7 @@ async fn cmd_query_account(matches: &clap::ArgMatches) {
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
         }
         Err(e) => {
-            eprintln!("Error querying account: {}", e);
+            eprintln!("Error querying account: {e}");
             std::process::exit(1);
         }
     }
@@ -568,7 +562,7 @@ async fn cmd_status(matches: &clap::ArgMatches) {
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
         }
         Err(e) => {
-            eprintln!("Error querying status: {}", e);
+            eprintln!("Error querying status: {e}");
             std::process::exit(1);
         }
     }

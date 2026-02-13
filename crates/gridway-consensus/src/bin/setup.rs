@@ -118,7 +118,7 @@ fn main() {
             Arg::new("hosts")
                 .long("hosts")
                 .value_parser(value_parser!(String))
-                .help("Comma-separated list of hostnames/IPs for each peer"),
+                .help("Comma-separated list of IP addresses for each peer"),
         )
         .arg(
             Arg::new("no_local")
@@ -153,11 +153,20 @@ fn main() {
 
     assert!(n_bootstrappers <= n_peers, "bootstrappers must be <= peers");
 
+    // Validate port range won't overflow u16
+    if !internal_ports {
+        let max_port = start_port as u32 + 3 * n_peers as u32;
+        if max_port > u16::MAX as u32 {
+            eprintln!("Port range overflow: {start_port} + 3 * {n_peers} = {max_port} > 65535");
+            std::process::exit(1);
+        }
+    }
+
     // Construct output paths
     let raw_current_dir = match std::env::current_dir() {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("Could not determine current directory: {}", e);
+            eprintln!("Could not determine current directory: {e}");
             std::process::exit(1);
         }
     };
@@ -195,7 +204,7 @@ fn main() {
         .collect();
 
     // Generate BLS12-381 threshold keys
-    let peers_u32 = n_peers as u32;
+    let peers_u32 = u32::try_from(n_peers).expect("too many peers");
     let Fixture { schemes, .. } =
         bls12381_threshold::fixture::<MinSig, _>(&mut OsRng, NAMESPACE, peers_u32);
 
@@ -251,9 +260,8 @@ fn main() {
 
     if hosts.len() != n_peers {
         eprintln!(
-            "--hosts count ({}) does not match --peers count ({})",
-            hosts.len(),
-            n_peers
+            "--hosts count ({}) does not match --peers count ({n_peers})",
+            hosts.len()
         );
         std::process::exit(1);
     }
@@ -327,14 +335,11 @@ fn main() {
 
     // Write output
     if let Err(e) = fs::create_dir_all(&output) {
-        eprintln!("Failed to create output directory '{}': {}", output, e);
+        eprintln!("Failed to create output directory '{output}': {e}");
         std::process::exit(1);
     }
     if let Err(e) = fs::create_dir_all(&storage_output) {
-        eprintln!(
-            "Failed to create storage directory '{}': {}",
-            storage_output, e
-        );
+        eprintln!("Failed to create storage directory '{storage_output}': {e}");
         std::process::exit(1);
     }
 
@@ -343,12 +348,12 @@ fn main() {
     let file = match fs::File::create(&peers_path) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Failed to create peers file '{}': {}", peers_path, e);
+            eprintln!("Failed to create peers file '{peers_path}': {e}");
             std::process::exit(1);
         }
     };
     if let Err(e) = serde_yaml::to_writer(file, &Peers { addresses }) {
-        eprintln!("Failed to write peers file: {}", e);
+        eprintln!("Failed to write peers file: {e}");
         std::process::exit(1);
     }
 
@@ -357,12 +362,12 @@ fn main() {
     let file = match fs::File::create(&genesis_path) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Failed to create genesis file '{}': {}", genesis_path, e);
+            eprintln!("Failed to create genesis file '{genesis_path}': {e}");
             std::process::exit(1);
         }
     };
     if let Err(e) = serde_yaml::to_writer(file, &genesis) {
-        eprintln!("Failed to write genesis file: {}", e);
+        eprintln!("Failed to write genesis file: {e}");
         std::process::exit(1);
     }
     info!(path = %genesis_path, accounts = genesis.accounts.len(), "wrote genesis configuration");
@@ -374,12 +379,12 @@ fn main() {
         let file = match fs::File::create(&path) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("Failed to create config file '{}': {}", path, e);
+                eprintln!("Failed to create config file '{path}': {e}");
                 std::process::exit(1);
             }
         };
         if let Err(e) = serde_yaml::to_writer(file, peer_config) {
-            eprintln!("Failed to write config file '{}': {}", path, e);
+            eprintln!("Failed to write config file '{path}': {e}");
             std::process::exit(1);
         }
         info!(path = peer_config_file, name, "wrote peer configuration");
@@ -387,19 +392,19 @@ fn main() {
         // Docker-friendly indexed directory (validator-N/config.yaml)
         let validator_dir = format!("{output}/validator-{i}");
         if let Err(e) = fs::create_dir_all(&validator_dir) {
-            eprintln!("Failed to create validator dir '{}': {}", validator_dir, e);
+            eprintln!("Failed to create validator dir '{validator_dir}': {e}");
             std::process::exit(1);
         }
         let validator_config_path = format!("{validator_dir}/config.yaml");
         let file = match fs::File::create(&validator_config_path) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("Failed to create '{}': {}", validator_config_path, e);
+                eprintln!("Failed to create '{validator_config_path}': {e}");
                 std::process::exit(1);
             }
         };
         if let Err(e) = serde_yaml::to_writer(file, peer_config) {
-            eprintln!("Failed to write '{}': {}", validator_config_path, e);
+            eprintln!("Failed to write '{validator_config_path}': {e}");
             std::process::exit(1);
         }
     }
